@@ -199,6 +199,7 @@ fn get_launch_context() -> LaunchContext {
 pub fn run() {
     tauri::Builder::default()
         .manage(startup_storage_bootstrap::StartupStorageBootstrapState::default())
+        .manage(downloader::DownloaderRegistry::new())
         .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
             #[cfg(windows)]
             {

@@ -3,15 +3,56 @@
 // Copyright © 2021 - present Aleksey Hoffman. All rights reserved.
 
 use crate::process_runner::run_command_blocking;
+use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio_util::sync::CancellationToken;
 
 const YTDLP_TIMEOUT: Duration = Duration::from_secs(30);
 const DOWNLOAD_CHUNKS: u64 = 4;
 const DB_FILE_NAME: &str = "meridian.db";
+/// Sentinel error returned by the download path when a cancellation token fires,
+/// so start_download can distinguish a user pause/cancel from a real failure.
+const CANCELLED_MARKER: &str = "__meridian_cancelled__";
+
+/// Registry of in-flight downloads so cancel/pause can actually stop a running
+/// task, not just flip a DB status string (Gap 3).
+#[derive(Default, Clone)]
+pub struct DownloaderRegistry {
+    tasks: Arc<Mutex<HashMap<String, CancellationToken>>>,
+}
+
+impl DownloaderRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn insert(&self, id: &str) -> CancellationToken {
+        let token = CancellationToken::new();
+        if let Ok(mut map) = self.tasks.lock() {
+            map.insert(id.to_string(), token.clone());
+        }
+        token
+    }
+
+    fn cancel(&self, id: &str) {
+        if let Ok(map) = self.tasks.lock() {
+            if let Some(token) = map.get(id) {
+                token.cancel();
+            }
+        }
+    }
+
+    fn remove(&self, id: &str) {
+        if let Ok(mut map) = self.tasks.lock() {
+            map.remove(id);
+        }
+    }
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DownloadItem {
@@ -174,6 +215,22 @@ impl DownloaderDb {
         Ok(())
     }
 
+    fn update_progress(
+        &self,
+        id: &str,
+        progress: f64,
+        total_bytes: Option<u64>,
+        downloaded_bytes: u64,
+    ) -> Result<(), String> {
+        self.conn
+            .execute(
+                "UPDATE download_queue SET progress=?1, total_bytes=?2, downloaded_bytes=?3 WHERE id=?4",
+                rusqlite::params![progress, total_bytes, downloaded_bytes, id],
+            )
+            .map_err(|e| format!("Failed to update progress: {}", e))?;
+        Ok(())
+    }
+
     fn load_queue(&self) -> Result<Vec<DownloadItem>, String> {
         let mut stmt = self
             .conn
@@ -278,7 +335,11 @@ fn now_ts() -> i64 {
 }
 
 fn generate_id() -> String {
-    format!("dl_{}", now_ts())
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("dl_{}", nanos)
 }
 
 pub fn find_ytdlp() -> Option<String> {
@@ -389,8 +450,12 @@ async fn download_chunked(
     dest_dir: &str,
     file_name: &str,
     total_size: u64,
+    token: CancellationToken,
     on_progress: impl Fn(u64, u64) + Send + 'static,
 ) -> Result<String, String> {
+    if token.is_cancelled() {
+        return Err(CANCELLED_MARKER.to_string());
+    }
     let dest_path = Path::new(dest_dir).join(safe_file_name(file_name));
     let chunk_size = (total_size + DOWNLOAD_CHUNKS - 1) / DOWNLOAD_CHUNKS;
     let mut handles = Vec::new();
@@ -439,9 +504,13 @@ async fn download_direct(
     url: &str,
     dest_dir: &str,
     file_name: &str,
+    token: CancellationToken,
     on_progress: impl Fn(u64, Option<u64>) + Send + 'static,
 ) -> Result<String, String> {
     use futures_util::StreamExt;
+    if token.is_cancelled() {
+        return Err(CANCELLED_MARKER.to_string());
+    }
     let head = fetch_head(url).await?;
     let total = head.content_length();
     let accept_ranges = head
@@ -455,7 +524,7 @@ async fn download_direct(
 
     if accept_ranges && total.is_some() && total.unwrap() > 1024 * 1024 {
         let total_size = total.unwrap();
-        return download_chunked(url, dest_dir, file_name, total_size, move |downloaded, total| {
+        return download_chunked(url, dest_dir, file_name, total_size, token.clone(), move |downloaded, total| {
             on_progress(downloaded, Some(total));
         }).await;
     }
@@ -473,6 +542,11 @@ async fn download_direct(
     let mut downloaded: u64 = 0;
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
+        if token.is_cancelled() {
+            drop(file);
+            let _ = fs::remove_file(&dest_path);
+            return Err(CANCELLED_MARKER.to_string());
+        }
         let chunk = chunk.map_err(|e| format!("Stream error: {}", e))?;
         file.write_all(&chunk).map_err(|e| format!("Write error: {}", e))?;
         downloaded += chunk.len() as u64;
@@ -484,6 +558,7 @@ async fn download_direct(
 
 pub async fn start_download(
     app_data_dir: &str,
+    registry: &DownloaderRegistry,
     url: String,
     file_name_hint: Option<String>,
     _format_id: Option<String>,
@@ -499,40 +574,84 @@ pub async fn start_download(
         .filter(|p| !p.trim().is_empty())
         .unwrap_or_else(|| resolve_download_dir(app_data_dir));
 
-    let result = download_direct(&url, &dest_dir, &file_name, move |_downloaded, _total| {
-        // progress is polled by frontend via get_state
-    }).await;
+    // Register a cancellation token so cancel/pause can stop this task (Gap 3).
+    let token = registry.insert(&id);
 
-    let mut final_item = DownloadItem {
+    let dest_path = Path::new(&dest_dir).join(safe_file_name(&file_name));
+
+    // Persist the item to the queue table on start (Gap 1).
+    let mut item = DownloadItem {
         id: id.clone(),
         url: url.clone(),
-        status: DownloadStatus::Completed,
-        progress: 1.0,
+        status: DownloadStatus::Downloading,
+        progress: 0.0,
         total_bytes: None,
         downloaded_bytes: 0,
-        file_path: None,
+        file_path: Some(dest_path.to_string_lossy().to_string()),
         file_name: file_name.clone(),
         created_at: now,
         finished_at: None,
         error: None,
     };
+    {
+        let db = DownloaderDb::open(app_data_dir)?;
+        db.enqueue(&item)?;
+    }
+
+    // Progress callback persists live progress to the DB row (Gap 2).
+    let progress_data_dir = app_data_dir.to_string();
+    let progress_id = id.clone();
+    let result = download_direct(&url, &dest_dir, &file_name, token.clone(), move |downloaded, total| {
+        if let Ok(db) = DownloaderDb::open(&progress_data_dir) {
+            let progress = match total {
+                Some(t) if t > 0 => (downloaded as f64 / t as f64).clamp(0.0, 1.0),
+                _ => 0.0,
+            };
+            let _ = db.update_progress(&progress_id, progress, total, downloaded);
+        }
+    }).await;
 
     match result {
         Ok(path) => {
-            final_item.file_path = Some(path);
-            final_item.finished_at = Some(now_ts());
+            item.status = DownloadStatus::Completed;
+            item.progress = 1.0;
+            item.file_path = Some(path);
+            item.finished_at = Some(now_ts());
+        }
+        Err(err) if err == CANCELLED_MARKER => {
+            // Cancelled/paused: leave status as already set in DB by the command,
+            // remove the registry entry and return without moving to history.
+            registry.remove(&id);
+            let db = DownloaderDb::open(app_data_dir)?;
+            let queue = db.load_queue()?;
+            if let Some(existing) = queue.into_iter().find(|i| i.id == id) {
+                return Ok(existing);
+            }
+            return Ok(item);
         }
         Err(err) => {
-            final_item.status = DownloadStatus::Failed;
-            final_item.error = Some(err);
-            final_item.finished_at = Some(now_ts());
+            item.status = DownloadStatus::Failed;
+            item.error = Some(err);
+            item.finished_at = Some(now_ts());
         }
     }
+
+    // Move the finished/failed item from queue to history (Gap 1).
+    {
+        let mut db = DownloaderDb::open(app_data_dir)?;
+        let _ = db.update(&item);
+        db.move_to_history(&item)?;
+    }
+
+    registry.remove(&id);
+    let final_item = item;
 
     Ok(final_item)
 }
 
-pub async fn cancel_download(db: &mut DownloaderDb, id: String) -> Result<(), String> {
+pub async fn cancel_download(db: &mut DownloaderDb, registry: &DownloaderRegistry, id: String) -> Result<(), String> {
+    // Stop the in-flight task first (Gap 3), then flip the DB status.
+    registry.cancel(&id);
     db.conn
         .execute(
             "UPDATE download_queue SET status=?1, finished_at=?2 WHERE id=?3",
@@ -542,24 +661,173 @@ pub async fn cancel_download(db: &mut DownloaderDb, id: String) -> Result<(), St
     Ok(())
 }
 
-pub async fn pause_download(db: &mut DownloaderDb, id: String) -> Result<(), String> {
+pub async fn pause_download(db: &mut DownloaderDb, registry: &DownloaderRegistry, id: String) -> Result<(), String> {
+    // Persist Paused status (downloaded_bytes already tracked by progress
+    // updates), then stop the in-flight task (Gap 3).
     db.conn
         .execute(
             "UPDATE download_queue SET status=?1 WHERE id=?2",
             rusqlite::params![DownloadStatus::Paused.to_string(), id],
         )
         .map_err(|e| format!("Failed to pause: {}", e))?;
+    registry.cancel(&id);
     Ok(())
 }
 
-pub async fn resume_download(db: &mut DownloaderDb, id: String) -> Result<(), String> {
-    db.conn
-        .execute(
-            "UPDATE download_queue SET status=?1 WHERE id=?2",
-            rusqlite::params![DownloadStatus::Downloading.to_string(), id],
+pub async fn resume_download(
+    app_data_dir: &str,
+    registry: &DownloaderRegistry,
+    id: String,
+) -> Result<(), String> {
+    // Look up the paused item to recover its URL, destination, and byte offset.
+    let (url, dest_path, file_name) = {
+        let db = DownloaderDb::open(app_data_dir)?;
+        let queue = db.load_queue()?;
+        let item = queue
+            .into_iter()
+            .find(|i| i.id == id)
+            .ok_or_else(|| "Item not found in queue".to_string())?;
+        let path = item
+            .file_path
+            .clone()
+            .ok_or_else(|| "No destination path recorded for resume".to_string())?;
+        (item.url.clone(), path, item.file_name.clone())
+        // db dropped here so the spawned task can reopen it
+    };
+
+    // Flip status back to Downloading.
+    {
+        let db = DownloaderDb::open(app_data_dir)?;
+        db.conn
+            .execute(
+                "UPDATE download_queue SET status=?1 WHERE id=?2",
+                rusqlite::params![DownloadStatus::Downloading.to_string(), id],
+            )
+            .map_err(|e| format!("Failed to resume: {}", e))?;
+    }
+
+    // Register a fresh token and relaunch the transfer from the saved offset.
+    let token = registry.insert(&id);
+    let data_dir = app_data_dir.to_string();
+    let registry_clone = registry.clone();
+    let resume_id = id.clone();
+
+    tauri::async_runtime::spawn(async move {
+        let existing_bytes = fs::metadata(&dest_path).map(|m| m.len()).unwrap_or(0);
+        let progress_dir = data_dir.clone();
+        let progress_id = resume_id.clone();
+        let result = download_resumable(
+            &url,
+            &dest_path,
+            existing_bytes,
+            token.clone(),
+            move |downloaded, total| {
+                if let Ok(db) = DownloaderDb::open(&progress_dir) {
+                    let progress = match total {
+                        Some(t) if t > 0 => (downloaded as f64 / t as f64).clamp(0.0, 1.0),
+                        _ => 0.0,
+                    };
+                    let _ = db.update_progress(&progress_id, progress, total, downloaded);
+                }
+            },
         )
-        .map_err(|e| format!("Failed to resume: {}", e))?;
+        .await;
+
+        if let Ok(mut db) = DownloaderDb::open(&data_dir) {
+            if let Ok(queue) = db.load_queue() {
+                if let Some(mut item) = queue.into_iter().find(|i| i.id == resume_id) {
+                    match result {
+                        Ok(_) => {
+                            item.status = DownloadStatus::Completed;
+                            item.progress = 1.0;
+                            item.file_path = Some(dest_path.clone());
+                            item.finished_at = Some(now_ts());
+                            let _ = db.update(&item);
+                            let _ = db.move_to_history(&item);
+                            registry_clone.remove(&resume_id);
+                        }
+                        Err(err) if err == CANCELLED_MARKER => {
+                            registry_clone.remove(&resume_id);
+                        }
+                        Err(err) => {
+                            item.status = DownloadStatus::Failed;
+                            item.error = Some(err);
+                            item.finished_at = Some(now_ts());
+                            let _ = db.update(&item);
+                            let _ = db.move_to_history(&item);
+                            registry_clone.remove(&resume_id);
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    let _ = file_name;
     Ok(())
+}
+
+/// Resume a download by appending to an existing partial file using a Range
+/// request from `start_offset` (Gap 3).
+async fn download_resumable(
+    url: &str,
+    dest_path: &str,
+    start_offset: u64,
+    token: CancellationToken,
+    on_progress: impl Fn(u64, Option<u64>) + Send + 'static,
+) -> Result<String, String> {
+    use futures_util::StreamExt;
+    use std::io::Seek;
+
+    if token.is_cancelled() {
+        return Err(CANCELLED_MARKER.to_string());
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(300))
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let mut request = client.get(url);
+    if start_offset > 0 {
+        request = request.header(reqwest::header::RANGE, format!("bytes={}-", start_offset));
+    }
+    let response = request.send().await.map_err(|e| format!("Resume request failed: {}", e))?;
+    if !response.status().is_success() && response.status() != reqwest::StatusCode::PARTIAL_CONTENT {
+        return Err(format!("HTTP {}", response.status()));
+    }
+
+    // If the server ignored the Range (200 not 206), restart from zero.
+    let resumed = response.status() == reqwest::StatusCode::PARTIAL_CONTENT && start_offset > 0;
+    let remaining = response.content_length();
+    let total_bytes = remaining.map(|r| r + if resumed { start_offset } else { 0 });
+
+    let mut file = if resumed {
+        let mut f = fs::OpenOptions::new()
+            .write(true)
+            .open(dest_path)
+            .map_err(|e| format!("Failed to open partial file: {}", e))?;
+        f.seek(std::io::SeekFrom::Start(start_offset))
+            .map_err(|e| format!("Failed to seek partial file: {}", e))?;
+        f
+    } else {
+        fs::File::create(dest_path).map_err(|e| format!("Failed to create file: {}", e))?
+    };
+
+    let mut downloaded: u64 = if resumed { start_offset } else { 0 };
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        if token.is_cancelled() {
+            drop(file);
+            return Err(CANCELLED_MARKER.to_string());
+        }
+        let chunk = chunk.map_err(|e| format!("Stream error: {}", e))?;
+        file.write_all(&chunk).map_err(|e| format!("Write error: {}", e))?;
+        downloaded += chunk.len() as u64;
+        on_progress(downloaded, total_bytes);
+    }
+    drop(file);
+    Ok(dest_path.to_string())
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -579,31 +847,48 @@ pub async fn downloader_get_state(app: tauri::AppHandle) -> Result<DownloaderSta
 #[tauri::command]
 pub async fn downloader_enqueue(
     app: tauri::AppHandle,
+    registry: tauri::State<'_, DownloaderRegistry>,
     url: String,
     file_name: Option<String>,
     format_id: Option<String>,
     auto_save_folder: Option<String>,
 ) -> Result<DownloadItem, String> {
     let app_data_dir = get_app_data_dir(&app)?;
-    start_download(&app_data_dir, url, file_name, format_id, auto_save_folder).await
+    let registry = registry.inner().clone();
+    start_download(&app_data_dir, &registry, url, file_name, format_id, auto_save_folder).await
 }
 
 #[tauri::command]
-pub async fn downloader_cancel(app: tauri::AppHandle, id: String) -> Result<(), String> {
+pub async fn downloader_cancel(
+    app: tauri::AppHandle,
+    registry: tauri::State<'_, DownloaderRegistry>,
+    id: String,
+) -> Result<(), String> {
     let mut db = open_db(&app)?;
-    cancel_download(&mut db, id).await
+    let registry = registry.inner().clone();
+    cancel_download(&mut db, &registry, id).await
 }
 
 #[tauri::command]
-pub async fn downloader_pause(app: tauri::AppHandle, id: String) -> Result<(), String> {
+pub async fn downloader_pause(
+    app: tauri::AppHandle,
+    registry: tauri::State<'_, DownloaderRegistry>,
+    id: String,
+) -> Result<(), String> {
     let mut db = open_db(&app)?;
-    pause_download(&mut db, id).await
+    let registry = registry.inner().clone();
+    pause_download(&mut db, &registry, id).await
 }
 
 #[tauri::command]
-pub async fn downloader_resume(app: tauri::AppHandle, id: String) -> Result<(), String> {
-    let mut db = open_db(&app)?;
-    resume_download(&mut db, id).await
+pub async fn downloader_resume(
+    app: tauri::AppHandle,
+    registry: tauri::State<'_, DownloaderRegistry>,
+    id: String,
+) -> Result<(), String> {
+    let app_data_dir = get_app_data_dir(&app)?;
+    let registry = registry.inner().clone();
+    resume_download(&app_data_dir, &registry, id).await
 }
 
 #[tauri::command]
@@ -622,4 +907,135 @@ fn get_app_data_dir(app: &tauri::AppHandle) -> Result<String, String> {
         .app_data_dir()
         .map(|p| p.to_string_lossy().to_string())
         .map_err(|e| format!("Failed to resolve app data dir: {}", e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Gap 1 + Gap 2 verification: a download must insert into download_queue,
+    // record progress, and end up in download_history.
+    #[tokio::test]
+    async fn start_download_persists_to_queue_then_history() {
+        use axum::routing::get;
+        use axum::Router;
+
+        // Serve a small known-size body that supports a plain GET.
+        let body = vec![7u8; 4096];
+        let body_for_route = body.clone();
+        let app = Router::new().route(
+            "/file.bin",
+            get(move || {
+                let b = body_for_route.clone();
+                async move { b }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.ok();
+        });
+
+        let tmp = std::env::temp_dir().join(format!("meridian_dl_test_{}", now_ts()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let data_dir = tmp.to_string_lossy().to_string();
+
+        let url = format!("http://{}/file.bin", addr);
+        let registry = DownloaderRegistry::new();
+        let item = start_download(&data_dir, &registry, url, Some("file.bin".to_string()), None, None)
+            .await
+            .expect("download should succeed");
+
+        assert_eq!(item.status, DownloadStatus::Completed);
+        assert_eq!(item.progress, 1.0);
+
+        // The queue should be drained and the item must be in history.
+        let db = DownloaderDb::open(&data_dir).unwrap();
+        let queue = db.load_queue().unwrap();
+        let history = db.load_history().unwrap();
+        assert!(queue.is_empty(), "queue should be empty after completion");
+        assert!(
+            history.iter().any(|h| h.id == item.id && h.status == DownloadStatus::Completed),
+            "completed item must be persisted in history"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    // Gap 3 verification: cancelling an in-flight download actually stops it.
+    #[tokio::test]
+    async fn cancel_stops_in_flight_download() {
+        use axum::routing::get;
+        use axum::body::Body;
+        use axum::Router;
+        use futures_util::stream;
+
+        // Server that streams slowly and effectively never finishes within the
+        // test window, so we can cancel mid-flight.
+        let app = Router::new().route(
+            "/slow.bin",
+            get(|| async {
+                let chunks = stream::unfold(0u64, |n| async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    let data = vec![0u8; 1024];
+                    Some((Ok::<_, std::io::Error>(data), n + 1))
+                });
+                Body::from_stream(chunks)
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.ok();
+        });
+
+        let tmp = std::env::temp_dir().join(format!("meridian_cancel_test_{}", now_ts()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let data_dir = tmp.to_string_lossy().to_string();
+        let url = format!("http://{}/slow.bin", addr);
+
+        let registry = DownloaderRegistry::new();
+        let registry_for_task = registry.clone();
+        let data_dir_for_task = data_dir.clone();
+
+        // Launch the download in the background.
+        let handle = tokio::spawn(async move {
+            start_download(
+                &data_dir_for_task,
+                &registry_for_task,
+                url,
+                Some("slow.bin".to_string()),
+                None,
+                None,
+            )
+            .await
+        });
+
+        // Let it start, then locate the in-flight item and cancel it.
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let id = {
+            let db = DownloaderDb::open(&data_dir).unwrap();
+            let queue = db.load_queue().unwrap();
+            assert!(!queue.is_empty(), "an in-flight item must be in the queue");
+            queue[0].id.clone()
+        };
+
+        let mut db = DownloaderDb::open(&data_dir).unwrap();
+        cancel_download(&mut db, &registry, id.clone()).await.unwrap();
+
+        // The background task must return promptly (cancelled), not hang.
+        let result = tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+            .await
+            .expect("download task must finish quickly after cancel")
+            .expect("join ok");
+        assert!(result.is_ok(), "cancelled download should return Ok with the item");
+
+        // DB row reflects Cancelled.
+        let db = DownloaderDb::open(&data_dir).unwrap();
+        let queue = db.load_queue().unwrap();
+        let cancelled = queue.iter().any(|i| i.id == id && i.status == DownloadStatus::Cancelled);
+        assert!(cancelled, "item must be marked Cancelled in the queue");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 }
