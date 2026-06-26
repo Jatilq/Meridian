@@ -1,6 +1,6 @@
 (function () {
   const MERIDIAN_ENDPOINT = 'http://localhost:7771/download';
-  const VIDEO_EXTENSIONS = ['.mp4', '.webm', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.m4v', '.mpg', '.mpeg'];
+  const VIDEO_EXTENSIONS = ['.mp4', '.webm', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.m4v', '.mpg', '.mpeg', '.m3u8', '.mpd', '.ts'];
   const BUTTON_SIZE = 36;
 
   let floatingButton = null;
@@ -44,11 +44,10 @@
     };
 
     try {
-      await fetch(MERIDIAN_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      const result = await chrome.runtime.sendMessage({ action: 'download', payload });
+      if (!result || result.status !== 'ok') {
+        alert('Failed to reach Meridian. Is the app running?');
+      }
     }
     catch {
       alert('Failed to reach Meridian. Is the app running?');
