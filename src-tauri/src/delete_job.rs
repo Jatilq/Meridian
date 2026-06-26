@@ -156,7 +156,7 @@ pub async fn start_delete_job(
 
     let app_progress = app.clone();
     let job_id_progress = job_id.clone();
-    let emit_progress = tokio::spawn(async move {
+    let emit_progress = tauri::async_runtime::spawn(async move {
         while let Some((percent, detail, processed_count, total_count)) = progress_rx.recv().await {
             let payload = DeleteJobProgressPayload {
                 job_id: job_id_progress.clone(),
@@ -172,7 +172,7 @@ pub async fn start_delete_job(
     let app_done = app.clone();
     let job_id_done = job_id.clone();
     let use_trash_done = use_trash;
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         let work_result = tokio::task::spawn_blocking(move || {
             run_delete_blocking(paths, use_trash, cancel, progress_tx)
         })

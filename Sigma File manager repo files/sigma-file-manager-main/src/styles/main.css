@@ -1,0 +1,234 @@
+@import "./preflight.css";
+
+@layer base {
+  /* Override preflight default hover cursor for buttons and button-like elements */
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  ::view-transition,
+  ::view-transition-group(root),
+  ::view-transition-image-pair(root),
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+    mix-blend-mode: normal;
+    pointer-events: none;
+  }
+
+  body {
+    overflow: hidden;
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    filter: brightness(calc(var(--sigma-visual-filter-brightness, 100) * 1%))
+      contrast(calc(var(--sigma-visual-filter-contrast, 100) * 1%));
+  }
+
+  img,
+  video {
+    filter: contrast(calc(100% * 100 / var(--sigma-visual-filter-contrast, 100)))
+      brightness(calc(100% * 100 / var(--sigma-visual-filter-brightness, 100)));
+  }
+
+  .infusion-image,
+  .infusion-video {
+    filter: blur(var(--infusion-blur)) contrast(var(--infusion-media-contrast))
+      brightness(var(--infusion-media-brightness))
+      contrast(calc(100% * 100 / var(--sigma-visual-filter-contrast, 100)))
+      brightness(calc(100% * 100 / var(--sigma-visual-filter-brightness, 100)));
+  }
+
+  .sr-only {
+    position: absolute;
+    overflow: hidden;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    border-width: 0;
+    margin: -1px;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .horizontal-scroll-fade {
+    --horizontal-scroll-left-fade-width: 0;
+    --horizontal-scroll-right-fade-width: 0;
+
+    -webkit-mask-image: linear-gradient(
+      to right,
+      transparent 0,
+      black var(--horizontal-scroll-left-fade-width),
+      black calc(100% - var(--horizontal-scroll-right-fade-width)),
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      to right,
+      transparent 0,
+      black var(--horizontal-scroll-left-fade-width),
+      black calc(100% - var(--horizontal-scroll-right-fade-width)),
+      transparent 100%
+    );
+  }
+
+  .progressive-blur {
+    position: absolute;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .progressive-blur__layer {
+    position: absolute;
+    -webkit-backdrop-filter: blur(var(--progressive-blur-amount, 0));
+    backdrop-filter: blur(var(--progressive-blur-amount, 0));
+    inset: 0;
+    -webkit-mask-image: linear-gradient(
+      var(--progressive-blur-direction, to bottom),
+      black var(--progressive-blur-start, 0%),
+      transparent var(--progressive-blur-end, 100%)
+    );
+    mask-image: linear-gradient(
+      var(--progressive-blur-direction, to bottom),
+      black var(--progressive-blur-start, 0%),
+      transparent var(--progressive-blur-end, 100%)
+    );
+  }
+
+  /* Shared keyframes */
+  @keyframes sigma-ui-fade-in {
+    from {
+      opacity: 0;
+    }
+
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes sigma-ui-fade-out {
+    from {
+      opacity: 1;
+    }
+
+    to {
+      opacity: 0;
+    }
+  }
+
+  @keyframes sigma-ui-fade-in-scale {
+    from {
+      opacity: 0;
+      transform: scale(0.95);
+    }
+
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  @keyframes sigma-ui-fade-out-scale {
+    from {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    to {
+      opacity: 0;
+      transform: scale(0.95);
+    }
+  }
+
+  @keyframes sigma-ui-spin {
+    from {
+      transform: rotate(0deg);
+    }
+
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @keyframes sigma-ui-collapsible-down {
+    from {
+      height: 0;
+    }
+
+    to {
+      height: var(--reka-collapsible-content-height);
+    }
+  }
+
+  @keyframes sigma-ui-collapsible-up {
+    from {
+      height: var(--reka-collapsible-content-height);
+    }
+
+    to {
+      height: 0;
+    }
+  }
+
+  @keyframes sigma-ui-accordion-up {
+    from {
+      height: var(--reka-accordion-content-height);
+    }
+
+    to {
+      height: 0;
+    }
+  }
+
+  @keyframes sigma-ui-accordion-down {
+    from {
+      height: 0;
+    }
+
+    to {
+      height: var(--reka-accordion-content-height);
+    }
+  }
+
+  /* CSS animations */
+  .animate-fade-in {
+    --animate-fade-in-duration: 0.5s;
+
+    animation: sigma-ui-fade-in var(--animate-fade-in-duration) ease;
+  }
+
+  .animate-fade-in-x2 {
+    --animate-fade-in-duration: 1s;
+
+    animation: sigma-ui-fade-in var(--animate-fade-in-duration) ease;
+  }
+
+  .animate-sigma-ui-spin {
+    animation: sigma-ui-spin 1s linear infinite;
+  }
+
+  /* Vue transitions */
+  .fade-slide-top-enter-active,
+  .fade-slide-top-leave-active {
+    transition: all 0.3s ease;
+  }
+
+  .fade-slide-top-enter-from,
+  .fade-slide-top-leave-to {
+    filter: blur(4px);
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* Skeleton fade-in support (must be unlayered to override the component's base animation rule) */
+.sigma-ui-skeleton.animate-fade-in {
+  animation: sigma-ui-fade-in var(--animate-fade-in-duration, 0.5s) ease forwards, sigma-ui-skeleton-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) var(--animate-fade-in-duration, 0.5s) infinite;
+}
+
+.sigma-ui-skeleton.animate-fade-in-x2 {
+  animation: sigma-ui-fade-in var(--animate-fade-in-duration, 1s) ease forwards, sigma-ui-skeleton-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) var(--animate-fade-in-duration, 1s) infinite;
+}

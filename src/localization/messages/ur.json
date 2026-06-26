@@ -436,6 +436,16 @@
         "title": "Sigma File Manager کو ڈیفالٹ فائل مینیجر بنائیں",
         "description": "یہ اختیار سسٹم رجسٹری بدلتا ہے اور غیر متوقع اثر کر سکتا ہے۔ اپنے خطرے پر آگے بڑھیں۔"
       }
+    },
+    "meridian": {
+      "aiPanel": {
+        "title": "AI Panel",
+        "description": "Configure the AI assistant panel endpoint and model"
+      },
+      "downloader": {
+        "title": "Downloader",
+        "description": "Configure download settings"
+      }
     }
   },
   "projectGithubButtons": {
@@ -452,7 +462,8 @@
     "dataStorage": "ڈیٹا اور اسٹوریج",
     "extensions": "ایکسٹینشن",
     "stats": "اعداد و شمار",
-    "experimental": "تجرباتی"
+    "experimental": "تجرباتی",
+    "meridian": "Meridian"
   },
   "settingsTags": {
     "language": "زبان, language",
@@ -480,7 +491,9 @@
     "whatsNew": "نیا کیا ہے, changelog, ریلیز",
     "autostart": "سٹارٹ اپ, بوٹ, لاگ ان",
     "extensions": "ایکسٹینشن, plugins, addons",
-    "infoPanelPreview": "info, panel, preview, image, thumbnail, memory, original, video, mute, autoplay"
+    "infoPanelPreview": "info, panel, preview, image, thumbnail, memory, original, video, mute, autoplay",
+    "aiPanel": "ai, artificial intelligence, panel, chat, endpoint, model, omnix",
+    "downloader": "downloader, download, queue, history, yt-dlp, save folder"
   },
   "drag": {
     "holdShiftToChangeMode": "موڈ بدلنے کے لیے [Shift] دبائے رکھیں",

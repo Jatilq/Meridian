@@ -403,6 +403,16 @@
         "title": "Sigma File Manager را به عنوان مدیر فایل پیش فرض تنظیم کنید",
         "description": "این گزینه رجیستری سیستم را تغییر می دهد و ممکن است عوارض جانبی غیرمنتظره ای روی دستگاه شما داشته باشد. با مسئولیت خود ادامه دهید."
       }
+    },
+    "meridian": {
+      "aiPanel": {
+        "title": "AI Panel",
+        "description": "Configure the AI assistant panel endpoint and model"
+      },
+      "downloader": {
+        "title": "Downloader",
+        "description": "Configure download settings"
+      }
     }
   },
   "projectGithubButtons": {
@@ -419,7 +429,8 @@
     "dataStorage": "داده ها و ذخیره سازی",
     "stats": "آمار",
     "experimental": "آزمایشی",
-    "extensions": "برنامه های افزودنی"
+    "extensions": "برنامه های افزودنی",
+    "meridian": "Meridian"
   },
   "settingsTags": {
     "language": "زبان",
@@ -447,7 +458,9 @@
     "whatsNew": "تازه‌ها، تغییرات، یادداشت‌های نسخه، نسخه، به‌روزرسانی، اخبار",
     "autostart": "اجرای خودکار، راه‌اندازی، ورود، سیستم، بوت",
     "extensions": "extensions, plugins, addons, configuration, settings",
-    "infoPanelPreview": "info, panel, preview, image, thumbnail, memory, original, video, mute, autoplay"
+    "infoPanelPreview": "info, panel, preview, image, thumbnail, memory, original, video, mute, autoplay",
+    "aiPanel": "ai, artificial intelligence, panel, chat, endpoint, model, omnix",
+    "downloader": "downloader, download, queue, history, yt-dlp, save folder"
   },
   "drag": {
     "holdShiftToChangeMode": "برای تغییر حالت، [Shift] را نگه دارید",

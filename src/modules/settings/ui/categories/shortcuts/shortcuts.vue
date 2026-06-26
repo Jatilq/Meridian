@@ -64,6 +64,7 @@ import {
   HomeIcon,
   FolderClosedIcon,
   BookmarkIcon,
+  BotIcon,
 } from '@lucide/vue';
 import type { Component } from 'vue';
 import {
@@ -94,6 +95,7 @@ const globalShortcutsStore = useGlobalShortcutsStore();
 const unassignedShortcutLabel = '—';
 
 const shortcutIcons: Record<ShortcutId, Component> = {
+  toggleAiPanel: BotIcon,
   toggleGlobalSearch: SearchIcon,
   switchToHomePage: HomeIcon,
   switchToNavigatorPage: FolderClosedIcon,

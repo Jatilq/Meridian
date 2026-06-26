@@ -436,6 +436,16 @@
         "title": "Nastavi Sigma File Manager kot privzeti upravljalnik datotek",
         "description": "Ta možnost spremeni sistemski register in lahko povzroči nepričakovane stranske učinke na vaši napravi. Nadaljujte na lastno odgovornost."
       }
+    },
+    "meridian": {
+      "aiPanel": {
+        "title": "AI Panel",
+        "description": "Configure the AI assistant panel endpoint and model"
+      },
+      "downloader": {
+        "title": "Downloader",
+        "description": "Configure download settings"
+      }
     }
   },
   "projectGithubButtons": {
@@ -452,7 +462,8 @@
     "dataStorage": "Podatki & shranjevanje",
     "stats": "Statistika",
     "experimental": "Eksperimentalno",
-    "extensions": "Razširitve"
+    "extensions": "Razširitve",
+    "meridian": "Meridian"
   },
   "settingsTags": {
     "language": "language",
@@ -480,7 +491,9 @@
     "whatsNew": "what's new, changelog, release notes, version, update, news",
     "autostart": "autostart, zagon, sistem, prijava, zagon ob zagonu",
     "extensions": "extensions, plugins, addons, configuration, settings",
-    "infoPanelPreview": "info, panel, preview, image, thumbnail, memory, original, video, mute, autoplay"
+    "infoPanelPreview": "info, panel, preview, image, thumbnail, memory, original, video, mute, autoplay",
+    "aiPanel": "ai, artificial intelligence, panel, chat, endpoint, model, omnix",
+    "downloader": "downloader, download, queue, history, yt-dlp, save folder"
   },
   "drag": {
     "holdShiftToChangeMode": "Zadržite [Shift] za spremembo načina",

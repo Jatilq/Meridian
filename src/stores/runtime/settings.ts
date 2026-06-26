@@ -65,6 +65,10 @@ const settingsTabs: SettingsTab[] = [
     name: 'experimental',
     labelKey: 'settingsTabs.experimental',
   },
+  {
+    name: 'meridian',
+    labelKey: 'settingsTabs.meridian',
+  },
 ];
 
 function normalizeSettingsTabName(tabName: string): string {
@@ -161,6 +165,8 @@ export const useSettingsStore = defineStore('settings', () => {
       { default: TabAppearanceSection },
       { default: ExtensionsListSection },
       { default: DefaultFileManagerSection },
+      { default: AiPanelSettingsSection },
+      { default: DownloaderSettingsSection },
     ] = await Promise.all([
       import('@/modules/settings/ui/categories/general/language.vue'),
       import('@/modules/settings/ui/categories/general/date-time.vue'),
@@ -189,6 +195,8 @@ export const useSettingsStore = defineStore('settings', () => {
       import('@/modules/settings/ui/categories/tabs/tab-appearance.vue'),
       import('@/modules/settings/ui/categories/extensions/extensions-list.vue'),
       import('@/modules/settings/ui/categories/experimental/default-file-manager.vue'),
+      import('@/modules/settings/ui/categories/meridian/ai-panel.vue'),
+      import('@/modules/settings/ui/categories/meridian/downloader.vue'),
     ]);
 
     sections.value = [
@@ -387,6 +395,20 @@ export const useSettingsStore = defineStore('settings', () => {
             category: 'experimental',
           }]
         : []),
+      {
+        key: 'aiPanel',
+        titleKey: 'settings.meridian.aiPanel.title',
+        tags: 'settingsTags.aiPanel',
+        component: markRaw(AiPanelSettingsSection),
+        category: 'meridian',
+      },
+      {
+        key: 'downloader',
+        titleKey: 'settings.meridian.downloader.title',
+        tags: 'settingsTags.downloader',
+        component: markRaw(DownloaderSettingsSection),
+        category: 'meridian',
+      },
     ];
 
     const normalizedStoredTab = normalizeSettingsTabName(userSettingsStore.userSettings.settingsCurrentTab);

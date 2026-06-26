@@ -436,6 +436,16 @@
         "title": "הגדר את Sigma File Manager כמנהל הקבצים שמוגדר כברירת מחדל",
         "description": "אפשרות זו משנה את רישום המערכת ועלולה לגרום לתופעות לוואי בלתי צפויות במכשירך. המשך על אחריותך."
       }
+    },
+    "meridian": {
+      "aiPanel": {
+        "title": "AI Panel",
+        "description": "Configure the AI assistant panel endpoint and model"
+      },
+      "downloader": {
+        "title": "Downloader",
+        "description": "Configure download settings"
+      }
     }
   },
   "projectGithubButtons": {
@@ -452,7 +462,8 @@
     "dataStorage": "נתונים ואחסון",
     "extensions": "תוספים",
     "stats": "סטטיסטיקה",
-    "experimental": "ניסיוני"
+    "experimental": "ניסיוני",
+    "meridian": "Meridian"
   },
   "settingsTags": {
     "language": "שפה",
@@ -480,7 +491,9 @@
     "whatsNew": "מה חדש, יומן שינויים, הערות גרסה, גרסה, עדכון, חדשות",
     "autostart": "הפעלה אוטומטית, אתחול, כניסה, התחברות, הפעלה, מערכת",
     "extensions": "תוספים, תוספות, הרחבות, תצורה, הגדרות",
-    "infoPanelPreview": "info, panel, preview, image, thumbnail, memory, original, video, mute, autoplay"
+    "infoPanelPreview": "info, panel, preview, image, thumbnail, memory, original, video, mute, autoplay",
+    "aiPanel": "ai, artificial intelligence, panel, chat, endpoint, model, omnix",
+    "downloader": "downloader, download, queue, history, yt-dlp, save folder"
   },
   "drag": {
     "holdShiftToChangeMode": "החזק [Shift] כדי לשנות מצב",

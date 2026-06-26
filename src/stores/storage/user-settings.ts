@@ -199,6 +199,16 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
       showOnUpdate: true,
       lastSeenVersion: '',
     },
+    meridian: {
+      aiPanel: {
+        endpointUrl: 'http://localhost:7770/api/text',
+        model: '',
+        omnixEnabled: false,
+      },
+      downloader: {
+        autoSaveFolder: '',
+      },
+    },
   });
 
   function createDefaultInfusionBackground() {

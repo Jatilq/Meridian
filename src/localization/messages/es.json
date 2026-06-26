@@ -407,6 +407,16 @@
         "title": "Establecer Sigma File Manager como gestor de archivos predeterminado",
         "description": "Esta opción modifica el registro del sistema y puede tener efectos secundarios inesperados en su dispositivo. Continúe bajo su propia responsabilidad."
       }
+    },
+    "meridian": {
+      "aiPanel": {
+        "title": "AI Panel",
+        "description": "Configure the AI assistant panel endpoint and model"
+      },
+      "downloader": {
+        "title": "Downloader",
+        "description": "Configure download settings"
+      }
     }
   },
   "projectGithubButtons": {
@@ -423,7 +433,8 @@
     "dataStorage": "Almacenamiento de datos",
     "stats": "Estadísticas",
     "experimental": "Experimental",
-    "extensions": "Extensiones"
+    "extensions": "Extensiones",
+    "meridian": "Meridian"
   },
   "settingsTags": {
     "language": "idioma",
@@ -451,7 +462,9 @@
     "whatsNew": "novedades, registro de cambios, notas de versión, versión, actualización, noticias",
     "autostart": "inicio automático, arranque, inicio de sesión, sistema, arranque del sistema",
     "extensions": "extensions, plugins, addons, configuration, settings",
-    "infoPanelPreview": "info, panel, preview, image, thumbnail, memory, original, video, mute, autoplay"
+    "infoPanelPreview": "info, panel, preview, image, thumbnail, memory, original, video, mute, autoplay",
+    "aiPanel": "ai, artificial intelligence, panel, chat, endpoint, model, omnix",
+    "downloader": "downloader, download, queue, history, yt-dlp, save folder"
   },
   "drag": {
     "holdShiftToChangeMode": "Mantén presionado [Shift] para cambiar de modo",

@@ -457,7 +457,7 @@ pub async fn download_shared_binary(
         drop(guard);
 
         let tx_for_task = tx.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             let result = run_download_shared_binary(
                 app_handle_clone,
                 binary_id_clone,
@@ -599,7 +599,7 @@ pub async fn download_and_extract_shared_binary(
         drop(guard);
 
         let tx_for_task = tx.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             let result = run_download_and_extract_shared_binary(
                 app_handle_clone,
                 binary_id_clone,

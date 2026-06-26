@@ -9,6 +9,9 @@ import router from './router';
 import { i18n } from '@/localization';
 import VWave from 'v-wave';
 import { installModuleLoadRecovery } from '@/utils/module-load-recovery';
+import { listen } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
+import { useDownloaderStore } from '@/stores/runtime/downloader';
 
 import './styles/index.css';
 
@@ -24,3 +27,23 @@ app.use(VWave, {
   color: 'hsl(var(--primary))',
 });
 app.mount('#app');
+
+listen<{
+  url: string;
+  fileName?: string;
+  formatId?: string;
+  autoSaveFolder?: string;
+}>('extension-download-request', (event) => {
+  const downloaderStore = useDownloaderStore();
+  const payload = event.payload;
+  void invoke('downloader_enqueue', {
+    url: payload.url,
+    fileName: payload.fileName ?? null,
+    formatId: payload.formatId ?? null,
+    autoSaveFolder: payload.autoSaveFolder ?? null,
+  }).then(() => {
+    if (downloaderStore) {
+      downloaderStore.open();
+    }
+  }).catch(console.error);
+});

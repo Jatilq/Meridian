@@ -1,0 +1,124 @@
+:root {
+  color-scheme: light;
+
+  /* Hover transition timings: instant in, animated out */
+  --hover-transition-duration-in: 0s;
+  --hover-transition-duration-out: 0.15s;
+  --hover-transition-easing-out: ease-out;
+  --drop-target-background: hsl(var(--primary) / 15%);
+  --drop-target-subtle-background: hsl(var(--primary) / 8%);
+  --drop-target-outline: 2px dashed hsl(var(--primary) / 60%);
+  --drop-target-outline-offset: -2px;
+
+  /* Drive progress indicator colors */
+  --drive-progress-color-green: 174 100% 27%;
+  --drive-progress-color-red: 4 82% 58%;
+  --drive-progress-bg-green: hsl(174deg 100% 27% / 25%);
+  --drive-progress-bg-red: hsl(4deg 82% 58% / 18%);
+  --drive-progress-glow-green: 0 0 20px 6px hsl(174deg 100% 27% / 15%);
+  --drive-progress-glow-red: 0 0 20px 6px hsl(4deg 82% 58% / 15%);
+
+  /* Sizes */
+  --nav-sidebar-width: 42px;
+  --quick-access-panel-width: 260px;
+  --window-toolbar-height: 48px;
+  --action-toolbar-height: 42px;
+  --workspace-toolbar-height: 48px;
+  --info-panel-width-value: 280;
+  --info-panel-width: calc(var(--info-panel-width-value) * 1px);
+  --info-panel-preview-height: 180px;
+  --info-panel-header-height: 32px;
+  --info-panel-sub-header-height: 16px;
+  --info-panel-properties-header-height: 36px;
+  --info-panel-properties-rows-min-width: 250px;
+  --navigator-sorting-header-height: 36px;
+  --navigator-list-view-entry-height: 42px;
+  --navigator-grid-view-dir-entry-height: 52px;
+  --navigator-grid-view-entry-height: 120px;
+  --tab-height: calc(var(--window-toolbar-height) - 16px);
+  --control-button-width: 46px;
+  --dir-entry-transition: all 0.3s ease-in-out;
+  --ring-outline-offset: -2px;
+
+  /* SIGMA-UI */
+
+  /* General */
+  --backdrop-filter-blur: 32px;
+  --radius: 0.5rem;
+  --radius-full: 9999px;
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-xs: min(calc(var(--radius) / 2.5), 6px);
+  --font-mono:
+    ui-monospace, sfmono-regular, menlo, monaco, consolas, "Liberation Mono", "Courier New",
+    monospace;
+  --shadow-md:
+    0 4px 6px -1px rgb(0 0 0 / 2%), 0 2px 4px -1px rgb(0 0 0 / 2%), 0 12px 24px rgb(0 0 0 / 5%);
+  --shadow-lg:
+    0 10px 15px -3px rgb(0 0 0 / 10%), 0 4px 6px -4px rgb(0 0 0 / 7%), 0 20px 40px rgb(0 0 0 / 30%);
+
+  /* Light theme */
+  --light: 0 0% 100%;
+  --dark: 0 0% 0%;
+  --background-2: 220 13% 93%;
+  --background-3: 220 14% 98%;
+  --window-toolbar: 220 14% 96%;
+  --icon: 220 9% 38%;
+
+  /* SIGMA-UI */
+  --background: 0 0% 100%;
+  --foreground: 224 71.4% 4.1%;
+  --muted: 220 14.3% 95.9%;
+  --muted-foreground: 220 8.9% 46.1%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 224 71.4% 4.1%;
+  --card: 0 0% 100%;
+  --card-foreground: 224 71.4% 4.1%;
+  --border: 220 13% 91%;
+  --input: 220 14% 96%;
+  --primary: 220.9 39.3% 11%;
+  --primary-foreground: 210 20% 98%;
+  --secondary: 220 14.3% 95.9%;
+  --secondary-foreground: 220.9 39.3% 11%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 210 20% 98%;
+  --ring: 220 13% 45%;
+  --success: 174 100% 27%;
+  --dangerous: 4 82% 58%;
+  --warning: 38 70% 50%;
+}
+
+.dark {
+  color-scheme: dark;
+
+  --light: 0 0% 100%;
+  --dark: 0 0% 0%;
+  --background-2: 225 10% 16%;
+  --background-3: 225 12% 13%;
+  --window-toolbar: 220 11% 19%;
+  --icon: 0 0% 62%;
+
+  /* SIGMA-UI */
+  --background: 225 10% 16%;
+  --foreground: 0 0% 75%;
+  --muted: 225 10% 20%;
+  --muted-foreground: 0 0% 62%;
+  --popover: 225 10% 16% / 50%;
+  --popover-foreground: 0 0% 75%;
+  --card: 225 10% 16% / 80%;
+  --card-foreground: 210 20% 98%;
+  --border: 225 10% 20%;
+  --input: 225 10% 16% / 50%;
+  --primary: 198 19% 38%;
+  --primary-foreground: 220.9 39.3% 11%;
+  --secondary: 222 10% 18%;
+  --secondary-foreground: 0 0% 60%;
+  --destructive: 0 62.8% 50%;
+  --destructive-foreground: 210 20% 98%;
+  --ring: 216 12.2% 83.9%;
+  --success: 174 100% 27%;
+  --dangerous: 4 82% 58%;
+  --warning: 43 70% 56%;
+}

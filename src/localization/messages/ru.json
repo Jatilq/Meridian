@@ -436,6 +436,16 @@
         "title": "Сделать Sigma File Manager файловым менеджером по умолчанию",
         "description": "Эта опция изменяет системный реестр и может вызвать неожиданные побочные эффекты на вашем устройстве. Продолжайте на свой страх и риск."
       }
+    },
+    "meridian": {
+      "aiPanel": {
+        "title": "AI Panel",
+        "description": "Configure the AI assistant panel endpoint and model"
+      },
+      "downloader": {
+        "title": "Downloader",
+        "description": "Configure download settings"
+      }
     }
   },
   "projectGithubButtons": {
@@ -452,7 +462,8 @@
     "dataStorage": "Хранилище данных",
     "stats": "Статистика",
     "experimental": "Экспериментальные",
-    "extensions": "Расширения"
+    "extensions": "Расширения",
+    "meridian": "Meridian"
   },
   "settingsTags": {
     "language": "язык",
@@ -480,7 +491,9 @@
     "whatsNew": "что нового, журнал изменений, примечания к выпуску, версия, обновление, новости",
     "autostart": "автозапуск, запуск, вход в систему, загрузка, система",
     "extensions": "extensions, plugins, addons, configuration, settings",
-    "infoPanelPreview": "info, panel, preview, image, thumbnail, memory, original, video, mute, autoplay"
+    "infoPanelPreview": "info, panel, preview, image, thumbnail, memory, original, video, mute, autoplay",
+    "aiPanel": "ai, artificial intelligence, panel, chat, endpoint, model, omnix",
+    "downloader": "downloader, download, queue, history, yt-dlp, save folder"
   },
   "drag": {
     "holdShiftToChangeMode": "Удерживайте [Shift], чтобы изменить режим",

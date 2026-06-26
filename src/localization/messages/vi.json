@@ -407,6 +407,16 @@
         "title": "Đặt Sigma File Manager làm trình quản lý tệp mặc định",
         "description": "Tùy chọn này sửa đổi sổ đăng ký hệ thống và có thể gây ra tác dụng phụ ngoài ý muốn trên thiết bị của bạn. Hãy tiếp tục với rủi ro của riêng bạn."
       }
+    },
+    "meridian": {
+      "aiPanel": {
+        "title": "AI Panel",
+        "description": "Configure the AI assistant panel endpoint and model"
+      },
+      "downloader": {
+        "title": "Downloader",
+        "description": "Configure download settings"
+      }
     }
   },
   "projectGithubButtons": {
@@ -423,7 +433,8 @@
     "dataStorage": "Dữ liệu & lưu trữ",
     "stats": "Số liệu thống kê",
     "experimental": "Thử nghiệm",
-    "extensions": "Tiện ích mở rộng"
+    "extensions": "Tiện ích mở rộng",
+    "meridian": "Meridian"
   },
   "settingsTags": {
     "language": "ngôn ngữ",
@@ -451,7 +462,9 @@
     "whatsNew": "tin mới, nhật ký thay đổi, ghi chú phát hành, phiên bản, cập nhật, tin tức",
     "autostart": "khởi động tự động, khởi động, đăng nhập, hệ thống, boot",
     "extensions": "extensions, plugins, addons, configuration, settings",
-    "infoPanelPreview": "info, panel, preview, image, thumbnail, memory, original, video, mute, autoplay"
+    "infoPanelPreview": "info, panel, preview, image, thumbnail, memory, original, video, mute, autoplay",
+    "aiPanel": "ai, artificial intelligence, panel, chat, endpoint, model, omnix",
+    "downloader": "downloader, download, queue, history, yt-dlp, save folder"
   },
   "drag": {
     "holdShiftToChangeMode": "Giữ [Shift] để thay đổi chế độ",

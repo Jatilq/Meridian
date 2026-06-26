@@ -34,6 +34,7 @@ import FileBrowserDragOverlay from '@/modules/navigator/components/file-browser/
 import { useActiveFileBrowserDragState } from '@/modules/navigator/components/file-browser/composables/use-file-browser-drag';
 import { provideFileBrowserInternalDropHandler } from '@/modules/navigator/components/file-browser/composables/use-file-browser-internal-drop';
 import { InfoPanel } from '@/modules/navigator/components/info-panel';
+import { AiPanel } from '@/modules/ai-panel';
 import { useInfoPanelLayout } from '@/modules/navigator/components/info-panel/composables/use-info-panel-layout';
 import { NavigatorToolbarActions } from '@/modules/navigator/components/navigator-toolbar-actions';
 import { ClipboardToolbar } from '@/modules/navigator/components/clipboard-toolbar';
@@ -41,6 +42,7 @@ import { GlobalSearchView } from '@/modules/global-search';
 import type { DirEntry } from '@/types/dir-entry';
 import type { SplitViewMode } from '@/types/user-settings';
 import type { Tab } from '@/types/workspaces';
+import { useAiPanelStore } from '@/stores/runtime/ai-panel';
 
 import { useIsSmallScreen } from '@/composables/use-responsive-query';
 import { useFileDropOperation } from '@/composables/use-file-drop-operation';
@@ -180,6 +182,10 @@ const {
 
 const showInfoPanel = ref(true);
 const infoPanelSlideVisible = ref(true);
+const showAiPanel = ref(false);
+const aiPanelSlideVisible = ref(false);
+
+const aiPanelStore = useAiPanelStore();
 
 const mainPanelMinSize = computed(() => {
   return showInfoPanel.value || isInfoPanelVisibilityAnimating.value
@@ -357,6 +363,22 @@ async function handleToggleInfoPanel() {
   infoPanelSlideVisible.value = true;
   showInfoPanel.value = true;
   await showInfoPanelAnimated();
+}
+
+async function handleToggleAiPanel() {
+  if (isSmallScreen.value) {
+    showAiPanel.value = !showAiPanel.value;
+    return;
+  }
+
+  if (showAiPanel.value) {
+    aiPanelSlideVisible.value = false;
+    showAiPanel.value = false;
+    return;
+  }
+
+  aiPanelSlideVisible.value = true;
+  showAiPanel.value = true;
 }
 
 function activateTabPane(tabId: string) {
@@ -982,6 +1004,14 @@ function registerShortcutHandlers() {
   });
 }
 
+watch(currentDirEntry, (entry) => {
+  aiPanelStore.setCurrentPath(entry?.path ?? '');
+});
+
+watch(selectedEntries, (entries) => {
+  aiPanelStore.setSelectedFiles(entries.map(e => e.path));
+});
+
 watch(isInfoPanelVisibilityAnimating, (isAnimating, wasAnimating) => {
   if (!isAnimating && wasAnimating && showInfoPanel.value) {
     infoPanelSlideVisible.value = true;
@@ -1007,9 +1037,11 @@ onUnmounted(() => {
   <NavigatorToolbarActions
     :is-split-view="isSplitView"
     :show-info-panel="showInfoPanel"
+    :show-ai-panel="showAiPanel"
     :is-global-search-open="globalSearchStore.isOpen"
     @toggle-split-view="handleToggleSplitView"
     @toggle-info-panel="handleToggleInfoPanel"
+    @toggle-ai-panel="handleToggleAiPanel"
     @set-split-view-mode="handleSetSplitViewMode"
   />
   <div class="navigator-page">
@@ -1027,6 +1059,11 @@ onUnmounted(() => {
           v-if="showInfoPanel"
           :selected-entry="infoPanelEntry"
           :is-current-dir="selectedEntries.length === 0 && !!currentDirEntry"
+        />
+        <AiPanel
+          v-if="showAiPanel"
+          :current-path="currentActivePath"
+          :selected-files="selectedEntries.map(e => e.path)"
         />
       </div>
       <ResizablePanelGroup
@@ -1176,6 +1213,30 @@ onUnmounted(() => {
             <InfoPanel
               :selected-entry="infoPanelEntry"
               :is-current-dir="selectedEntries.length === 0 && !!currentDirEntry"
+            />
+          </div>
+        </ResizablePanel>
+        <ResizableHandle
+          class="navigator-page__ai-panel-handle"
+          :class="{ 'navigator-page__ai-panel-handle--collapsed': !showAiPanel }"
+          with-handle
+        />
+        <ResizablePanel
+          :order="3"
+          :default-size="0"
+          :min-size="0"
+          :max-size="400"
+          size-unit="px"
+          :collapsed-size="0"
+          collapsible
+        >
+          <div
+            class="navigator-page__ai-panel-slide"
+            :class="{ 'navigator-page__ai-panel-slide--visible': showAiPanel }"
+          >
+            <AiPanel
+              :current-path="currentActivePath"
+              :selected-files="selectedEntries.map(e => e.path)"
             />
           </div>
         </ResizablePanel>
@@ -1364,6 +1425,37 @@ onUnmounted(() => {
   transform: translateX(0);
 }
 
+.navigator-page__ai-panel-handle {
+  overflow: visible;
+  min-width: 0;
+  max-width: 4px;
+  flex-shrink: 0;
+  opacity: 1;
+  transition:
+    max-width 0.2s ease,
+    opacity 0.2s ease;
+}
+
+.navigator-page__ai-panel-handle--collapsed {
+  overflow: hidden;
+  max-width: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.navigator-page__ai-panel-slide {
+  overflow: hidden;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  transform: translateX(100%);
+  transition: transform 0.2s ease;
+}
+
+.navigator-page__ai-panel-slide--visible {
+  transform: translateX(0);
+}
+
 .navigator-page__panes {
   overflow: hidden;
   width: 100%;
@@ -1425,6 +1517,14 @@ onUnmounted(() => {
 .navigator-page__compact-header :deep(.info-panel) {
   padding: 8px;
   border-radius: 0;
+}
+
+.navigator-page__compact-header :deep(.ai-panel) {
+  padding: 0;
+  border-radius: 0;
+  flex: 1;
+  min-height: 200px;
+  max-height: 50vh;
 }
 
 @media (width <= 800px) {

@@ -1,0 +1,593 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later
+License: GNU GPLv3 or later. See the license file in the project root for more information.
+Copyright © 2021 - present Aleksey Hoffman. All rights reserved.
+-->
+
+<script setup lang="ts">
+import { computed, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
+import { useRouter } from 'vue-router';
+import {
+  StarIcon,
+  TagIcon,
+  TrendingUpIcon,
+  ClockIcon,
+  XIcon,
+} from '@lucide/vue';
+import { PageDefaultLayout } from '@/layouts';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Button } from '@/components/ui/button';
+import { TagSelector } from '@/components/ui/tag-selector';
+import { DirEntryInteractive } from '@/components/dir-entry-interactive';
+import { useUserStatsStore } from '@/stores/storage/user-stats';
+import { useWorkspacesStore } from '@/stores/storage/workspaces';
+import { usePageDropZone } from '@/composables/use-page-drop-zone';
+import { useFileDropOperation } from '@/composables/use-file-drop-operation';
+import { resolveNavigableItemTarget } from '@/utils/resolve-navigable-item-target';
+import DashboardActionBar from '@/modules/dashboard/components/dashboard-action-bar.vue';
+import DashboardEmptyState from '@/modules/dashboard/components/dashboard-empty-state.vue';
+import DashboardTagSectionHeader from '@/modules/dashboard/components/dashboard-tag-section-header.vue';
+import EntryCard from '@/modules/dashboard/components/entry-card.vue';
+import FileBrowserConflictDialog from '@/modules/navigator/components/file-browser/file-browser-conflict-dialog.vue';
+import type {
+  FavoriteItem,
+  HistoryItem,
+  FrequentItem,
+  ItemTag,
+  TaggedItem,
+} from '@/types/user-stats';
+import { getStaggerSlideUpBinding } from '@/utils/stagger-animation';
+
+type TaggedSection = {
+  tag: ItemTag;
+  items: TaggedItem[];
+  staggerBase: number;
+};
+
+const { t } = useI18n();
+const router = useRouter();
+const userStatsStore = useUserStatsStore();
+const workspacesStore = useWorkspacesStore();
+
+const activeTab = ref('favorites');
+const dropContainerRef = ref<HTMLElement | null>(null);
+
+const {
+  conflictDialogState,
+  handleConflictResolution,
+  handleConflictCancel,
+  performDrop,
+} = useFileDropOperation();
+
+usePageDropZone({
+  containerRef: dropContainerRef,
+  onDrop: (sourcePaths, targetPath, operation) => {
+    performDrop(sourcePaths, targetPath, operation);
+  },
+});
+
+const favoriteItems = computed(() => userStatsStore.favorites);
+const taggedItems = computed(() => userStatsStore.taggedItems);
+const historyItems = computed(() => userStatsStore.sortedHistory);
+const frequentItems = computed(() => userStatsStore.sortedFrequentItems);
+const tags = computed(() => userStatsStore.tags);
+
+const taggedSections = computed((): TaggedSection[] => {
+  let staggerBase = 0;
+  const sections: TaggedSection[] = [];
+
+  for (const tag of tags.value) {
+    const itemsForTag = taggedItems.value.filter(item => item.tagIds.includes(tag.id));
+
+    if (itemsForTag.length === 0) {
+      continue;
+    }
+
+    sections.push({
+      tag,
+      items: itemsForTag,
+      staggerBase,
+    });
+    staggerBase += itemsForTag.length;
+  }
+
+  return sections;
+});
+
+function getTagById(tagId: string): ItemTag | undefined {
+  return tags.value.find(tag => tag.id === tagId);
+}
+
+function getItemDirectory(path: string): string {
+  const lastSlashIndex = path.lastIndexOf('/');
+  return lastSlashIndex > 0 ? path.substring(0, lastSlashIndex) : path;
+}
+
+function formatRelativeTime(timestamp: number): string {
+  const now = Date.now();
+  const diffMs = now - timestamp;
+  const diffMinutes = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMinutes < 1) return t('dashboard.justNow');
+  if (diffMinutes < 60) return t('dashboard.minutesAgo', diffMinutes);
+  if (diffHours < 24) return t('dashboard.hoursAgo', diffHours);
+  return t('dashboard.daysAgo', diffDays);
+}
+
+async function openItem(path: string, isFile: boolean) {
+  try {
+    const navigableItemTarget = await resolveNavigableItemTarget(path, isFile);
+
+    if (navigableItemTarget.opensAsFile) {
+      const directory = getItemDirectory(navigableItemTarget.targetPath);
+      await workspacesStore.openNewTabGroup(directory);
+    }
+    else {
+      await workspacesStore.openNewTabGroup(navigableItemTarget.targetPath);
+    }
+
+    router.push({ name: 'navigator' });
+  }
+  catch (error) {
+    console.error('Failed to open item:', error);
+  }
+}
+
+function isFavoriteFile(item: FavoriteItem): boolean {
+  return !item.path.endsWith('/') && item.path.includes('.');
+}
+
+async function openFavoriteItem(item: FavoriteItem) {
+  await openItem(item.path, isFavoriteFile(item));
+}
+
+async function openHistoryItem(item: HistoryItem) {
+  await openItem(item.path, item.isFile);
+}
+
+async function openFrequentItem(item: FrequentItem) {
+  await openItem(item.path, item.isFile);
+}
+
+async function removeFavorite(path: string, event: MouseEvent) {
+  event.stopPropagation();
+  await userStatsStore.removeFromFavorites(path);
+}
+
+async function removeHistoryItem(path: string, openedAt: number, event: MouseEvent) {
+  event.stopPropagation();
+  await userStatsStore.removeFromHistory(path, openedAt);
+}
+
+async function handleToggleTagOnItem(item: TaggedItem, tagId: string) {
+  const hasTag = item.tagIds.includes(tagId);
+
+  if (hasTag) {
+    await userStatsStore.removeTagFromItem(item.path, tagId);
+  }
+  else {
+    await userStatsStore.addTagToItem(item.path, tagId, item.isFile);
+  }
+}
+
+async function handleCreateTagForItem(item: TaggedItem, name: string) {
+  const colors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#14b8a6', '#3b82f6', '#8b5cf6', '#ec4899'];
+  const randomColor = colors[Math.floor(Math.random() * colors.length)];
+  const newTag = await userStatsStore.createTag(name, randomColor);
+
+  await userStatsStore.addTagToItem(item.path, newTag.id, item.isFile);
+}
+
+async function handleDeleteTag(tagId: string) {
+  await userStatsStore.deleteTag(tagId);
+}
+
+async function handleRenameTag(tagId: string, name: string) {
+  await userStatsStore.renameTag(tagId, name);
+}
+
+async function handleUpdateTagColor(tagId: string, color: string) {
+  await userStatsStore.updateTagColor(tagId, color);
+}
+</script>
+
+<template>
+  <PageDefaultLayout
+    class="dashboard-page"
+    :title="t('pages.dashboard')"
+    :subtitle="t('dashboard.subtitle')"
+  >
+    <div ref="dropContainerRef">
+      <Tabs
+        v-model="activeTab"
+        default-value="favorites"
+        class="dashboard-page__tabs"
+      >
+        <TabsList class="dashboard-page__tabs-list">
+          <TabsTrigger
+            value="favorites"
+            class="dashboard-page__tab-trigger"
+          >
+            <StarIcon :size="16" />
+            <span>{{ t('dashboard.tabs.favorites') }}</span>
+            <span
+              v-if="favoriteItems.length > 0"
+              class="dashboard-page__tab-badge"
+            >
+              {{ favoriteItems.length }}
+            </span>
+          </TabsTrigger>
+          <TabsTrigger
+            value="tagged"
+            class="dashboard-page__tab-trigger"
+          >
+            <TagIcon :size="16" />
+            <span>{{ t('dashboard.tabs.tagged') }}</span>
+            <span
+              v-if="taggedItems.length > 0"
+              class="dashboard-page__tab-badge"
+            >
+              {{ taggedItems.length }}
+            </span>
+          </TabsTrigger>
+          <TabsTrigger
+            value="frequent"
+            class="dashboard-page__tab-trigger"
+          >
+            <TrendingUpIcon :size="16" />
+            <span>{{ t('dashboard.tabs.frequent') }}</span>
+            <span
+              v-if="frequentItems.length > 0"
+              class="dashboard-page__tab-badge"
+            >
+              {{ frequentItems.length }}
+            </span>
+          </TabsTrigger>
+          <TabsTrigger
+            value="history"
+            class="dashboard-page__tab-trigger"
+          >
+            <ClockIcon :size="16" />
+            <span>{{ t('dashboard.tabs.history') }}</span>
+            <span
+              v-if="historyItems.length > 0"
+              class="dashboard-page__tab-badge"
+            >
+              {{ historyItems.length }}
+            </span>
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent
+          value="favorites"
+          class="dashboard-page__tab-content"
+        >
+          <DashboardActionBar
+            :is-empty="favoriteItems.length === 0"
+            @clear-all="userStatsStore.clearAllFavorites()"
+          />
+          <DashboardEmptyState
+            v-if="favoriteItems.length === 0"
+            type="favorites"
+            :title="t('dashboard.emptyFavorites')"
+            :description="t('dashboard.emptyFavoritesDescription')"
+          />
+          <div
+            v-else
+            class="dashboard-page__items-grid"
+          >
+            <DirEntryInteractive
+              v-for="(item, itemIndex) in favoriteItems"
+              :key="item.path"
+              :path="item.path"
+              :is-file="isFavoriteFile(item)"
+            >
+              <EntryCard
+                v-bind="getStaggerSlideUpBinding(itemIndex)"
+                :path="item.path"
+                @click="openFavoriteItem(item)"
+              >
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  class="entry-card__action"
+                  @click="removeFavorite(item.path, $event)"
+                >
+                  <XIcon :size="14" />
+                </Button>
+              </EntryCard>
+            </DirEntryInteractive>
+          </div>
+        </TabsContent>
+
+        <TabsContent
+          value="tagged"
+          class="dashboard-page__tab-content"
+        >
+          <DashboardActionBar
+            :is-empty="taggedItems.length === 0"
+            @clear-all="userStatsStore.clearAllTagged()"
+          />
+          <DashboardEmptyState
+            v-if="taggedItems.length === 0"
+            type="tagged"
+            :title="t('dashboard.emptyTagged')"
+            :description="t('dashboard.emptyTaggedDescription')"
+          />
+          <div
+            v-else
+            class="dashboard-page__tagged-sections"
+          >
+            <section
+              v-for="section in taggedSections"
+              :key="section.tag.id"
+              class="dashboard-page__tagged-section"
+            >
+              <div class="dashboard-page__tagged-section-head">
+                <DashboardTagSectionHeader
+                  :tag="section.tag"
+                  @rename-tag="handleRenameTag"
+                  @delete-tag="handleDeleteTag"
+                  @update-tag-color="handleUpdateTagColor"
+                />
+              </div>
+              <div class="dashboard-page__items-grid">
+                <DirEntryInteractive
+                  v-for="(item, itemIndex) in section.items"
+                  :key="`${section.tag.id}-${item.path}`"
+                  :path="item.path"
+                  :is-file="item.isFile"
+                >
+                  <EntryCard
+                    v-bind="getStaggerSlideUpBinding(section.staggerBase + itemIndex)"
+                    :path="item.path"
+                    :is-file="item.isFile"
+                    @click="openItem(item.path, item.isFile)"
+                  >
+                    <template #footer>
+                      <div class="entry-card__tags">
+                        <span
+                          v-for="tagId in item.tagIds"
+                          :key="tagId"
+                          class="entry-card__tag"
+                          :style="{ backgroundColor: getTagById(tagId)?.color + '25', color: getTagById(tagId)?.color }"
+                        >
+                          {{ getTagById(tagId)?.name }}
+                        </span>
+                      </div>
+                      <TagSelector
+                        :tags="tags"
+                        :selected-tag-ids="item.tagIds"
+                        :allow-create="true"
+                        trigger-variant="compact"
+                        @toggle-tag="(tagId) => handleToggleTagOnItem(item, tagId)"
+                        @create-tag="(name) => handleCreateTagForItem(item, name)"
+                        @rename-tag="handleRenameTag"
+                        @update-tag-color="handleUpdateTagColor"
+                      />
+                    </template>
+                  </EntryCard>
+                </DirEntryInteractive>
+              </div>
+            </section>
+          </div>
+        </TabsContent>
+
+        <TabsContent
+          value="frequent"
+          class="dashboard-page__tab-content"
+        >
+          <DashboardActionBar
+            :is-empty="frequentItems.length === 0"
+            @clear-all="userStatsStore.clearAllFrequent()"
+          />
+          <DashboardEmptyState
+            v-if="frequentItems.length === 0"
+            type="frequent"
+            :title="t('dashboard.emptyFrequent')"
+            :description="t('dashboard.emptyFrequentDescription')"
+          />
+          <div
+            v-else
+            class="dashboard-page__items-grid"
+          >
+            <DirEntryInteractive
+              v-for="(item, itemIndex) in frequentItems"
+              :key="item.path"
+              :path="item.path"
+              :is-file="item.isFile"
+            >
+              <EntryCard
+                v-bind="getStaggerSlideUpBinding(itemIndex)"
+                :path="item.path"
+                :is-file="item.isFile"
+                @click="openFrequentItem(item)"
+              >
+                <div class="entry-card__stats">
+                  <span class="entry-card__badge">{{ t('dashboard.openedCount', item.openCount) }}</span>
+                </div>
+              </EntryCard>
+            </DirEntryInteractive>
+          </div>
+        </TabsContent>
+
+        <TabsContent
+          value="history"
+          class="dashboard-page__tab-content"
+        >
+          <DashboardActionBar
+            :is-empty="historyItems.length === 0"
+            @clear-all="userStatsStore.clearHistory()"
+          />
+          <DashboardEmptyState
+            v-if="historyItems.length === 0"
+            type="history"
+            :title="t('dashboard.emptyHistory')"
+            :description="t('dashboard.emptyHistoryDescription')"
+          />
+          <div
+            v-else
+            class="dashboard-page__items-grid"
+          >
+            <DirEntryInteractive
+              v-for="(item, itemIndex) in historyItems"
+              :key="`${item.path}-${item.openedAt}`"
+              :path="item.path"
+              :is-file="item.isFile"
+            >
+              <EntryCard
+                v-bind="getStaggerSlideUpBinding(itemIndex)"
+                :path="item.path"
+                :is-file="item.isFile"
+                @click="openHistoryItem(item)"
+              >
+                <span class="entry-card__time">{{ formatRelativeTime(item.openedAt) }}</span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  class="entry-card__action"
+                  @click="removeHistoryItem(item.path, item.openedAt, $event)"
+                >
+                  <XIcon :size="14" />
+                </Button>
+              </EntryCard>
+            </DirEntryInteractive>
+          </div>
+        </TabsContent>
+      </Tabs>
+    </div>
+    <FileBrowserConflictDialog
+      v-model:open="conflictDialogState.isOpen"
+      :conflicts="conflictDialogState.conflicts"
+      :operation-type="conflictDialogState.operationType"
+      :is-checking-conflicts="conflictDialogState.isCheckingConflicts"
+      @resolve="handleConflictResolution"
+      @cancel="handleConflictCancel"
+    />
+  </PageDefaultLayout>
+</template>
+
+<style>
+.dashboard-page__tabs {
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboard-page__tabs-list {
+  display: flex;
+  padding: 4px;
+  border-radius: var(--radius);
+  background-color: hsl(var(--muted) / 50%);
+  gap: 4px;
+}
+
+.dashboard-page__tab-trigger {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 10px 16px;
+  gap: 8px;
+}
+
+.dashboard-page__tab-badge {
+  display: flex;
+  min-width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  border-radius: 10px;
+  background-color: hsl(var(--primary) / 20%);
+  color: hsl(var(--primary));
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.dashboard-page__tab-content {
+  display: flex;
+  flex-direction: column;
+  animation: fade-in 0.2s ease-out;
+  gap: 12px;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.dashboard-page__tagged-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.dashboard-page__tagged-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dashboard-page__tagged-section-head {
+  min-width: 0;
+}
+
+.dashboard-page__tagged-section-head .tag-selector__tag-name {
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.dashboard-page__items-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+}
+
+.dashboard-page__items-grid .dir-entry-interactive {
+  border-radius: var(--radius);
+  transition:
+    outline-color var(--hover-transition-duration-out) var(--hover-transition-easing-out),
+    background-color var(--hover-transition-duration-out) var(--hover-transition-easing-out);
+}
+
+.dashboard-page__items-grid .dir-entry-interactive[data-drag-over] {
+  background-color: var(--drop-target-subtle-background);
+  outline: var(--drop-target-outline);
+  outline-offset: var(--drop-target-outline-offset);
+  transition:
+    outline-color var(--hover-transition-duration-in),
+    background-color var(--hover-transition-duration-in);
+}
+
+@media (width <= 768px) {
+  .dashboard-page__tabs-list.sigma-ui-tabs-list {
+    display: grid;
+    height: auto;
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .dashboard-page__tab-trigger {
+    flex-direction: column;
+    padding: 8px;
+    font-size: 0.75rem;
+    gap: 4px;
+  }
+
+  .dashboard-page__tab-badge {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    min-width: 18px;
+    height: 18px;
+    font-size: 10px;
+  }
+}
+</style>

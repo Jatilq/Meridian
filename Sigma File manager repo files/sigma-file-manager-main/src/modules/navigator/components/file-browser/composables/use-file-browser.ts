@@ -1,0 +1,628 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// License: GNU GPLv3 or later. See the license file in the project root for more information.
+// Copyright © 2021 - present Aleksey Hoffman. All rights reserved.
+
+import {
+  ref, computed, nextTick, toRef, onMounted, onUnmounted, watch,
+} from 'vue';
+import type { Ref, ComputedRef } from 'vue';
+import { useUserSettingsStore } from '@/stores/storage/user-settings';
+import { useDismissalLayerStore } from '@/stores/runtime/dismissal-layer';
+import { useQuickViewStore } from '@/stores/runtime/quick-view';
+import { useGlobalSearchStore } from '@/stores/runtime/global-search';
+import { useWorkspacesStore } from '@/stores/storage/workspaces';
+import {
+  registerNavigationProvider,
+  unregisterNavigationProvider,
+  emitPathChange,
+  emitSelectionChange,
+} from '@/modules/extensions/context';
+import {
+  registerNavigateToPath,
+  registerOpenNavigatorFile,
+  unregisterNavigateToPath,
+  unregisterOpenNavigatorFile,
+} from '@/modules/extensions/builtin-commands';
+import type { DirEntry, DirContents } from '@/types/dir-entry';
+import type { Tab } from '@/types/workspaces';
+import type { UserSettingsNavigator } from '@/types/user-settings';
+import { useFileBrowserNavigation } from './use-file-browser-navigation';
+import { useFileBrowserSelection } from './use-file-browser-selection';
+import { useFileBrowserEntries } from './use-file-browser-entries';
+import { useFileBrowserFilter } from './use-file-browser-filter';
+import { useFileBrowserFocus } from './use-file-browser-focus';
+import { useFileBrowserDialogs } from './use-file-browser-dialogs';
+import { useFileBrowserActions } from './use-file-browser-actions';
+import { useFileBrowserKeyboardNavigation } from './use-file-browser-keyboard-navigation';
+import { useFileBrowserLifecycle } from './use-file-browser-lifecycle';
+import { useFileBrowserLinkMetadata } from './use-file-browser-link-metadata';
+import { useFileBrowserItemCounts } from './use-file-browser-item-counts';
+import { useFileBrowserDrag } from './use-file-browser-drag';
+import { useFileBrowserInternalDropHandler } from './use-file-browser-internal-drop';
+import { useFileBrowserExternalDrop } from './use-file-browser-external-drop';
+import { useFileBrowserVirtualLayout } from './use-file-browser-virtual-layout';
+import { useNavigatorImageThumbnails } from '@/modules/navigator/composables/use-navigator-image-thumbnails';
+import { useVideoThumbnails } from './use-video-thumbnails';
+import { getNavigatorSortSettingsForLayout } from '@/modules/navigator/components/file-browser/utils/file-browser-sort-columns';
+
+function createNavigatorSortSettingsComputed(
+  getNavigator: () => UserSettingsNavigator,
+  layout: () => 'list' | 'grid' | undefined,
+) {
+  return computed(() => getNavigatorSortSettingsForLayout(getNavigator(), layout()));
+}
+
+function shouldApplyNavigatorSort(layout: 'list' | 'grid' | undefined) {
+  return layout === 'list' || layout === 'grid';
+}
+
+export interface UseFileBrowserOptions {
+  tab: () => Tab | undefined;
+  layout: () => 'list' | 'grid' | undefined;
+  externalEntries?: () => DirEntry[];
+  basePath?: () => string;
+  onSelectedEntriesChange: (entries: DirEntry[]) => void;
+  onCurrentDirEntryChange: (entry: DirEntry | null) => void;
+  onOpenEntry: (entry: DirEntry) => void;
+  componentRef: Ref<HTMLElement | null>;
+  isDefaultPane?: boolean;
+  isActivePane?: () => boolean;
+  entryDescription?: (entry: DirEntry) => string | undefined;
+}
+
+interface DataSource {
+  entries: ComputedRef<DirEntry[]>;
+  currentPath: ComputedRef<string>;
+  isDirectoryEmpty: ComputedRef<boolean>;
+  dirContents: Ref<DirContents | null>;
+  isLoading: Ref<boolean>;
+  isRefreshing: Ref<boolean>;
+  error: Ref<string | null>;
+  pathInput: Ref<string>;
+  canGoBack: Ref<boolean>;
+  canGoForward: Ref<boolean>;
+  parentPath: ComputedRef<string | null> | Ref<string | null>;
+  navigateToPath: (path: string) => Promise<void>;
+  navigateToEntry: (entry: DirEntry) => Promise<void>;
+  navigateToParent: () => Promise<void>;
+  navigateToHome: () => Promise<void>;
+  goBack: () => void;
+  goForward: () => void;
+  refresh: () => void;
+  handlePathSubmit: () => Promise<void>;
+  openFile: (path: string) => Promise<void>;
+  silentRefresh: () => void;
+  filterQuery: Ref<string>;
+  isFilterOpen: Ref<boolean>;
+  shouldFocusFilterInput: Ref<boolean>;
+  toggleFilter: () => void;
+  openFilter: () => void;
+  focusFilter: () => void;
+  clearFilterInputFocusRequest: () => void;
+  closeFilter: () => void;
+}
+
+function setupNavigationDataSource(
+  options: UseFileBrowserOptions,
+  onNavigationCleanup: () => void,
+): DataSource {
+  const userSettingsStore = useUserSettingsStore();
+  const dismissalLayerStore = useDismissalLayerStore();
+  const globalSearchStore = useGlobalSearchStore();
+  const workspacesStore = useWorkspacesStore();
+
+  const navigation = useFileBrowserNavigation(
+    options.tab,
+    dirEntry => options.onCurrentDirEntryChange(dirEntry),
+    onNavigationCleanup,
+  );
+
+  const filter = useFileBrowserFilter({
+    dismissalLayerStore,
+    globalSearchStore,
+    currentPath: navigation.currentPath,
+    componentRef: options.componentRef,
+    isDefaultPane: options.isDefaultPane ?? true,
+    isActivePane: options.isActivePane,
+  });
+
+  const showHiddenFiles = computed(() => userSettingsStore.userSettings.navigator.showHiddenFiles);
+  const sortSettings = createNavigatorSortSettingsComputed(
+    () => userSettingsStore.userSettings.navigator,
+    options.layout,
+  );
+  const sortColumn = computed(() => sortSettings.value.column);
+  const sortDirection = computed(() => sortSettings.value.direction);
+  const applySort = computed(() => shouldApplyNavigatorSort(options.layout()));
+  const {
+    entries: filteredEntries,
+    isDirectoryEmpty: filteredIsDirectoryEmpty,
+  } = useFileBrowserEntries(
+    navigation.dirContents,
+    filter.filterQuery,
+    showHiddenFiles,
+    sortColumn,
+    sortDirection,
+    applySort,
+  );
+
+  const tabRef = toRef(options.tab);
+
+  useFileBrowserLifecycle({
+    tabRef,
+    currentPath: navigation.currentPath,
+    readDir: navigation.readDir,
+    init: navigation.init,
+    shouldAddExternalPathToHistory: workspacesStore.consumeCurrentTabPathNavigationRequest,
+  });
+
+  return {
+    entries: computed(() => filteredEntries.value),
+    currentPath: computed(() => navigation.currentPath.value),
+    isDirectoryEmpty: computed(() => filteredIsDirectoryEmpty.value),
+    dirContents: navigation.dirContents,
+    isLoading: navigation.isLoading,
+    isRefreshing: navigation.isRefreshing,
+    error: navigation.error,
+    pathInput: navigation.pathInput,
+    canGoBack: navigation.canGoBack,
+    canGoForward: navigation.canGoForward,
+    parentPath: navigation.parentPath,
+    navigateToPath: navigation.navigateToPath,
+    navigateToEntry: navigation.navigateToEntry,
+    navigateToParent: navigation.navigateToParent,
+    navigateToHome: navigation.navigateToHome,
+    goBack: navigation.goBack,
+    goForward: navigation.goForward,
+    refresh: navigation.refresh,
+    handlePathSubmit: navigation.handlePathSubmit,
+    openFile: navigation.openFile,
+    silentRefresh: navigation.silentRefresh,
+    filterQuery: filter.filterQuery,
+    isFilterOpen: filter.isFilterOpen,
+    shouldFocusFilterInput: filter.shouldFocusFilterInput,
+    toggleFilter: filter.toggleFilter,
+    openFilter: filter.openFilter,
+    focusFilter: filter.focusFilter,
+    clearFilterInputFocusRequest: filter.clearFilterInputFocusRequest,
+    closeFilter: filter.closeFilter,
+  };
+}
+
+function setupExternalDataSource(options: UseFileBrowserOptions): DataSource {
+  const globalSearchStore = useGlobalSearchStore();
+  const userSettingsStore = useUserSettingsStore();
+  const getEntries = options.externalEntries ?? (() => []);
+  const getBasePath = options.basePath ?? (() => '');
+
+  const externalDirContents = computed(() => ({ entries: getEntries() }));
+  const showAllEntries = computed(() => true);
+  const emptyFilterQuery = ref('');
+  const sortSettings = createNavigatorSortSettingsComputed(
+    () => userSettingsStore.userSettings.navigator,
+    options.layout,
+  );
+  const sortColumn = computed(() => sortSettings.value.column);
+  const sortDirection = computed(() => sortSettings.value.direction);
+  const applySort = computed(() => shouldApplyNavigatorSort(options.layout()));
+  const {
+    entries: sortedEntries,
+    isDirectoryEmpty,
+  } = useFileBrowserEntries(
+    externalDirContents,
+    emptyFilterQuery,
+    showAllEntries,
+    sortColumn,
+    sortDirection,
+    applySort,
+  );
+
+  return {
+    entries: sortedEntries,
+    currentPath: computed(() => getBasePath()),
+    isDirectoryEmpty,
+    dirContents: ref(null),
+    isLoading: ref(false),
+    isRefreshing: ref(false),
+    error: ref(null),
+    pathInput: ref(''),
+    canGoBack: ref(false),
+    canGoForward: ref(false),
+    parentPath: ref(null),
+    navigateToPath: async () => {},
+    navigateToEntry: async () => {},
+    navigateToParent: async () => {},
+    navigateToHome: async () => {},
+    goBack: () => {},
+    goForward: () => {},
+    refresh: () => {},
+    handlePathSubmit: async () => {},
+    openFile: async () => {},
+    silentRefresh: () => {
+      globalSearchStore.search();
+    },
+    filterQuery: ref(''),
+    isFilterOpen: ref(false),
+    shouldFocusFilterInput: ref(false),
+    toggleFilter: () => {},
+    openFilter: () => {},
+    focusFilter: () => {},
+    clearFilterInputFocusRequest: () => {},
+    closeFilter: () => {},
+  };
+}
+
+export function useFileBrowser(options: UseFileBrowserOptions) {
+  const isExternalMode = !!options.externalEntries;
+  const quickViewStore = useQuickViewStore();
+  const internalDropHandler = useFileBrowserInternalDropHandler();
+
+  const dataSource = isExternalMode
+    ? setupExternalDataSource(options)
+    : setupNavigationDataSource(options, () => {
+        selection.clearSelection();
+        selection.resetMouseState();
+      });
+  const visualEntries = computed(() => dataSource.entries.value);
+
+  let openPropertiesForSelection: (entries: DirEntry[]) => void = () => {};
+
+  const selection = useFileBrowserSelection(
+    visualEntries,
+    dataSource.currentPath,
+    selectedItems => options.onSelectedEntriesChange(selectedItems),
+    async (entry) => {
+      if (isExternalMode) {
+        options.onOpenEntry(entry);
+        return;
+      }
+
+      if (entry.is_dir) {
+        await dataSource.navigateToEntry(entry);
+      }
+      else {
+        await dataSource.openFile(entry.path);
+      }
+    },
+    (entries) => {
+      openPropertiesForSelection(entries);
+    },
+    dataSource.silentRefresh,
+  );
+
+  const virtualLayout = useFileBrowserVirtualLayout({
+    entries: visualEntries,
+    layout: options.layout,
+    entryDescription: options.entryDescription,
+  });
+  const linkMetadata = useFileBrowserLinkMetadata({
+    enabled: !isExternalMode,
+    currentPath: dataSource.currentPath,
+    directoryEntries: computed(() => dataSource.dirContents.value?.entries ?? []),
+    visibleRows: virtualLayout.visibleRows,
+    layout: options.layout,
+  });
+  useFileBrowserItemCounts({
+    enabled: !isExternalMode,
+    currentPath: dataSource.currentPath,
+    directoryEntries: computed(() => dataSource.dirContents.value?.entries ?? []),
+    visibleRows: virtualLayout.visibleRows,
+    layout: options.layout,
+  });
+
+  const { entriesContainerRef, setEntriesContainerRef } = useFileBrowserFocus({
+    entries: visualEntries,
+    pendingFocusRequest: selection.pendingFocusRequest,
+    currentPath: dataSource.currentPath,
+    selectEntryByPath: selection.selectEntryByPath,
+    clearPendingFocusRequest: selection.clearPendingFocusRequest,
+    scrollToPath: virtualLayout.scrollToPath,
+    getEntryElement: virtualLayout.getEntryElement,
+  });
+
+  const videoThumbnails = !isExternalMode
+    ? useVideoThumbnails()
+    : {
+        getVideoThumbnail: () => undefined,
+        cancelVideoThumbnail: () => undefined,
+        clearThumbnails: () => undefined,
+      };
+  const imageThumbnails = !isExternalMode
+    ? useNavigatorImageThumbnails()
+    : {
+        getImageThumbnail: () => undefined,
+        getImageThumbnailPlaceholder: () => undefined,
+        shouldShowImageThumbnailFallback: () => true,
+        cancelImageThumbnail: () => undefined,
+        clearThumbnails: () => undefined,
+      };
+
+  const dialogs = useFileBrowserDialogs({
+    renameState: selection.renameState,
+    cancelRename: selection.cancelRename,
+    confirmRename: selection.confirmRename,
+    createNewItem: selection.createNewItem,
+  });
+
+  const drag = useFileBrowserDrag({
+    selectedEntries: selection.selectedEntries,
+    currentPath: dataSource.currentPath,
+    componentRef: options.componentRef,
+    isEntrySelected: selection.isEntrySelected,
+    replaceSelection: selection.replaceSelection,
+    entriesContainerRef,
+    disableBackgroundDrop: isExternalMode,
+    fallbackDropHandler: internalDropHandler,
+    onDrop: async (items, destinationPath, operation) => {
+      await selection.handleExternalDrop(
+        items.map(item => item.path),
+        destinationPath,
+        operation,
+      );
+    },
+  });
+
+  const externalDrop = useFileBrowserExternalDrop({
+    componentRef: options.componentRef,
+    currentPath: dataSource.currentPath,
+    entriesContainerRef,
+    disableBackgroundDrop: isExternalMode,
+    onDrop: (sourcePaths, targetPath, operation) => {
+      selection.handleExternalDrop(sourcePaths, targetPath, operation);
+    },
+    onUrlDrop: (urls, targetPath) => {
+      selection.handleExternalUrlDrop(urls, targetPath);
+    },
+  });
+
+  const actions = useFileBrowserActions({
+    contextMenu: selection.contextMenu,
+    selectedEntries: selection.selectedEntries,
+    visibleEntries: visualEntries,
+    quickViewStore,
+    handleContextMenuAction: selection.handleContextMenuAction,
+    openOpenWithDialog: dialogs.openOpenWithDialog,
+    handleEntryMouseDown: selection.handleEntryMouseDown,
+    handleEntryMouseUp: selection.handleEntryMouseUp,
+    handleDragMouseDown: drag.handleDragMouseDown,
+    isDragging: drag.isDragging,
+  });
+
+  openPropertiesForSelection = (entries) => {
+    void actions.openProperties(entries);
+  };
+
+  const keyboardNav = useFileBrowserKeyboardNavigation({
+    entries: visualEntries,
+    selectedEntries: selection.selectedEntries,
+    layout: options.layout,
+    selectEntryByPath: selection.selectEntryByPath,
+    scrollToPath: virtualLayout.scrollToPath,
+    getEntryElement: virtualLayout.getEntryElement,
+    getGridNavigationEntry: virtualLayout.getGridNavigationEntry,
+    goBack: dataSource.goBack,
+    openEntry: isExternalMode
+      ? (entry) => { options.onOpenEntry(entry); }
+      : async (entry) => {
+        if (entry.is_dir) {
+          await dataSource.navigateToEntry(entry);
+        }
+        else {
+          await dataSource.openFile(entry.path);
+        }
+      },
+    entriesContainerRef,
+  });
+
+  async function selectFirstEntry() {
+    if (visualEntries.value.length === 0) return;
+
+    const firstEntry = visualEntries.value[0];
+    selection.selectEntryByPath(firstEntry.path);
+    await virtualLayout.scrollToPath(firstEntry.path);
+    await nextTick();
+
+    const element = virtualLayout.getEntryElement(firstEntry.path);
+
+    if (element) {
+      element.focus({ preventScroll: true });
+    }
+  }
+
+  function handleVirtualScroll(event: Event) {
+    virtualLayout.handleScroll(event);
+
+    if (externalDrop.isExternalDragActive.value) {
+      externalDrop.refreshDropTargets();
+    }
+  }
+
+  async function applyFilteredFirstEntrySelection(entries: DirEntry[], isCancelled: () => boolean) {
+    await nextTick();
+
+    if (isCancelled()) {
+      return;
+    }
+
+    if (entries.length === 0) {
+      selection.clearSelection();
+      return;
+    }
+
+    const firstEntry = entries[0];
+    selection.selectEntryByPath(firstEntry.path);
+    await virtualLayout.scrollToPath(firstEntry.path);
+  }
+
+  watch([dataSource.filterQuery, visualEntries], ([filterQuery, entries], _oldValue, onCleanup) => {
+    let isCancelled = false;
+
+    onCleanup(() => {
+      isCancelled = true;
+    });
+
+    if (!filterQuery.trim()) {
+      return;
+    }
+
+    if (selection.pendingFocusRequest.value != null) {
+      return;
+    }
+
+    applyFilteredFirstEntrySelection(entries, () => isCancelled);
+  });
+
+  if (!isExternalMode) {
+    onMounted(() => {
+      registerNavigationProvider({
+        getCurrentPath: () => dataSource.currentPath.value || null,
+        getSelectedEntries: () => selection.selectedEntries.value,
+      });
+
+      registerNavigateToPath(dataSource.navigateToPath);
+      registerOpenNavigatorFile(dataSource.openFile);
+    });
+
+    onUnmounted(() => {
+      imageThumbnails.clearThumbnails();
+      videoThumbnails.clearThumbnails();
+      unregisterNavigationProvider();
+      unregisterNavigateToPath();
+      unregisterOpenNavigatorFile();
+    });
+
+    watch(dataSource.currentPath, (newPath) => {
+      imageThumbnails.clearThumbnails();
+      videoThumbnails.clearThumbnails();
+      emitPathChange(newPath);
+    });
+
+    watch(selection.selectedEntries, (newSelection) => {
+      emitSelectionChange(newSelection);
+    }, { deep: true });
+  }
+
+  return {
+    isExternalMode,
+
+    entries: visualEntries,
+    currentPath: dataSource.currentPath,
+    isDirectoryEmpty: dataSource.isDirectoryEmpty,
+    dirContents: dataSource.dirContents,
+    isLoading: dataSource.isLoading,
+    isLinkMetadataLoading: linkMetadata.isLinkMetadataLoading,
+    isRefreshing: dataSource.isRefreshing,
+    error: dataSource.error,
+
+    pathInput: dataSource.pathInput,
+    canGoBack: dataSource.canGoBack,
+    canGoForward: dataSource.canGoForward,
+    parentPath: dataSource.parentPath,
+    navigateToPath: dataSource.navigateToPath,
+    navigateToParent: dataSource.navigateToParent,
+    navigateToHome: dataSource.navigateToHome,
+    goBack: dataSource.goBack,
+    goForward: dataSource.goForward,
+    refresh: dataSource.refresh,
+    handlePathSubmit: dataSource.handlePathSubmit,
+    openFile: dataSource.openFile,
+
+    filterQuery: dataSource.filterQuery,
+    isFilterOpen: dataSource.isFilterOpen,
+    shouldFocusFilterInput: dataSource.shouldFocusFilterInput,
+    toggleFilter: dataSource.toggleFilter,
+    openFilter: dataSource.openFilter,
+    focusFilter: dataSource.focusFilter,
+    clearFilterInputFocusRequest: dataSource.clearFilterInputFocusRequest,
+    closeFilter: dataSource.closeFilter,
+
+    selectedEntries: selection.selectedEntries,
+    contextMenu: selection.contextMenu,
+    renameState: selection.renameState,
+    isEntrySelected: selection.isEntrySelected,
+    clearSelection: selection.clearSelection,
+    selectAll: selection.selectAll,
+    selectEntryByPath: selection.selectEntryByPath,
+    requestFocusEntryAfterRefresh: selection.requestFocusEntryAfterRefresh,
+    armFocusRevealStaleRestoreGuard: selection.armFocusRevealStaleRestoreGuard,
+    removeFromSelection: selection.removeFromSelection,
+    handleEntryFocus: selection.handleEntryFocus,
+    handleEntryContextMenu: selection.handleEntryContextMenu,
+    handleBackgroundContextMenu: selection.handleBackgroundContextMenu,
+    closeContextMenu: selection.closeContextMenu,
+    copyItems: selection.copyItems,
+    cutItems: selection.cutItems,
+    createLinksForEntries: selection.createLinksForEntries,
+    pasteItems: selection.pasteItems,
+    deleteItems: selection.deleteItems,
+    startRename: selection.startRename,
+    conflictDialogState: selection.conflictDialogState,
+    handleConflictResolution: selection.handleConflictResolution,
+    handleConflictCancel: selection.handleConflictCancel,
+    topLevelNameConflictDialogState: selection.topLevelNameConflictDialogState,
+    handleTopLevelNameConflictRename: selection.handleTopLevelNameConflictRename,
+    handleTopLevelNameConflictMerge: selection.handleTopLevelNameConflictMerge,
+    handleTopLevelNameConflictCancel: selection.handleTopLevelNameConflictCancel,
+    permanentDeleteConfirm: selection.permanentDeleteConfirm,
+
+    getImageThumbnail: imageThumbnails.getImageThumbnail,
+    getImageThumbnailPlaceholder: imageThumbnails.getImageThumbnailPlaceholder,
+    shouldShowImageThumbnailFallback: imageThumbnails.shouldShowImageThumbnailFallback,
+    cancelImageThumbnail: imageThumbnails.cancelImageThumbnail,
+    getVideoThumbnail: videoThumbnails.getVideoThumbnail,
+    cancelVideoThumbnail: videoThumbnails.cancelVideoThumbnail,
+    entriesContainerRef,
+    setEntriesContainerRef,
+    setScrollViewportRef: virtualLayout.setScrollViewportRef,
+    handleVirtualScroll,
+    virtualRows: virtualLayout.rows,
+    visibleVirtualRows: virtualLayout.visibleRows,
+    activeGridSectionRow: virtualLayout.activeGridSectionRow,
+    virtualTotalSize: virtualLayout.totalSize,
+    virtualOffsetY: virtualLayout.offsetY,
+    virtualSpacerStyle: virtualLayout.spacerStyle,
+    virtualWindowStyle: virtualLayout.windowStyle,
+    virtualGridColumnCount: virtualLayout.gridColumnCount,
+
+    openWithState: dialogs.openWithState,
+    newItemDialogState: dialogs.newItemDialogState,
+    isRenameDialogOpen: dialogs.isRenameDialogOpen,
+    isNewItemDialogOpen: dialogs.isNewItemDialogOpen,
+    openOpenWithDialog: dialogs.openOpenWithDialog,
+    closeOpenWithDialog: dialogs.closeOpenWithDialog,
+    openNewItemDialog: dialogs.openNewItemDialog,
+    handleRenameConfirm: dialogs.handleRenameConfirm,
+    handleRenameCancel: dialogs.handleRenameCancel,
+    handleNewItemConfirm: dialogs.handleNewItemConfirm,
+    handleNewItemCancel: dialogs.handleNewItemCancel,
+
+    isDragging: drag.isDragging,
+    dragItems: drag.dragItems,
+    dragOperationType: drag.operationType,
+    dragCursorX: drag.cursorX,
+    dragCursorY: drag.cursorY,
+    isCrossPaneTarget: drag.isCrossPaneTarget,
+
+    isExternalDragActive: externalDrop.isExternalDragActive,
+    externalDragItemCount: externalDrop.externalDragItemCount,
+    externalDragOperationType: externalDrop.externalDragOperationType,
+    isUrlDrop: externalDrop.isUrlDrop,
+    isCurrentDirLocked: externalDrop.isCurrentDirLocked,
+    isTargetingEntry: externalDrop.isTargetingEntry,
+
+    onContextMenuAction: actions.onContextMenuAction,
+    onEntryMouseDown: actions.onEntryMouseDown,
+    onEntryMouseUp: actions.onEntryMouseUp,
+
+    quickView: actions.quickView,
+    printEntry: actions.printEntry,
+    openProperties: actions.openProperties,
+    selectFirstEntry,
+
+    navigateUp: keyboardNav.navigateUp,
+    navigateDown: keyboardNav.navigateDown,
+    navigateLeft: keyboardNav.navigateLeft,
+    navigateRight: keyboardNav.navigateRight,
+    openSelected: keyboardNav.openSelected,
+  };
+}

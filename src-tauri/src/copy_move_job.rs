@@ -71,7 +71,7 @@ pub async fn start_copy_move_job(
 
     let app_progress = app.clone();
     let job_id_progress = request.job_id.clone();
-    let emit_progress = tokio::spawn(async move {
+    let emit_progress = tauri::async_runtime::spawn(async move {
         while let Some((percent, detail, processed_count, total_count)) = progress_rx.recv().await {
             let payload = CopyMoveJobProgressPayload {
                 job_id: job_id_progress.clone(),
@@ -92,7 +92,7 @@ pub async fn start_copy_move_job(
     let conflict_resolution = request.conflict_resolution;
     let per_path_resolutions = request.per_path_resolutions;
 
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         let work_result = tokio::task::spawn_blocking(move || {
             let mut progress_box: Box<dyn FnMut(u32, String, Option<u64>, Option<u64>)> =
                 Box::new(move |percent, detail, processed_count, total_count| {

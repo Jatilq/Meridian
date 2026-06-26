@@ -29,6 +29,7 @@ import {
   ListIcon,
   CircleHelpIcon,
   EllipsisVerticalIcon,
+  BotIcon,
 } from '@lucide/vue';
 import { useUserSettingsStore } from '@/stores/storage/user-settings';
 import { useShortcutsStore } from '@/stores/runtime/shortcuts';
@@ -41,12 +42,14 @@ type LayoutType = 'list' | 'grid';
 const props = defineProps<{
   isSplitView: boolean;
   showInfoPanel: boolean;
+  showAiPanel: boolean;
   isGlobalSearchOpen: boolean;
 }>();
 
 const emit = defineEmits<{
   'toggle-split-view': [];
   'toggle-info-panel': [];
+  'toggle-ai-panel': [];
   'set-split-view-mode': [mode: SplitViewMode];
 }>();
 
@@ -269,6 +272,24 @@ function handleToggleInfoPanelDynamicSize(enabled: boolean) {
         </TooltipTrigger>
         <TooltipContent>
           {{ t('settings.infoPanel.title') }}
+        </TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger as-child>
+          <Button
+            variant="ghost"
+            size="icon"
+            :class="{ 'navigator-toolbar-actions__button--active': props.showAiPanel }"
+            @click="emit('toggle-ai-panel')"
+          >
+            <BotIcon
+              :size="16"
+              class="navigator-toolbar-actions__icon"
+            />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>
+          {{ t('aiPanel.title') }}
         </TooltipContent>
       </Tooltip>
     </div>

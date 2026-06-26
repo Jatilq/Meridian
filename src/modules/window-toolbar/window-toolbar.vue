@@ -11,6 +11,8 @@ import WindowActions from './window-actions.vue';
 import { GlobalSearchToolbarButton } from '@/modules/global-search';
 import { LanShareReplaceDialog, LanShareToolbarButton } from '@/modules/lan-share';
 import { StatusCenterToolbarButton } from '@/modules/status-center';
+import { AiPanelToolbarButton } from '@/modules/ai-panel';
+import { DownloaderToolbarButton } from '@/modules/downloader';
 import CommandPaletteToolbarButton from '@/modules/extensions/components/command-palette-toolbar-button.vue';
 import { ProgressiveBlur, type ProgressiveBlurLayer } from '@/components/ui/progressive-blur';
 
@@ -80,6 +82,8 @@ const toolbarProgressiveBlurLayers: ProgressiveBlurLayer[] = [
         <LanShareToolbarButton v-if="shouldShowNavigatorToolbarExtras" />
         <StatusCenterToolbarButton v-if="shouldShowNavigatorToolbarExtras" />
         <GlobalSearchToolbarButton v-if="shouldShowGlobalSearchButton" />
+        <AiPanelToolbarButton />
+        <DownloaderToolbarButton />
       </div>
       <WindowActions />
     </div>

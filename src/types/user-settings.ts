@@ -138,7 +138,8 @@ export type ShortcutId
     | 'reloadCurrentDirectory'
     | 'uiZoomIncrease'
     | 'uiZoomDecrease'
-    | 'toggleFullscreen';
+    | 'toggleFullscreen'
+    | 'toggleAiPanel';
 
 export type UserShortcuts = Partial<Record<ShortcutId, UserShortcutStoredValue>>;
 
@@ -156,6 +157,21 @@ export type AppUpdatesSettings = {
 export type ChangelogSettings = {
   showOnUpdate: boolean;
   lastSeenVersion: string;
+};
+
+export type AiPanelSettings = {
+  endpointUrl: string;
+  model: string;
+  omnixEnabled: boolean;
+};
+
+export type DownloaderSettings = {
+  autoSaveFolder: string;
+};
+
+export type MeridianSettings = {
+  aiPanel: AiPanelSettings;
+  downloader: DownloaderSettings;
 };
 
 export type TextSettings = {
@@ -193,6 +209,7 @@ export type UserSettings = {
   launchAtStartupHidden: boolean;
   appUpdates: AppUpdatesSettings;
   changelog: ChangelogSettings;
+  meridian: MeridianSettings;
 };
 
 export type UserSettingsGlobalSearch = {

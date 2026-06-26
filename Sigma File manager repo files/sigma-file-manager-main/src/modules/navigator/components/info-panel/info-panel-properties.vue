@@ -1,0 +1,549 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later
+License: GNU GPLv3 or later. See the license file in the project root for more information.
+Copyright © 2021 - present Aleksey Hoffman. All rights reserved.
+-->
+
+<script setup lang="ts">
+import { computed, watch } from 'vue';
+import { LoaderCircleIcon, XIcon, RefreshCwIcon } from '@lucide/vue';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Button } from '@/components/ui/button';
+import DateHoverDisplay from '@/components/ui/date-hover-display/date-hover-display.vue';
+import { useI18n } from 'vue-i18n';
+import {
+  formatBytes,
+  formatRelativeTime,
+} from '@/modules/navigator/components/file-browser/utils';
+import { useRelativeDateDisplayClock } from '@/composables/use-relative-date-display';
+import { useDirSizesStore } from '@/stores/runtime/dir-sizes';
+import { useLinkMetadataStore } from '@/stores/runtime/link-metadata';
+import { useUserSettingsStore } from '@/stores/storage/user-settings';
+import type { DirEntry } from '@/types/dir-entry';
+import type { RelativeTimeTranslations } from '@/modules/navigator/components/file-browser/utils';
+import { getPathDisplayValue } from '@/utils/normalize-path';
+import { formatRelativeDateDisplay } from '@/utils/relative-date-display';
+import {
+  getDirEntryKindKey,
+  getDirEntryLinksDisplay,
+  getDirEntryLinkStatusKey,
+} from '@/utils/dir-entry-link-metadata';
+const props = withDefaults(defineProps<{
+  selectedEntry: DirEntry | null;
+  orientation?: 'vertical' | 'compact';
+  propertyLayout?: 'rows' | 'stacked';
+  useInternalScroll?: boolean;
+}>(), {
+  orientation: 'vertical',
+  propertyLayout: 'rows',
+  useInternalScroll: true,
+});
+
+const { t, locale } = useI18n();
+const dirSizesStore = useDirSizesStore();
+const linkMetadataStore = useLinkMetadataStore();
+const userSettingsStore = useUserSettingsStore();
+
+const selectedEntryWithMetadata = computed(() => {
+  return props.selectedEntry
+    ? linkMetadataStore.mergeEntry(props.selectedEntry)
+    : null;
+});
+
+const { clockRef: relativeDateClock } = useRelativeDateDisplayClock(() => {
+  const entry = props.selectedEntry;
+
+  if (!entry) {
+    return false;
+  }
+
+  return !!(entry.modified_time || entry.created_time);
+});
+
+function formatPropertyDate(timestamp: number, relativeDisplay = true): string {
+  return formatRelativeDateDisplay({
+    timestamp,
+    referenceNowMs: relativeDateClock.value,
+    dateTimeOptions: userSettingsStore.userSettings.dateTime,
+    appLocale: locale.value,
+    translate: t,
+    relativeDisplay,
+  });
+}
+
+const dirSizeInfo = computed(() => {
+  if (!props.selectedEntry?.is_dir) return null;
+  return dirSizesStore.getSize(props.selectedEntry.path);
+});
+
+const isDirSizeLoading = computed(() => {
+  if (!props.selectedEntry?.is_dir) return false;
+  return dirSizesStore.isLoading(props.selectedEntry.path);
+});
+
+const showGetSizeButton = computed(() => {
+  if (!props.selectedEntry?.is_dir) return false;
+  const info = dirSizeInfo.value;
+  return !info;
+});
+
+const showRecalculateButton = computed(() => {
+  if (!props.selectedEntry?.is_dir) return false;
+  const info = dirSizeInfo.value;
+  if (!info) return false;
+
+  return info.status === 'Complete';
+});
+
+const dirSizeDisplay = computed(() => {
+  const info = dirSizeInfo.value;
+  if (!info) return null;
+  if (info.status === 'Loading' && info.size > 0) return formatBytes(info.size);
+  if (info.status === 'Loading') return null;
+  if (info.status === 'Complete') return formatBytes(info.size);
+  return null;
+});
+
+const relativeTimeTranslations = computed<RelativeTimeTranslations>(() => ({
+  justNow: t('relativeTime.justNow'),
+  minutesAgo: (count: number) => t('relativeTime.minutesAgo', count),
+  hoursAgo: (count: number) => t('relativeTime.hoursAgo', count),
+  daysAgo: (count: number) => t('relativeTime.daysAgo', count),
+}));
+
+const calculatedAgo = computed(() => {
+  const info = dirSizeInfo.value;
+  if (!info) return null;
+  if (info.status === 'Loading') return null;
+  if (!info.calculatedAt) return null;
+
+  return formatRelativeTime(info.calculatedAt, relativeTimeTranslations.value);
+});
+
+async function handleGetSize() {
+  if (!props.selectedEntry?.is_dir) return;
+  await dirSizesStore.requestSizeForce(props.selectedEntry.path);
+}
+
+async function handleCancelSize() {
+  if (!props.selectedEntry?.is_dir) return;
+  await dirSizesStore.cancelSize(props.selectedEntry.path);
+}
+
+interface PropertyValueItem {
+  title: string;
+  value: string;
+}
+
+interface PropertyDateItem {
+  title: string;
+  dateTimestamp: number;
+  relativeDisplay?: boolean;
+}
+
+type PropertyItem = PropertyValueItem | PropertyDateItem;
+
+const properties = computed<PropertyItem[]>(() => {
+  if (!selectedEntryWithMetadata.value) return [];
+
+  const entry = selectedEntryWithMetadata.value;
+  const items: PropertyItem[] = [];
+  const linkStatusKey = getDirEntryLinkStatusKey(entry);
+
+  items.push({
+    title: t('type'),
+    value: entry.is_dir ? t('directory') : entry.mime || t('file'),
+  });
+  items.push({
+    title: t('path'),
+    value: getPathDisplayValue(entry.path),
+  });
+
+  if (entry.is_dir && entry.item_count !== null) {
+    items.push({
+      title: t('items'),
+      value: t('fileBrowser.itemCount', { count: entry.item_count }),
+    });
+  }
+
+  if (entry.ext) {
+    items.push({
+      title: t('fileExtension'),
+      value: `.${entry.ext}`,
+    });
+  }
+
+  if (entry.modified_time) {
+    items.push({
+      title: t('modified'),
+      dateTimestamp: entry.modified_time,
+    });
+  }
+
+  if (entry.created_time) {
+    items.push({
+      title: t('created'),
+      dateTimestamp: entry.created_time,
+    });
+  }
+
+  if (entry.accessed_time) {
+    items.push({
+      title: t('accessed'),
+      dateTimestamp: entry.accessed_time,
+      relativeDisplay: false,
+    });
+  }
+
+  if (entry.is_symlink && !entry.link_type) {
+    items.push({
+      title: t('symlink'),
+      value: t('yes'),
+    });
+  }
+
+  if (entry.is_hidden) {
+    items.push({
+      title: t('hidden'),
+      value: t('yes'),
+    });
+  }
+
+  items.push({
+    title: t('fileBrowser.kind'),
+    value: t(getDirEntryKindKey(entry)),
+  });
+  items.push({
+    title: t('fileBrowser.links'),
+    value: getDirEntryLinksDisplay(entry),
+  });
+  items.push({
+    title: t('fileBrowser.linkTarget'),
+    value: entry.link_target ? getPathDisplayValue(entry.link_target) : '—',
+  });
+  items.push({
+    title: t('fileBrowser.linkStatus'),
+    value: linkStatusKey ? t(linkStatusKey) : '—',
+  });
+
+  return items;
+});
+
+const compactItems = computed<string[]>(() => {
+  if (!selectedEntryWithMetadata.value) return [];
+
+  const entry = selectedEntryWithMetadata.value;
+  const items: string[] = [];
+
+  const kindDisplay = entry.link_type
+    ? t(getDirEntryKindKey(entry))
+    : (entry.is_dir ? t('directory') : (entry.ext ? `.${entry.ext}` : t('file')));
+
+  items.push(kindDisplay);
+
+  if (entry.is_file) {
+    items.push(formatBytes(entry.size));
+  }
+  else if (entry.is_dir) {
+    if (dirSizeDisplay.value) {
+      items.push(dirSizeDisplay.value);
+    }
+
+    if (entry.item_count !== null) {
+      items.push(t('fileBrowser.itemCount', { count: entry.item_count }));
+    }
+  }
+
+  if (entry.modified_time) {
+    items.push(formatPropertyDate(entry.modified_time));
+  }
+
+  return items;
+});
+
+watch(
+  () => props.selectedEntry?.path,
+  (path) => {
+    if (!path) {
+      return;
+    }
+
+    linkMetadataStore
+      .requestMetadataBatch([path], {
+        includeShortcutTargets: true,
+        includeHardLinkCounts: true,
+      })
+      .catch((error: unknown) => {
+        console.error('Failed to load selected entry link metadata:', error);
+      });
+  },
+  { immediate: true },
+);
+</script>
+
+<template>
+  <div
+    v-if="orientation === 'compact'"
+    class="info-panel-properties info-panel-properties--compact"
+  >
+    <span
+      v-if="selectedEntry"
+      class="info-panel-properties__compact-text"
+    >
+      {{ compactItems.join(' · ') }}
+    </span>
+  </div>
+  <component
+    :is="useInternalScroll ? ScrollArea : 'div'"
+    v-else
+    class="info-panel-properties"
+    :class="{
+      'info-panel-properties--inline': !useInternalScroll,
+      'info-panel-properties--stacked': propertyLayout === 'stacked',
+    }"
+    :orientation="useInternalScroll ? 'vertical' : undefined"
+  >
+    <div
+      v-if="!selectedEntry"
+      class="info-panel-properties__empty"
+    >
+      {{ t('noData') }}
+    </div>
+    <div
+      v-else
+      class="info-panel-properties__list"
+    >
+      <div
+        v-if="selectedEntryWithMetadata?.is_file || selectedEntry?.is_dir"
+        class="info-panel-properties__item info-panel-properties__item--size"
+      >
+        <div class="info-panel-properties__title">
+          {{ t('size') }}
+        </div>
+        <div class="info-panel-properties__value info-panel-properties__value--action">
+          <template v-if="selectedEntryWithMetadata?.is_file">
+            {{ formatBytes(selectedEntryWithMetadata.size) }}
+          </template>
+          <template v-else-if="isDirSizeLoading">
+            <LoaderCircleIcon
+              :size="14"
+              class="info-panel-properties__spinner"
+            />
+            <div class="info-panel-properties__size-content">
+              <span v-if="dirSizeDisplay">{{ dirSizeDisplay }}</span>
+              <span v-else>{{ t('calculating') }}...</span>
+            </div>
+            <Button
+              size="xs"
+              variant="ghost"
+              class="info-panel-properties__cancel-btn"
+              @click="handleCancelSize"
+            >
+              <XIcon :size="14" />
+            </Button>
+          </template>
+          <template v-else-if="dirSizeDisplay && !showGetSizeButton">
+            <div class="info-panel-properties__size-content">
+              <span>{{ dirSizeDisplay }}</span>
+              <span
+                v-if="calculatedAgo"
+                class="info-panel-properties__calculated-ago"
+              >{{ t('calculatedAgo', { time: calculatedAgo }) }}</span>
+            </div>
+            <Button
+              v-if="showRecalculateButton"
+              size="xs"
+              variant="ghost"
+              class="info-panel-properties__recalculate-btn"
+              :title="t('recalculate')"
+              @click="handleGetSize"
+            >
+              <RefreshCwIcon :size="12" />
+            </Button>
+          </template>
+          <Button
+            v-else-if="showGetSizeButton"
+            size="xs"
+            variant="secondary"
+            @click="handleGetSize"
+          >
+            {{ t('getSize') }}
+          </Button>
+        </div>
+      </div>
+
+      <div
+        v-for="(item, index) in properties"
+        :key="index"
+        class="info-panel-properties__item"
+      >
+        <div class="info-panel-properties__title">
+          {{ item.title }}
+        </div>
+        <div class="info-panel-properties__value">
+          <DateHoverDisplay
+            v-if="'dateTimestamp' in item"
+            :timestamp="item.dateTimestamp"
+            :reference-now="relativeDateClock"
+            :relative-display="item.relativeDisplay ?? true"
+          />
+          <template v-else>
+            {{ item.value }}
+          </template>
+        </div>
+      </div>
+    </div>
+  </component>
+</template>
+
+<style scoped>
+.info-panel-properties {
+  flex: 1;
+  padding: 12px 16px;
+}
+
+.info-panel-properties--compact {
+  overflow: hidden;
+  min-width: 0;
+  padding: 0;
+}
+
+.info-panel-properties--inline {
+  flex: none;
+}
+
+.info-panel-properties__empty {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  color: hsl(var(--muted-foreground));
+  font-size: 13px;
+}
+
+.info-panel-properties__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.info-panel-properties__item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+@container info-panel (width >= 250px) {
+  .info-panel-properties:not(.info-panel-properties--stacked) .info-panel-properties__item {
+    display: grid;
+    align-items: start;
+    gap: 2px 12px;
+    grid-template-columns: minmax(80px, 24%) minmax(0, 1fr);
+  }
+
+  .info-panel-properties:not(.info-panel-properties--stacked) .info-panel-properties__item--size {
+    align-items: center;
+  }
+
+  .info-panel-properties:not(.info-panel-properties--stacked) .info-panel-properties__title {
+    line-height: 1.4;
+  }
+}
+
+.info-panel-properties__title {
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  line-height: inherit;
+  text-transform: uppercase;
+}
+
+.info-panel-properties__value {
+  color: hsl(var(--foreground));
+  font-size: 13px;
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+.info-panel-properties__compact-text {
+  overflow: hidden;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.info-panel-properties__item--size {
+  min-height: var(--info-panel-properties-header-height);
+  align-items: stretch;
+}
+
+.info-panel-properties__value--action {
+  display: flex;
+  width: 100%;
+  height: var(--info-panel-properties-header-height);
+  min-height: var(--info-panel-properties-header-height);
+  align-items: center;
+  gap: 6px;
+}
+
+.info-panel-properties__size-content {
+  display: flex;
+  overflow: hidden;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0;
+  line-height: 1.15;
+}
+
+.info-panel-properties__calculated-ago {
+  overflow: hidden;
+  color: hsl(var(--muted-foreground) / 70%);
+  font-size: 11px;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.info-panel-properties__spinner {
+  animation: spin 1s linear infinite;
+  color: hsl(var(--muted-foreground));
+}
+
+.info-panel-properties__cancel-btn {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  margin-left: auto;
+  color: hsl(var(--muted-foreground));
+}
+
+.info-panel-properties__cancel-btn:hover {
+  color: hsl(var(--destructive));
+}
+
+.info-panel-properties__recalculate-btn {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  margin-left: auto;
+  color: hsl(var(--muted-foreground));
+  opacity: 0.5;
+  transition: opacity 0.15s ease;
+}
+
+.info-panel-properties__recalculate-btn:hover {
+  color: hsl(var(--primary));
+  opacity: 1;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+</style>

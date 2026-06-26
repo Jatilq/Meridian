@@ -1,0 +1,24 @@
+{
+  "identifier": "6609AlekseyHoffman.SigmaFileManager",
+  "publisher": "CN=Microsoft Store Publisher",
+  "publisherDisplayName": "Aleksey Hoffman",
+  "executable": "sigma-file-manager.exe",
+  "capabilities": {
+    "general": [
+      "internetClient"
+    ]
+  },
+  "extensions": {
+    "shareTarget": false,
+    "fileAssociations": [],
+    "protocolHandlers": []
+  },
+  "signing": {
+    "pfx": null,
+    "pfxPassword": null
+  },
+  "resourceIndex": {
+    "enabled": false,
+    "keepConfig": false
+  }
+}

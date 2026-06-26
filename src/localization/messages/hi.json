@@ -436,6 +436,16 @@
         "title": "सिग्मा फ़ाइल प्रबंधक को डिफ़ॉल्ट फ़ाइल प्रबंधक के रूप में सेट करें",
         "description": "यह विकल्प सिस्टम रजिस्ट्री को संशोधित करता है और आपके डिवाइस पर अप्रत्याशित दुष्प्रभाव हो सकता है। स्वयं के जोखिम पर आगे बढ़ें।"
       }
+    },
+    "meridian": {
+      "aiPanel": {
+        "title": "AI Panel",
+        "description": "Configure the AI assistant panel endpoint and model"
+      },
+      "downloader": {
+        "title": "Downloader",
+        "description": "Configure download settings"
+      }
     }
   },
   "projectGithubButtons": {
@@ -452,7 +462,8 @@
     "dataStorage": "आधार सामग्री भंडारण",
     "extensions": "एक्सटेंशन",
     "stats": "आँकड़े",
-    "experimental": "प्रयोगात्मक"
+    "experimental": "प्रयोगात्मक",
+    "meridian": "Meridian"
   },
   "settingsTags": {
     "language": "भाषा",
@@ -480,7 +491,9 @@
     "whatsNew": "नया क्या है, चेंजलॉग, रिलीज़ नोट्स, संस्करण, अपडेट, समाचार",
     "autostart": "ऑटोस्टार्ट, स्टार्टअप, बूट, लॉगिन, लॉन्च, सिस्टम, वेक",
     "extensions": "एक्सटेंशन, प्लगइन्स, ऐडऑन, कॉन्फ़िगरेशन, सेटिंग्स",
-    "infoPanelPreview": "info, panel, preview, image, thumbnail, memory, original, video, mute, autoplay"
+    "infoPanelPreview": "info, panel, preview, image, thumbnail, memory, original, video, mute, autoplay",
+    "aiPanel": "ai, artificial intelligence, panel, chat, endpoint, model, omnix",
+    "downloader": "downloader, download, queue, history, yt-dlp, save folder"
   },
   "drag": {
     "holdShiftToChangeMode": "मोड बदलने के लिए [Shift] दबाए रखें",

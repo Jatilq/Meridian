@@ -16,7 +16,7 @@ import {
 import { BUILTIN_NAVIGATOR_ICON_THEME_IDS } from '@/types/icon-theme';
 
 export const USER_SETTINGS_SCHEMA_VERSION_KEY = '__schemaVersion';
-export const USER_SETTINGS_SCHEMA_VERSION = 18;
+export const USER_SETTINGS_SCHEMA_VERSION = 19;
 
 export const DEFAULT_GLOBAL_SEARCH_IGNORED_PATHS = [
   '/node_modules',
@@ -413,6 +413,17 @@ async function migrateUserSettingsStep(storage: StorageAdapter, fromVersion: num
     await setDefaultBooleanIfMissing(storage, 'navigator.infoPanel.autoplayVideoPreview', false);
   }
 
+  if (fromVersion === 18 && toVersion === 19) {
+    await setDefaultObjectIfMissing(storage, 'meridian.aiPanel', {
+      endpointUrl: 'http://localhost:7770/api/text',
+      model: '',
+      omnixEnabled: false,
+    });
+    await setDefaultObjectIfMissing(storage, 'meridian.downloader', {
+      autoSaveFolder: '',
+    });
+  }
+
   if (fromVersion === 6 && toVersion === 7) {
     const appData = await appDataDir();
     const mediaDir = `${appData.replace(/\\/g, '/')}/user-data/media`.replace(/\/+/g, '/');
@@ -465,6 +476,18 @@ async function setDefaultBooleanIfMissing(
   const existingValue = await storage.get<unknown>(key);
 
   if (typeof existingValue !== 'boolean') {
+    await storage.set(key, defaultValue);
+  }
+}
+
+async function setDefaultObjectIfMissing(
+  storage: StorageAdapter,
+  key: string,
+  defaultValue: Record<string, unknown>,
+) {
+  const existingValue = await storage.get<unknown>(key);
+
+  if (!existingValue || typeof existingValue !== 'object' || Array.isArray(existingValue)) {
     await storage.set(key, defaultValue);
   }
 }

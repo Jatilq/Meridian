@@ -114,6 +114,19 @@ const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
     isReadOnly: false,
   },
   {
+    id: 'toggleAiPanel',
+    labelKey: 'shortcuts.showHideAiPanel',
+    defaultKeys: {
+      ctrl: true,
+      key: ' ',
+    },
+    scope: 'global',
+    conditions: {
+      dialogIsOpened: false,
+    },
+    isReadOnly: false,
+  },
+  {
     id: 'toggleFilter',
     labelKey: 'shortcuts.focusUnfocusFilterField',
     defaultKeys: {

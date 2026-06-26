@@ -1,0 +1,1113 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// License: GNU GPLv3 or later. See the license file in the project root for more information.
+// Copyright © 2021 - present Aleksey Hoffman. All rights reserved.
+
+import { ref, markRaw, nextTick, type Ref } from 'vue';
+import { useI18n } from 'vue-i18n';
+import { invoke } from '@tauri-apps/api/core';
+import type { DirEntry } from '@/types/dir-entry';
+import type { ContextMenuAction } from '@/modules/navigator/components/file-browser/types';
+import { useWorkspacesStore } from '@/stores/storage/workspaces';
+import { useUserStatsStore } from '@/stores/storage/user-stats';
+import {
+  useClipboardStore,
+  type FileOperationResult,
+} from '@/stores/runtime/clipboard';
+import { useDirSizesStore } from '@/stores/runtime/dir-sizes';
+import { useLinkMetadataStore } from '@/stores/runtime/link-metadata';
+import { useDeleteJobsStore } from '@/stores/runtime/delete-jobs';
+import { toast, ToastProgress, ToastStatic } from '@/components/ui/toaster';
+import { useLanShare } from '@/composables/use-lan-share';
+import { useCopyMoveWithConflicts } from '@/composables/use-copy-move-with-conflicts';
+import normalizePath, { getPathDisplayName } from '@/utils/normalize-path';
+import { isVirtualLocationPath } from '@/utils/virtual-locations';
+import {
+  getSharedSourceDirectory,
+  isDestinationInsideAnySourceDirectory,
+} from '@/utils/file-operation-paths';
+import { useFileBrowserClickSelection } from '@/modules/navigator/components/file-browser/composables/use-file-browser-click-selection';
+import { createIndexedFileName, safeFileNameFromUrl } from '@/utils/remote-file';
+import { basenameFromPath } from '@/utils/source-display-name';
+import { usePermanentDeleteConfirm } from '@/composables/use-permanent-delete-confirm';
+import { usePlatformStore } from '@/stores/runtime/platform';
+import { isContextMenuActionVisible } from '@/modules/navigator/components/file-browser/utils/context-menu-action-visibility';
+import { resolveNavigableItemTarget } from '@/utils/resolve-navigable-item-target';
+import type { CreateLinksResult, LinkCreationKind } from '@/utils/link-operations';
+
+export const FILE_BROWSER_REVEAL_STALE_FOCUS_GUARD_MS = 500;
+
+export function useFileBrowserSelection(
+  entriesRef: Ref<DirEntry[]>,
+  currentPathRef: Ref<string>,
+  onSelect: (entries: DirEntry[]) => void,
+  onOpen: (entry: DirEntry) => void,
+  onOpenProperties: (entries: DirEntry[]) => void,
+  onRefresh: () => void,
+) {
+  const { t } = useI18n();
+  const platformStore = usePlatformStore();
+  const workspacesStore = useWorkspacesStore();
+  const userStatsStore = useUserStatsStore();
+  const clipboardStore = useClipboardStore();
+  const dirSizesStore = useDirSizesStore();
+  const linkMetadataStore = useLinkMetadataStore();
+  const deleteJobsStore = useDeleteJobsStore();
+  const { startShare } = useLanShare();
+  const permanentDeleteConfirm = usePermanentDeleteConfirm();
+  const {
+    performCopyMoveWithConflicts,
+    conflictDialogState,
+    handleConflictResolution,
+    handleConflictCancel,
+    topLevelNameConflictDialogState,
+    handleTopLevelNameConflictRename,
+    handleTopLevelNameConflictMerge,
+    handleTopLevelNameConflictCancel,
+  } = useCopyMoveWithConflicts();
+  const selectedEntries = ref<DirEntry[]>([]);
+  const lastSelectedEntry = ref<DirEntry | null>(null);
+
+  const contextMenu = ref({
+    targetEntry: null as DirEntry | null,
+    selectedEntries: [] as DirEntry[],
+  });
+
+  const renameState = ref({
+    isActive: false,
+    entry: null as DirEntry | null,
+  });
+
+  type PendingFocusRequest
+    = {
+      type: 'path';
+      targetPath: string;
+      path: string;
+    }
+    | {
+      type: 'diff';
+      targetPath: string;
+      previousPaths: Set<string>;
+    };
+
+  const pendingFocusRequest = ref<PendingFocusRequest | null>(null);
+  const focusRevealStaleRestoreGuardUntil = ref(0);
+
+  function clearPendingFocusRequest() {
+    pendingFocusRequest.value = null;
+  }
+
+  function armFocusRevealStaleRestoreGuard(
+    durationMs: number = FILE_BROWSER_REVEAL_STALE_FOCUS_GUARD_MS,
+  ) {
+    const until = performance.now() + durationMs;
+    focusRevealStaleRestoreGuardUntil.value = Math.max(
+      focusRevealStaleRestoreGuardUntil.value,
+      until,
+    );
+  }
+
+  function requestFocusEntryAfterRefresh(parentDirectoryPath: string, entryPath: string) {
+    pendingFocusRequest.value = {
+      type: 'path',
+      targetPath: normalizePath(parentDirectoryPath),
+      path: normalizePath(entryPath),
+    };
+  }
+
+  function buildJoinedPath(parentPath: string, fileName: string): string {
+    const normalizedParentPath = normalizePath(parentPath).replace(/\/+$/, '');
+    return `${normalizedParentPath}/${fileName}`;
+  }
+
+  async function resolveAvailableDownloadPath(
+    targetPath: string,
+    fileName: string,
+    reservedPaths: Set<string>,
+  ): Promise<string> {
+    let index = 0;
+
+    while (true) {
+      const candidateFileName = createIndexedFileName(fileName, index);
+      const candidatePath = normalizePath(buildJoinedPath(targetPath, candidateFileName));
+
+      if (reservedPaths.has(candidatePath)) {
+        index += 1;
+        continue;
+      }
+
+      const exists = await invoke<boolean>('path_exists', { path: candidatePath });
+
+      if (!exists) {
+        reservedPaths.add(candidatePath);
+        return candidatePath;
+      }
+
+      index += 1;
+    }
+  }
+
+  function clearSelection() {
+    selectedEntries.value = [];
+    lastSelectedEntry.value = null;
+    onSelect([]);
+  }
+
+  function isEntrySelected(entry: DirEntry): boolean {
+    return selectedEntries.value.some(selectedEntry => selectedEntry.path === entry.path);
+  }
+
+  function getEntryIndex(entry: DirEntry): number {
+    return entriesRef.value.findIndex(item => item.path === entry.path);
+  }
+
+  function selectRange(fromEntry: DirEntry, toEntry: DirEntry) {
+    const entries = entriesRef.value;
+    let startIndex = getEntryIndex(fromEntry);
+    let endIndex = getEntryIndex(toEntry);
+
+    if (startIndex === -1 || endIndex === -1) return;
+
+    if (startIndex > endIndex) {
+      [startIndex, endIndex] = [endIndex, startIndex];
+    }
+
+    const rangeEntries = entries.slice(startIndex, endIndex + 1);
+    selectedEntries.value = rangeEntries;
+    onSelect(selectedEntries.value);
+  }
+
+  function addToSelection(entry: DirEntry) {
+    if (!isEntrySelected(entry)) {
+      selectedEntries.value = [...selectedEntries.value, entry];
+      lastSelectedEntry.value = entry;
+      onSelect(selectedEntries.value);
+    }
+  }
+
+  function removeFromSelection(entry: DirEntry) {
+    selectedEntries.value = selectedEntries.value.filter(
+      selectedEntry => selectedEntry.path !== entry.path,
+    );
+
+    if (lastSelectedEntry.value?.path === entry.path) {
+      const lastEntry = selectedEntries.value.length > 0
+        ? selectedEntries.value[selectedEntries.value.length - 1]
+        : null;
+      lastSelectedEntry.value = lastEntry;
+    }
+
+    onSelect(selectedEntries.value);
+  }
+
+  function replaceSelection(entry: DirEntry) {
+    selectedEntries.value = [entry];
+    lastSelectedEntry.value = entry;
+    onSelect(selectedEntries.value);
+  }
+
+  function selectEntryByPath(path: string): boolean {
+    const normalizedPath = normalizePath(path);
+    const targetEntry = entriesRef.value.find(
+      entry => normalizePath(entry.path) === normalizedPath,
+    );
+
+    if (!targetEntry) {
+      return false;
+    }
+
+    replaceSelection(targetEntry);
+    return true;
+  }
+
+  const {
+    mouseDownState,
+    handleEntryMouseDown,
+    handleEntryMouseUp,
+    resetMouseState,
+  } = useFileBrowserClickSelection({
+    selectedEntries,
+    lastSelectedEntry,
+    isEntrySelected,
+    selectRange,
+    addToSelection,
+    removeFromSelection,
+    replaceSelection,
+    clearSelection,
+    onOpen,
+    onOpenProperties,
+    onMiddleClickOpenInNewTab: (entry) => {
+      void openEntriesInNewTabs([entry]);
+    },
+    isWindows: platformStore.isWindows,
+  });
+
+  function handleEntryFocus(entry: DirEntry, event: FocusEvent) {
+    if (pendingFocusRequest.value != null) {
+      return;
+    }
+
+    if (
+      performance.now() < focusRevealStaleRestoreGuardUntil.value
+      && !isEntrySelected(entry)
+    ) {
+      return;
+    }
+
+    const target = event.currentTarget;
+
+    if (!(target instanceof HTMLElement) || !target.matches(':focus-visible')) {
+      return;
+    }
+
+    if (selectedEntries.value.length !== 1 || !isEntrySelected(entry)) {
+      replaceSelection(entry);
+    }
+  }
+
+  function handleEntryContextMenu(entry: DirEntry) {
+    const isEntryAlreadySelected = isEntrySelected(entry);
+
+    if (!isEntryAlreadySelected) {
+      replaceSelection(entry);
+    }
+
+    contextMenu.value = {
+      targetEntry: entry,
+      selectedEntries: [...selectedEntries.value],
+    };
+  }
+
+  function handleBackgroundContextMenu() {
+    const currentDirEntry: DirEntry = {
+      name: getPathDisplayName(currentPathRef.value) || currentPathRef.value,
+      path: currentPathRef.value,
+      is_dir: true,
+      is_file: false,
+      is_hidden: false,
+      is_symlink: false,
+      size: 0,
+      created_time: 0,
+      modified_time: 0,
+      accessed_time: 0,
+      item_count: null,
+      ext: null,
+      mime: null,
+    };
+
+    contextMenu.value = {
+      targetEntry: currentDirEntry,
+      selectedEntries: [currentDirEntry],
+    };
+  }
+
+  function closeContextMenu() {
+    contextMenu.value.targetEntry = null;
+    contextMenu.value.selectedEntries = [];
+  }
+
+  async function openEntriesInNewTabs(entries: DirEntry[]) {
+    for (const entry of entries) {
+      const navigableItemTarget = await resolveNavigableItemTarget(entry.path, entry.is_file);
+
+      if (!navigableItemTarget.opensAsFile) {
+        await workspacesStore.openNewTabGroup(navigableItemTarget.targetPath, { activate: false });
+      }
+    }
+  }
+
+  function canPerformAction(action: ContextMenuAction, entries: DirEntry[]): boolean {
+    return isContextMenuActionVisible(action, entries, {
+      platform: platformStore.currentPlatform,
+    });
+  }
+
+  function copyItems(entries: DirEntry[]) {
+    if (!canPerformAction('copy', entries)) {
+      return;
+    }
+
+    clipboardStore.setClipboard('copy', entries);
+  }
+
+  function cutItems(entries: DirEntry[]) {
+    if (!canPerformAction('cut', entries)) {
+      return;
+    }
+
+    clipboardStore.setClipboard('move', entries);
+  }
+
+  async function createLinksForEntries(
+    entries: DirEntry[],
+    linkKind: LinkCreationKind,
+    destinationPath?: string,
+  ): Promise<boolean> {
+    if (entries.length === 0) {
+      return false;
+    }
+
+    if (!canPerformAction('link', entries)) {
+      return false;
+    }
+
+    const targetPath = destinationPath || currentPathRef.value;
+
+    if (isDestinationInsideAnySourceDirectory(
+      targetPath,
+      entries.map(entry => entry.path),
+      entries.map(entry => entry.is_dir),
+    )) {
+      toast.custom(markRaw(ToastStatic), {
+        componentProps: {
+          data: {
+            title: t('fileBrowser.createLinkFailed'),
+            description: t('fileBrowser.cannotCreateLinkInsideItself'),
+          },
+        },
+      });
+
+      return false;
+    }
+
+    const shouldFocusCreatedLinks = targetPath === currentPathRef.value;
+    const previousPaths = shouldFocusCreatedLinks
+      ? new Set(entriesRef.value.map(entry => entry.path))
+      : null;
+    let result: CreateLinksResult;
+
+    try {
+      result = await invoke<CreateLinksResult>('create_links', {
+        sourcePaths: entries.map(entry => entry.path),
+        destinationPath: targetPath,
+        linkKind,
+      });
+    }
+    catch (error) {
+      result = {
+        success: false,
+        createdPaths: [],
+        failedItems: [{
+          sourcePath: '',
+          error: String(error),
+        }],
+      };
+    }
+
+    if (result.createdPaths.length > 0) {
+      dirSizesStore.invalidate([targetPath]);
+      linkMetadataStore.invalidate([
+        ...entries.map(entry => entry.path),
+        ...result.createdPaths,
+      ]);
+      workspacesStore.handleDirectoryContentsChanged([targetPath]);
+
+      if (shouldFocusCreatedLinks && previousPaths) {
+        pendingFocusRequest.value = {
+          type: 'diff',
+          targetPath,
+          previousPaths,
+        };
+      }
+
+      onRefresh();
+    }
+
+    if (result.success) {
+      toast.custom(markRaw(ToastStatic), {
+        componentProps: {
+          data: {
+            title: t('notifications.createdNLinks', result.createdPaths.length),
+            description: '',
+          },
+        },
+      });
+
+      return true;
+    }
+
+    if (result.createdPaths.length > 0) {
+      const firstError = result.failedItems[0]?.error || t('fileBrowser.createLinkFailed');
+      toast.custom(markRaw(ToastStatic), {
+        componentProps: {
+          data: {
+            title: t('notifications.createdNOfNLinks', {
+              created: result.createdPaths.length,
+              total: result.createdPaths.length + result.failedItems.length,
+            }),
+            description: t('notifications.linkCreationPartialFailureDescription', {
+              count: result.failedItems.length,
+              error: firstError,
+            }),
+          },
+        },
+      });
+
+      return false;
+    }
+
+    const firstError = result.failedItems[0]?.error || t('fileBrowser.createLinkFailed');
+    toast.custom(markRaw(ToastStatic), {
+      componentProps: {
+        data: {
+          title: t('fileBrowser.createLinkFailed'),
+          description: firstError,
+        },
+      },
+    });
+
+    return false;
+  }
+
+  async function pasteItems(destinationPath?: string): Promise<boolean> {
+    const targetPath = destinationPath || currentPathRef.value;
+
+    if (isVirtualLocationPath(targetPath)) {
+      return false;
+    }
+
+    const systemClipboard = await clipboardStore.readSystemClipboardFiles();
+
+    if (!systemClipboard?.paths.length) {
+      if (clipboardStore.hasFileItems) {
+        const sourcePaths = clipboardStore.clipboardItems.map(item => item.path);
+        const operation = clipboardStore.isCopyOperation ? 'copy' : 'move';
+        const pasted = await handleExternalDrop(sourcePaths, targetPath, operation);
+
+        if (pasted) {
+          clipboardStore.discardClipboard();
+        }
+
+        return pasted;
+      }
+
+      return await pasteSystemClipboardImage(targetPath);
+    }
+
+    const pasted = await handleExternalDrop(
+      systemClipboard.paths,
+      targetPath,
+      systemClipboard.operation,
+    );
+
+    if (pasted) {
+      clipboardStore.discardClipboard();
+    }
+
+    return pasted;
+  }
+
+  async function pasteSystemClipboardImage(targetPath: string): Promise<boolean> {
+    const shouldFocusPaste = targetPath === currentPathRef.value;
+    const previousPaths = shouldFocusPaste
+      ? new Set(entriesRef.value.map(entry => entry.path))
+      : null;
+    const result = await clipboardStore.pasteSystemClipboardImage(targetPath);
+
+    if (!result.success) {
+      if (result.error) {
+        toast.error(result.error);
+      }
+
+      return false;
+    }
+
+    await dirSizesStore.refreshSizesAfterCopyMove([], targetPath, [
+      targetPath,
+      currentPathRef.value,
+    ]);
+
+    if (shouldFocusPaste && previousPaths) {
+      if (result.path) {
+        pendingFocusRequest.value = {
+          type: 'path',
+          targetPath,
+          path: result.path,
+        };
+      }
+      else {
+        pendingFocusRequest.value = {
+          type: 'diff',
+          targetPath,
+          previousPaths,
+        };
+      }
+    }
+
+    onRefresh();
+    clipboardStore.discardClipboard();
+    return true;
+  }
+
+  async function handleExternalDrop(sourcePaths: string[], targetPath: string, operation: 'copy' | 'move' = 'copy'): Promise<boolean> {
+    if (isVirtualLocationPath(targetPath)) {
+      return false;
+    }
+
+    const shouldFocusPaste = targetPath === currentPathRef.value;
+    const previousPaths = shouldFocusPaste
+      ? new Set(entriesRef.value.map(entry => entry.path))
+      : null;
+    const result = await performCopyMoveWithConflicts(sourcePaths, targetPath, operation);
+
+    if (!result || result.cancelled) {
+      return false;
+    }
+
+    if (result.copiedCount > 0) {
+      const sourcesForSizes = sourcePaths.map((path, index) => ({
+        path,
+        is_dir: result.sourcePathIsDir[index] ?? false,
+      }));
+      await dirSizesStore.refreshSizesAfterCopyMove(sourcesForSizes, targetPath, [
+        targetPath,
+        currentPathRef.value,
+      ]);
+    }
+
+    if (result.success) {
+      if (shouldFocusPaste && previousPaths) {
+        pendingFocusRequest.value = {
+          type: 'diff',
+          targetPath,
+          previousPaths,
+        };
+      }
+
+      onRefresh();
+      return true;
+    }
+
+    if (result.copiedCount > 0) {
+      onRefresh();
+    }
+
+    return false;
+  }
+
+  async function handleExternalUrlDrop(urls: string[], targetPath: string): Promise<boolean> {
+    if (urls.length === 0) {
+      return false;
+    }
+
+    const shouldFocusPaste = targetPath === currentPathRef.value;
+    const previousPaths = shouldFocusPaste
+      ? new Set(entriesRef.value.map(entry => entry.path))
+      : null;
+
+    const toastData = ref({
+      id: '' as string | number,
+      title: t('notifications.copyingItems'),
+      description: '',
+      progress: 0,
+      timer: 0,
+      actionText: t('cancel'),
+      cleanup: () => {},
+      operationType: 'copy' as 'copy' | 'move' | 'delete' | '',
+      itemCount: urls.length,
+    });
+
+    toastData.value.id = toast.custom(markRaw(ToastProgress), {
+      componentProps: {
+        data: toastData.value,
+        onAction: () => {
+          if (autoDismissTimeout) {
+            clearTimeout(autoDismissTimeout);
+            autoDismissTimeout = null;
+          }
+
+          toast.dismiss(toastData.value.id);
+        },
+      },
+      duration: Infinity,
+    });
+
+    let autoDismissTimeout: ReturnType<typeof setTimeout> | null = null;
+    let progressInterval: ReturnType<typeof setInterval> | null = setInterval(() => {
+      if (toastData.value.progress < 90) {
+        toastData.value.progress += 5;
+      }
+    }, 100);
+
+    toastData.value.cleanup = () => {
+      if (progressInterval) {
+        clearInterval(progressInterval);
+        progressInterval = null;
+      }
+
+      if (autoDismissTimeout) {
+        clearTimeout(autoDismissTimeout);
+        autoDismissTimeout = null;
+      }
+    };
+
+    const downloadedPaths: string[] = [];
+    let lastDownloadError = '';
+
+    try {
+      await invoke('ensure_directory', { directoryPath: targetPath });
+
+      const reservedPaths = new Set<string>();
+
+      for (const url of urls) {
+        try {
+          const destinationPath = await resolveAvailableDownloadPath(
+            targetPath,
+            safeFileNameFromUrl(url),
+            reservedPaths,
+          );
+          const downloadedPath = await invoke<string>('download_url_to_path', {
+            url,
+            destPath: destinationPath,
+          });
+          downloadedPaths.push(normalizePath(downloadedPath));
+        }
+        catch (error) {
+          lastDownloadError = String(error);
+        }
+      }
+
+      if (downloadedPaths.length === 0) {
+        throw new Error(lastDownloadError || t('fileBrowser.copyFailed'));
+      }
+
+      toastData.value.cleanup();
+      toastData.value.progress = 100;
+      toastData.value.title = t('notifications.copied');
+      toastData.value.itemCount = downloadedPaths.length;
+      toastData.value.actionText = '';
+      toastData.value.description = downloadedPaths.length < urls.length ? lastDownloadError : '';
+
+      dirSizesStore.invalidate([targetPath, currentPathRef.value]);
+
+      if (shouldFocusPaste && previousPaths) {
+        pendingFocusRequest.value = {
+          type: 'diff',
+          targetPath,
+          previousPaths,
+        };
+      }
+
+      onRefresh();
+
+      autoDismissTimeout = setTimeout(() => {
+        toast.dismiss(toastData.value.id);
+      }, downloadedPaths.length < urls.length ? 5000 : 2500);
+
+      return downloadedPaths.length === urls.length;
+    }
+    catch (error) {
+      toastData.value.cleanup();
+      toastData.value.title = t('fileBrowser.copyFailed');
+      toastData.value.description = String(error);
+      toastData.value.actionText = '';
+      toastData.value.progress = 0;
+      toastData.value.itemCount = 0;
+
+      setTimeout(() => {
+        toast.dismiss(toastData.value.id);
+      }, 5000);
+
+      return false;
+    }
+  }
+
+  function startRename(entry: DirEntry) {
+    if (!canPerformAction('rename', [entry])) {
+      return;
+    }
+
+    renameState.value = {
+      isActive: true,
+      entry,
+    };
+  }
+
+  function cancelRename() {
+    renameState.value = {
+      isActive: false,
+      entry: null,
+    };
+  }
+
+  async function confirmRename(newName: string): Promise<boolean> {
+    if (!renameState.value.entry || !newName.trim()) {
+      cancelRename();
+      return false;
+    }
+
+    const entry = renameState.value.entry;
+    const trimmedName = newName.trim();
+
+    if (trimmedName === entry.name) {
+      cancelRename();
+      return true;
+    }
+
+    try {
+      const result = await invoke<FileOperationResult>('rename_item', {
+        sourcePath: entry.path,
+        newName: trimmedName,
+      });
+
+      if (result.success) {
+        toast.custom(markRaw(ToastStatic), {
+          componentProps: {
+            data: {
+              title: t('notifications.renamed'),
+              description: '',
+            },
+          },
+        });
+
+        const oldPath = entry.path;
+        const parentDir = oldPath.substring(0, oldPath.lastIndexOf('/'));
+        const newPath = `${parentDir}/${trimmedName}`;
+
+        workspacesStore.handlePathRenamed(oldPath, newPath);
+        userStatsStore.handlePathRenamed(oldPath, newPath);
+
+        dirSizesStore.invalidate([entry.path, currentPathRef.value]);
+
+        cancelRename();
+        clearSelection();
+        onRefresh();
+        return true;
+      }
+      else {
+        toast.custom(markRaw(ToastStatic), {
+          componentProps: {
+            data: {
+              title: t('notifications.failedToRenameItem'),
+              description: result.error || '',
+            },
+          },
+        });
+        return false;
+      }
+    }
+    catch (error) {
+      toast.custom(markRaw(ToastStatic), {
+        componentProps: {
+          data: {
+            title: t('notifications.failedToRenameItem'),
+            description: String(error),
+          },
+        },
+      });
+      return false;
+    }
+  }
+
+  async function createNewItem(
+    name: string,
+    itemType: 'directory' | 'file',
+    targetPaths?: string[],
+  ): Promise<boolean> {
+    const trimmedName = name.trim();
+
+    if (!trimmedName) {
+      return false;
+    }
+
+    const invalidChars = /[<>:"/\\|?*\x00-\x1f]/;
+
+    if (invalidChars.test(trimmedName)) {
+      return false;
+    }
+
+    if (trimmedName === '.' || trimmedName === '..') {
+      return false;
+    }
+
+    const directoryPaths = targetPaths && targetPaths.length > 0
+      ? targetPaths
+      : [currentPathRef.value];
+
+    if (directoryPaths.some(directoryPath => isVirtualLocationPath(directoryPath))) {
+      return false;
+    }
+
+    let successCount = 0;
+    let lastError: string | null = null;
+
+    for (const directoryPath of directoryPaths) {
+      try {
+        const result = await invoke<FileOperationResult>('create_item', {
+          directoryPath,
+          name: trimmedName,
+          isDirectory: itemType === 'directory',
+        });
+
+        if (result.success) {
+          successCount++;
+          dirSizesStore.invalidate([directoryPath]);
+
+          if (directoryPath === currentPathRef.value) {
+            pendingFocusRequest.value = {
+              type: 'path',
+              targetPath: currentPathRef.value,
+              path: `${currentPathRef.value}/${trimmedName}`,
+            };
+          }
+        }
+        else {
+          lastError = result.error || '';
+        }
+      }
+      catch (error) {
+        lastError = String(error);
+      }
+    }
+
+    if (successCount > 0) {
+      toast.custom(markRaw(ToastStatic), {
+        componentProps: {
+          data: {
+            title: itemType === 'directory'
+              ? t('dialogs.newDirItemDialog.newDirectoryCreated')
+              : t('dialogs.newDirItemDialog.newFileCreated'),
+            description: '',
+          },
+        },
+      });
+      onRefresh();
+      return true;
+    }
+
+    toast.custom(markRaw(ToastStatic), {
+      componentProps: {
+        data: {
+          title: itemType === 'directory'
+            ? t('dialogs.newDirItemDialog.failedToCreateNewDirectory')
+            : t('dialogs.newDirItemDialog.failedToCreateNewFile'),
+          description: lastError || '',
+        },
+      },
+    });
+    return false;
+  }
+
+  function handleContextMenuAction(action: ContextMenuAction) {
+    const entries = contextMenu.value.selectedEntries;
+
+    switch (action) {
+      case 'rename':
+        if (entries.length === 1) {
+          startRename(entries[0]);
+        }
+
+        break;
+      case 'copy':
+        if (entries.length > 0) {
+          copyItems(entries);
+        }
+
+        break;
+      case 'cut':
+        if (entries.length > 0) {
+          cutItems(entries);
+        }
+
+        break;
+
+      case 'paste': {
+        const targetDir = entries.length === 1 && !entries[0].is_file
+          ? entries[0].path
+          : undefined;
+        pasteItems(targetDir);
+        break;
+      }
+
+      case 'delete':
+        if (entries.length > 0) {
+          deleteItems(entries, true);
+        }
+
+        break;
+      case 'delete-permanently':
+        if (entries.length > 0) {
+          void deleteItems(entries, false);
+        }
+
+        break;
+      case 'open-in-new-tab':
+        if (entries.length > 0) {
+          openEntriesInNewTabs(entries);
+        }
+
+        break;
+      case 'toggle-favorite':
+        if (entries.length > 0) {
+          toggleFavorites(entries);
+        }
+
+        break;
+      case 'copy-path':
+        if (entries.length > 0) {
+          const pathText = entries.map(entry => entry.path).join('\n');
+          navigator.clipboard.writeText(pathText).then(() => {
+            toast.custom(markRaw(ToastStatic), {
+              componentProps: {
+                data: {
+                  title: t('dialogs.localShareManagerDialog.addressCopiedToClipboard'),
+                  description: pathText,
+                },
+              },
+              duration: 2000,
+            });
+          }).catch((error) => {
+            console.error('Failed to copy path:', error);
+          });
+        }
+
+        break;
+      case 'share':
+        if (entries.length > 0 && canPerformAction('share', entries)) {
+          startShare(entries);
+        }
+
+        break;
+    }
+
+    void nextTick(() => {
+      closeContextMenu();
+    });
+  }
+
+  async function toggleFavorites(entries: DirEntry[]) {
+    const allAreFavorites = entries.every(entry => userStatsStore.isFavorite(entry.path));
+
+    for (const entry of entries) {
+      if (allAreFavorites) {
+        await userStatsStore.removeFromFavorites(entry.path);
+      }
+      else if (!userStatsStore.isFavorite(entry.path)) {
+        await userStatsStore.addToFavorites(entry.path);
+      }
+    }
+
+    const message = allAreFavorites
+      ? t('notifications.removedFromFavorites', entries.length)
+      : t('notifications.addedToFavorites', entries.length);
+
+    toast.custom(markRaw(ToastStatic), {
+      componentProps: {
+        data: {
+          title: message,
+          description: '',
+        },
+      },
+    });
+  }
+
+  function selectAll() {
+    selectedEntries.value = [...entriesRef.value];
+    const lastEntry = selectedEntries.value.length > 0
+      ? selectedEntries.value[selectedEntries.value.length - 1]
+      : null;
+    lastSelectedEntry.value = lastEntry;
+    onSelect(selectedEntries.value);
+  }
+
+  async function deleteItems(entries: DirEntry[], useTrash: boolean = true): Promise<boolean> {
+    if (entries.length === 0) {
+      return false;
+    }
+
+    const deleteAction: ContextMenuAction = useTrash ? 'delete' : 'delete-permanently';
+
+    if (!canPerformAction(deleteAction, entries)) {
+      return false;
+    }
+
+    if (!useTrash) {
+      const confirmed = await permanentDeleteConfirm.requestConfirm(entries);
+
+      if (!confirmed) {
+        return false;
+      }
+    }
+
+    const paths = entries.map(entry => entry.path);
+    const sharedParentDirectory = getSharedSourceDirectory(paths);
+    const displayPath = sharedParentDirectory
+      ? basenameFromPath(sharedParentDirectory)
+      : '';
+
+    try {
+      const result = await deleteJobsStore.startJob(paths, useTrash, {
+        label: useTrash ? t('notifications.trashingItems') : t('notifications.deletingItems'),
+        displayPath,
+      });
+
+      if (result.deletedPaths.length > 0) {
+        workspacesStore.handlePathsDeleted(result.deletedPaths);
+        userStatsStore.handlePathsDeleted(result.deletedPaths);
+
+        dirSizesStore.invalidate([currentPathRef.value, ...result.deletedPaths]);
+
+        clearSelection();
+        onRefresh();
+      }
+
+      return result.success && !result.cancelled;
+    }
+    catch (error) {
+      toast.custom(markRaw(ToastStatic), {
+        componentProps: {
+          data: {
+            title: useTrash ? t('notifications.errorTrashItems') : t('notifications.errorDeleteItems'),
+            description: String(error),
+          },
+        },
+      });
+
+      return false;
+    }
+  }
+
+  return {
+    selectedEntries,
+    lastSelectedEntry,
+    mouseDownState,
+    contextMenu,
+    renameState,
+    clearSelection,
+    isEntrySelected,
+    replaceSelection,
+    handleEntryMouseDown,
+    handleEntryMouseUp,
+    handleEntryFocus,
+    handleEntryContextMenu,
+    handleBackgroundContextMenu,
+    closeContextMenu,
+    handleContextMenuAction,
+    resetMouseState,
+    selectAll,
+    selectEntryByPath,
+    removeFromSelection,
+    copyItems,
+    cutItems,
+    createLinksForEntries,
+    pasteItems,
+    handleExternalDrop,
+    handleExternalUrlDrop,
+    deleteItems,
+    startRename,
+    cancelRename,
+    confirmRename,
+    createNewItem,
+    pendingFocusRequest,
+    clearPendingFocusRequest,
+    requestFocusEntryAfterRefresh,
+    armFocusRevealStaleRestoreGuard,
+    conflictDialogState,
+    handleConflictResolution,
+    handleConflictCancel,
+    topLevelNameConflictDialogState,
+    handleTopLevelNameConflictRename,
+    handleTopLevelNameConflictMerge,
+    handleTopLevelNameConflictCancel,
+    permanentDeleteConfirm,
+  };
+}

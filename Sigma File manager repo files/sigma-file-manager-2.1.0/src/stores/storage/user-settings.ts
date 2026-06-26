@@ -1,0 +1,517 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// License: GNU GPLv3 or later. See the license file in the project root for more information.
+// Copyright © 2021 - present Aleksey Hoffman. All rights reserved.
+
+import cloneDeep from 'lodash.clonedeep';
+import { defineStore } from 'pinia';
+import { LazyStore } from '@tauri-apps/plugin-store';
+import { ref, computed, watch } from 'vue';
+import type {
+  UserSettings,
+  LocalizationLanguage,
+  UserSettingsPath,
+  UserSettingsValue,
+  InfusionPageSettings,
+  VisualFiltersSettings,
+  Theme,
+} from '@/types/user-settings';
+import {
+  backgroundMedia,
+  DEFAULT_BACKGROUND_FILE_NAME,
+  DEFAULT_INFUSION_BACKGROUND_FILE_NAME,
+} from '@/data/background-media';
+import { normalizeThemeSelection } from '@/modules/themes/registry';
+import { useTheme } from './composables/use-theme';
+import type { ThemeTransitionOrigin } from './composables/use-theme';
+import { useUserPathsStore } from './user-paths';
+import { useExtensionsStorageStore } from './extensions';
+import { i18n } from '@/localization';
+import { getCurrentWebview } from '@tauri-apps/api/webview';
+import { emit, listen, type UnlistenFn } from '@tauri-apps/api/event';
+import {
+  buildAllowedUserSettingsStorageKeys,
+  DEFAULT_GLOBAL_SEARCH_IGNORED_PATHS,
+  migrateUserSettingsStorage,
+  USER_SETTINGS_SCHEMA_VERSION_KEY,
+  USER_SETTINGS_SCHEMA_VERSION,
+} from '@/stores/schemas/user-settings';
+import { SEARCH_CONSTANTS } from '@/constants';
+import {
+  canUseStartupStorageFastPath,
+  getStartupStorageFile,
+  getStartupStorageRecord,
+  type StartupStorageFileBootstrap,
+} from './utils/startup-storage-bootstrap';
+import { BUILTIN_NAVIGATOR_ICON_THEME_IDS } from '@/types/icon-theme';
+
+export const USER_SETTINGS_THEME_CHANGED_EVENT = 'user-settings:theme-changed';
+
+type ThemeChangedEventPayload = {
+  theme: Theme;
+};
+
+export const useUserSettingsStore = defineStore('userSettings', () => {
+  const userPathsStore = useUserPathsStore();
+  const extensionsStorageStore = useExtensionsStorageStore();
+
+  const userSettingsStorage = ref<LazyStore | null>(null);
+  const userSettingsDefault = ref<UserSettings | null>(null);
+  const themeTransitionOrigin = ref<ThemeTransitionOrigin | null>(null);
+  const themeTransitionsEnabled = ref(false);
+  const themeChangeEventUnlisten = ref<UnlistenFn | null>(null);
+  const allowedUserSettingsStorageKeys = ref<Set<string>>(new Set());
+  const userSettings = ref<UserSettings>({
+    language: {
+      name: 'English',
+      locale: 'en',
+      isCorrected: true,
+      isRtl: false,
+    },
+    theme: 'dark',
+    text: {
+      font: 'system-ui',
+    },
+    transparentToolbars: false,
+    dateTime: {
+      month: 'short',
+      regionalFormat: {
+        code: 'en',
+        name: 'English',
+      },
+      autoDetectRegionalFormat: true,
+      hour12: false,
+      showRelativeDates: true,
+      properties: {
+        showSeconds: false,
+        showMilliseconds: false,
+      },
+    },
+    navigator: {
+      lastTabCloseBehavior: 'createDefaultTab',
+      boldActiveTabTitle: false,
+      layout: {
+        type: {
+          title: 'listLayout',
+          name: 'list',
+        },
+        dirItemOptions: {
+          title: {
+            height: 32,
+          },
+          directory: {
+            height: 48,
+          },
+          file: {
+            height: 48,
+          },
+        },
+      },
+      infoPanel: {
+        show: false,
+      },
+      showHiddenFiles: false,
+      folderIconTheme: BUILTIN_NAVIGATOR_ICON_THEME_IDS.system,
+      fileIconTheme: BUILTIN_NAVIGATOR_ICON_THEME_IDS.system,
+      listColumnVisibility: {
+        items: true,
+        size: true,
+        modified: true,
+        created: false,
+        tags: false,
+      },
+      listSortColumn: null,
+      listSortDirection: 'asc',
+    },
+    globalSearch: {
+      scanDepth: 7,
+      autoScanPeriodMinutes: 60,
+      autoReindexWhenIdle: true,
+      ignoredPaths: [...DEFAULT_GLOBAL_SEARCH_IGNORED_PATHS],
+      selectedDriveRoots: [],
+      parallelScan: false,
+      resultLimit: SEARCH_CONSTANTS.DEFAULT_RESULT_LIMIT,
+      includeFiles: true,
+      includeDirectories: true,
+      exactMatch: false,
+      typoTolerance: true,
+      lastManualCancelTime: null,
+    },
+    UIZoomLevel: 1.0,
+    showHomeBanner: true,
+    homeBannerIndex: 0,
+    homeBannerMediaId: DEFAULT_BACKGROUND_FILE_NAME,
+    homeBannerPauseVideoWhenIdle: true,
+    customBackgroundMedia: [],
+    homeBannerPositions: {},
+    driveCard: {
+      showSpaceIndicator: true,
+      spaceIndicatorStyle: 'linearVertical',
+    },
+    userDirectories: {},
+    infusion: {
+      enabled: true,
+      sameSettingsForAllPages: true,
+      selectedPageToCustomize: '',
+      pauseVideoWhenIdle: true,
+      pages: {
+        '': createDefaultInfusionPageSettings(),
+        'home': createDefaultInfusionPageSettingsHome(),
+        'navigator': createDefaultInfusionPageSettings(),
+        'dashboard': createDefaultInfusionPageSettings(),
+        'settings': createDefaultInfusionPageSettings(),
+        'extensions': createDefaultInfusionPageSettings(),
+      },
+    },
+    visualFilters: createDefaultVisualFiltersSettings(),
+    settingsCurrentTab: 'general',
+    shortcuts: {},
+    shortcutUserAlternateChordSlots: {},
+    globalShortcuts: {},
+    focusWindowOnDriveConnected: true,
+    preventDropdownCloseFocusReturn: false,
+    quickAccessOnHover: true,
+    tooltipDelayMs: 0,
+    launchAtStartup: false,
+    launchAtStartupHidden: false,
+    appUpdates: {
+      autoCheck: true,
+      lastCheckTimestamp: 0,
+    },
+    changelog: {
+      showOnUpdate: true,
+      lastSeenVersion: '',
+    },
+  });
+
+  function createDefaultInfusionBackground() {
+    const media = backgroundMedia.find(item => item.fileName === DEFAULT_INFUSION_BACKGROUND_FILE_NAME)
+      ?? backgroundMedia[0];
+    const index = backgroundMedia.findIndex(item => item.fileName === media.fileName);
+
+    return {
+      type: media.type as 'image' | 'video',
+      path: media.fileName,
+      index: index >= 0 ? index : 0,
+      mediaId: media.fileName,
+    };
+  }
+
+  function createDefaultInfusionPageSettings(): InfusionPageSettings {
+    const background = createDefaultInfusionBackground();
+
+    return {
+      blur: 64,
+      mediaContrast: 100,
+      mediaBrightness: 100,
+      opacity: 15,
+      noise: 5,
+      noiseScale: 0.5,
+      mixBlendMode: 'normal',
+      background,
+    };
+  }
+
+  function createDefaultInfusionPageSettingsHome(): InfusionPageSettings {
+    const background = createDefaultInfusionBackground();
+
+    return {
+      blur: 32,
+      mediaContrast: 100,
+      mediaBrightness: 100,
+      opacity: 5,
+      noise: 5,
+      noiseScale: 0.5,
+      mixBlendMode: 'normal',
+      background,
+    };
+  }
+
+  function createDefaultVisualFiltersSettings(): VisualFiltersSettings {
+    return {
+      brightness: 100,
+      contrast: 100,
+      dialogOverlayBlur: 8,
+    };
+  }
+
+  function clampVisualFilterValue(value: number): number {
+    return Math.min(200, Math.max(80, value));
+  }
+
+  function clampDialogOverlayBlur(value: number): number {
+    const candidate = Number.isFinite(value) ? Math.round(value) : 8;
+    return Math.min(32, Math.max(0, candidate));
+  }
+
+  function applyDialogOverlayBackdropBlur(blurPixels: number) {
+    if (typeof document === 'undefined' || !document.documentElement) {
+      return;
+    }
+
+    const blur = clampDialogOverlayBlur(blurPixels);
+    document.documentElement.style.setProperty('--sigma-dialog-overlay-backdrop-blur', `${blur}px`);
+  }
+
+  function applyBodyVisualFilters(visualFilters: Pick<VisualFiltersSettings, 'brightness' | 'contrast'>) {
+    if (typeof document === 'undefined' || !document.documentElement) {
+      return;
+    }
+
+    const brightness = clampVisualFilterValue(visualFilters.brightness);
+    const contrast = clampVisualFilterValue(visualFilters.contrast);
+
+    document.documentElement.style.setProperty('--sigma-visual-filter-brightness', String(brightness));
+    document.documentElement.style.setProperty('--sigma-visual-filter-contrast', String(contrast));
+  }
+
+  const defaultFontFamily = computed(
+    () => userSettings.value.text?.font ?? 'system-ui',
+  );
+  const themeSettingRef = computed(() => userSettings.value.theme);
+  const normalizedThemeSelection = computed(() => {
+    if (!extensionsStorageStore.isInitialized) {
+      return userSettings.value.theme;
+    }
+
+    return normalizeThemeSelection(
+      userSettings.value.theme,
+      extensionsStorageStore.extensionsData.installedExtensions,
+    );
+  });
+  const { setTheme } = useTheme(themeSettingRef, themeTransitionOrigin, themeTransitionsEnabled);
+
+  watch(
+    () => [
+      userSettings.value.visualFilters.brightness,
+      userSettings.value.visualFilters.contrast,
+      userSettings.value.visualFilters.dialogOverlayBlur,
+    ] as const,
+    ([brightness, contrast, dialogOverlayBlur]) => {
+      applyBodyVisualFilters({
+        brightness,
+        contrast,
+      });
+      applyDialogOverlayBackdropBlur(dialogOverlayBlur);
+    },
+    { immediate: true },
+  );
+
+  watch(normalizedThemeSelection, (normalizedTheme) => {
+    if (!extensionsStorageStore.isInitialized || normalizedTheme === userSettings.value.theme) {
+      return;
+    }
+
+    void set('theme', normalizedTheme);
+  });
+
+  function applyUserSettingsEntries(settingsEntries: Iterable<[string, unknown]>) {
+    for (const [key, value] of settingsEntries) {
+      if (key === USER_SETTINGS_SCHEMA_VERSION_KEY) {
+        continue;
+      }
+
+      const normalizedKey = normalizeStorageKeyToMemory(key);
+
+      if (!allowedUserSettingsStorageKeys.value.has(normalizedKey)) {
+        continue;
+      }
+
+      setNestedValue(userSettings.value as Record<string, unknown>, normalizedKey, value);
+    }
+  }
+
+  async function loadUserSettings() {
+    try {
+      const settings = await userSettingsStorage.value?.entries();
+
+      if (!settings || settings.length === 0) {
+        return;
+      }
+
+      applyUserSettingsEntries(settings);
+    }
+    catch (error) {
+      console.error('Failed to load user settings:', error);
+    }
+  }
+
+  function normalizeStorageKeyToMemory(key: string): string {
+    return key.replace('infusion.pages.global.', 'infusion.pages..');
+  }
+
+  function setNestedValue(obj: Record<string, unknown>, path: string, value: unknown) {
+    const keys = path.split('.');
+    let current = obj;
+
+    for (let keyIndex = 0; keyIndex < keys.length - 1; keyIndex++) {
+      const key = keys[keyIndex];
+
+      if (current[key] === undefined || typeof current[key] !== 'object') {
+        current[key] = {};
+      }
+
+      current = current[key] as Record<string, unknown>;
+    }
+
+    current[keys[keys.length - 1]] = value;
+  }
+
+  async function initUserSettings() {
+    try {
+      if (!userSettingsStorage.value) {
+        userSettingsStorage.value = await new LazyStore(userPathsStore.customPaths.appUserDataSettingsPath);
+        await userSettingsStorage.value.save();
+      }
+
+      if (!userSettingsDefault.value) {
+        userSettingsDefault.value = cloneDeep(userSettings.value);
+      }
+
+      if (userSettingsDefault.value && allowedUserSettingsStorageKeys.value.size === 0) {
+        allowedUserSettingsStorageKeys.value = buildAllowedUserSettingsStorageKeys(userSettingsDefault.value);
+      }
+    }
+    catch (error) {
+      console.error('Failed to initialize user settings storage:', error);
+    }
+  }
+
+  async function setUserSettingsStorage(key: string, value: unknown) {
+    try {
+      if (userSettingsStorage.value) {
+        await userSettingsStorage.value.set(key, value);
+        await userSettingsStorage.value.save();
+      }
+    }
+    catch (error: unknown) {
+      console.error(`Failed to save to storage: ${key}: ${value}`, error);
+    }
+  }
+
+  async function broadcastThemeChange(theme: Theme) {
+    try {
+      await emit(USER_SETTINGS_THEME_CHANGED_EVENT, { theme } satisfies ThemeChangedEventPayload);
+    }
+    catch (error) {
+      console.error('Failed to broadcast theme change:', error);
+    }
+  }
+
+  async function ensureThemeChangeListener() {
+    if (themeChangeEventUnlisten.value) {
+      return;
+    }
+
+    try {
+      themeChangeEventUnlisten.value = await listen<ThemeChangedEventPayload>(
+        USER_SETTINGS_THEME_CHANGED_EVENT,
+        (event) => {
+          if (event.payload.theme === userSettings.value.theme) {
+            return;
+          }
+
+          userSettings.value.theme = event.payload.theme;
+        },
+      );
+    }
+    catch (error) {
+      console.error('Failed to listen for theme changes:', error);
+    }
+  }
+
+  async function setLanguage(newLanguage: LocalizationLanguage) {
+    userSettings.value.language = newLanguage;
+    await setUserSettingsStorage('language', newLanguage);
+  }
+
+  function initTheme() {
+    setTheme(userSettings.value.theme);
+  }
+
+  function setThemeTransitionOrigin(origin: ThemeTransitionOrigin | null) {
+    themeTransitionOrigin.value = origin;
+  }
+
+  function initLanguage() {
+    i18n.global.locale.value = userSettings.value.language.locale as typeof i18n.global.locale.value;
+  }
+
+  async function initZoom() {
+    const webview = getCurrentWebview();
+    const zoomLevel = userSettings.value.UIZoomLevel ?? 1.0;
+    await webview.setZoom(zoomLevel);
+  }
+
+  async function toggleInfoPanel() {
+    userSettings.value.navigator.infoPanel.show = !userSettings.value.navigator.infoPanel.show;
+    await setUserSettingsStorage('navigator.infoPanel.show', userSettings.value.navigator.infoPanel.show);
+  }
+
+  async function set<P extends UserSettingsPath>(key: P, value: UserSettingsValue<P>) {
+    const keys = key.split('.');
+    let current: Record<string, unknown> = userSettings.value as Record<string, unknown>;
+
+    for (let keyIndex = 0; keyIndex < keys.length - 1; keyIndex++) {
+      current = current[keys[keyIndex]] as Record<string, unknown>;
+    }
+
+    current[keys[keys.length - 1]] = value;
+
+    if (key === 'theme') {
+      await broadcastThemeChange(value as Theme);
+    }
+
+    await setUserSettingsStorage(key, value);
+  }
+
+  function hydrateUserSettingsFromBootstrap(bootstrapFile?: StartupStorageFileBootstrap): boolean {
+    if (!canUseStartupStorageFastPath(bootstrapFile, USER_SETTINGS_SCHEMA_VERSION)) {
+      return false;
+    }
+
+    const bootstrapRecord = getStartupStorageRecord(bootstrapFile);
+
+    if (bootstrapRecord) {
+      applyUserSettingsEntries(Object.entries(bootstrapRecord));
+    }
+
+    return true;
+  }
+
+  async function init(bootstrapFile?: StartupStorageFileBootstrap) {
+    const resolvedBootstrapFile = bootstrapFile ?? await getStartupStorageFile('userSettings');
+    await initUserSettings();
+    const loadedFromBootstrap = hydrateUserSettingsFromBootstrap(resolvedBootstrapFile);
+
+    if (!loadedFromBootstrap && userSettingsStorage.value) {
+      try {
+        await migrateUserSettingsStorage(userSettingsStorage.value);
+      }
+      catch (error) {
+        console.error('[UserSettings] Migration failed, loading with current storage state:', error);
+      }
+    }
+
+    if (!loadedFromBootstrap) {
+      await loadUserSettings();
+    }
+
+    initTheme();
+    themeTransitionsEnabled.value = true;
+    await ensureThemeChangeListener();
+    initLanguage();
+    await initZoom();
+  }
+
+  return {
+    userSettings,
+    userSettingsDefault,
+    defaultFontFamily,
+    init,
+    set,
+    setUserSettingsStorage,
+    setLanguage,
+    setThemeTransitionOrigin,
+    toggleInfoPanel,
+  };
+});

@@ -504,7 +504,7 @@ pub async fn start_archive_job(
 
     let app_progress = app.clone();
     let job_id_progress = job_id.clone();
-    let emit_progress = tokio::spawn(async move {
+    let emit_progress = tauri::async_runtime::spawn(async move {
         while let Some((percent, detail)) = progress_rx.recv().await {
             let payload = ArchiveJobProgressPayload {
                 job_id: job_id_progress.clone(),
@@ -517,7 +517,7 @@ pub async fn start_archive_job(
 
     let app_done = app.clone();
     let job_id_done = job_id.clone();
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         let work_result = tokio::task::spawn_blocking(move || {
             let sink = ProgressSink {
                 cancel: cancel.clone(),
