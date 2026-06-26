@@ -207,6 +207,7 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
       },
       downloader: {
         autoSaveFolder: '',
+        chunkCount: 8,
       },
     },
   });

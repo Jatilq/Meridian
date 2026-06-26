@@ -19,6 +19,7 @@ export const useDownloaderStore = defineStore('downloader', () => {
   const showFormatSelector = ref(false);
   const activeTab = ref<'queue' | 'history'>('queue');
   const autoSaveFolder = ref(userSettingsStore.userSettings.meridian?.downloader?.autoSaveFolder || '');
+  const chunkCount = ref(userSettingsStore.userSettings.meridian?.downloader?.chunkCount ?? 8);
 
   const activeCount = computed(() => queue.value.filter(item => item.status === 'downloading').length);
   const hasActive = computed(() => activeCount.value > 0);
@@ -70,7 +71,7 @@ export const useDownloaderStore = defineStore('downloader', () => {
 
   return {
     isOpen, queue, history, isLoading, urlInput, formats, selectedFormat,
-    showFormatSelector, activeTab, autoSaveFolder, activeCount, hasActive, queueCount, historyCount,
+    showFormatSelector, activeTab, autoSaveFolder, chunkCount, activeCount, hasActive, queueCount, historyCount,
     open, close, toggle, setUrlInput, setSelectedFormat, setShowFormatSelector,
     setActiveTab, setAutoSaveFolder, setQueue, setHistory, setLoading, setFormats, upsertItem,
     removeFromQueue, clearHistory,

@@ -167,6 +167,7 @@ export type AiPanelSettings = {
 
 export type DownloaderSettings = {
   autoSaveFolder: string;
+  chunkCount: number;
 };
 
 export type MeridianSettings = {

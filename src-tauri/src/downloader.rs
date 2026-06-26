@@ -13,7 +13,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio_util::sync::CancellationToken;
 
 const YTDLP_TIMEOUT: Duration = Duration::from_secs(30);
-const DOWNLOAD_CHUNKS: u64 = 4;
+const DOWNLOAD_CHUNKS: u64 = 8;
 const DB_FILE_NAME: &str = "meridian.db";
 /// Sentinel error returned by the download path when a cancellation token fires,
 /// so start_download can distinguish a user pause/cancel from a real failure.
@@ -450,17 +450,19 @@ async fn download_chunked(
     dest_dir: &str,
     file_name: &str,
     total_size: u64,
+    chunk_count: u64,
     token: CancellationToken,
     on_progress: impl Fn(u64, u64) + Send + 'static,
 ) -> Result<String, String> {
     if token.is_cancelled() {
         return Err(CANCELLED_MARKER.to_string());
     }
+    let chunk_count = chunk_count.max(1);
     let dest_path = Path::new(dest_dir).join(safe_file_name(file_name));
-    let chunk_size = (total_size + DOWNLOAD_CHUNKS - 1) / DOWNLOAD_CHUNKS;
+    let chunk_size = (total_size + chunk_count - 1) / chunk_count;
     let mut handles = Vec::new();
 
-    for chunk_idx in 0..DOWNLOAD_CHUNKS {
+    for chunk_idx in 0..chunk_count {
         let start = chunk_idx * chunk_size;
         let end = if start + chunk_size > total_size { total_size - 1 } else { start + chunk_size - 1 };
         if start >= total_size {
@@ -504,6 +506,7 @@ async fn download_direct(
     url: &str,
     dest_dir: &str,
     file_name: &str,
+    chunk_count: u64,
     token: CancellationToken,
     on_progress: impl Fn(u64, Option<u64>) + Send + 'static,
 ) -> Result<String, String> {
@@ -524,7 +527,7 @@ async fn download_direct(
 
     if accept_ranges && total.is_some() && total.unwrap() > 1024 * 1024 {
         let total_size = total.unwrap();
-        return download_chunked(url, dest_dir, file_name, total_size, token.clone(), move |downloaded, total| {
+        return download_chunked(url, dest_dir, file_name, total_size, chunk_count, token.clone(), move |downloaded, total| {
             on_progress(downloaded, Some(total));
         }).await;
     }
@@ -563,6 +566,7 @@ pub async fn start_download(
     file_name_hint: Option<String>,
     _format_id: Option<String>,
     auto_save_folder: Option<String>,
+    chunk_count: u64,
 ) -> Result<DownloadItem, String> {
     let file_name = file_name_hint.unwrap_or_else(|| {
         url.rsplit('/').next().unwrap_or("download").split('?').next().unwrap_or("download").to_string()
@@ -601,7 +605,7 @@ pub async fn start_download(
     // Progress callback persists live progress to the DB row (Gap 2).
     let progress_data_dir = app_data_dir.to_string();
     let progress_id = id.clone();
-    let result = download_direct(&url, &dest_dir, &file_name, token.clone(), move |downloaded, total| {
+    let progress_cb = move |downloaded: u64, total: Option<u64>| {
         if let Ok(db) = DownloaderDb::open(&progress_data_dir) {
             let progress = match total {
                 Some(t) if t > 0 => (downloaded as f64 / t as f64).clamp(0.0, 1.0),
@@ -609,7 +613,21 @@ pub async fn start_download(
             };
             let _ = db.update_progress(&progress_id, progress, total, downloaded);
         }
-    }).await;
+    };
+
+    // Route to yt-dlp when a format was selected (Gap 4); otherwise use the
+    // direct/chunked HTTP path.
+    let result = if let Some(fmt) = _format_id.as_ref().filter(|f| !f.trim().is_empty()) {
+        let pct_data_dir = app_data_dir.to_string();
+        let pct_id = id.clone();
+        download_with_ytdlp(&url, &dest_dir, &file_name, fmt, token.clone(), move |pct| {
+            if let Ok(db) = DownloaderDb::open(&pct_data_dir) {
+                let _ = db.update_progress(&pct_id, (pct / 100.0).clamp(0.0, 1.0), None, 0);
+            }
+        }).await
+    } else {
+        download_direct(&url, &dest_dir, &file_name, chunk_count, token.clone(), progress_cb).await
+    };
 
     match result {
         Ok(path) => {
@@ -830,6 +848,87 @@ async fn download_resumable(
     Ok(dest_path.to_string())
 }
 
+/// Download via yt-dlp child process for a selected format (Gap 4). Streams
+/// yt-dlp stdout, parses `[download] xx.x%` lines into progress, and kills the
+/// child if the cancellation token fires.
+async fn download_with_ytdlp(
+    url: &str,
+    dest_dir: &str,
+    file_name: &str,
+    format_id: &str,
+    token: CancellationToken,
+    on_percent: impl Fn(f64) + Send + 'static,
+) -> Result<String, String> {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    use tokio::process::Command as TokioCommand;
+
+    if token.is_cancelled() {
+        return Err(CANCELLED_MARKER.to_string());
+    }
+
+    let binary = find_ytdlp().ok_or_else(|| "yt-dlp not found".to_string())?;
+    let out_template = Path::new(dest_dir).join(safe_file_name(file_name));
+    let out_str = out_template.to_string_lossy().to_string();
+
+    let mut command = TokioCommand::new(&binary);
+    command
+        .arg("-f")
+        .arg(format_id)
+        .arg("-o")
+        .arg(&out_str)
+        .arg("--newline")
+        .arg("--no-playlist")
+        .arg(url)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
+
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let mut child = command.spawn().map_err(|e| format!("Failed to spawn yt-dlp: {}", e))?;
+    let stdout = child.stdout.take().ok_or_else(|| "No yt-dlp stdout".to_string())?;
+    let mut lines = BufReader::new(stdout).lines();
+
+    loop {
+        tokio::select! {
+            _ = token.cancelled() => {
+                let _ = child.kill().await;
+                return Err(CANCELLED_MARKER.to_string());
+            }
+            line = lines.next_line() => {
+                match line {
+                    Ok(Some(line)) => {
+                        if let Some(pct) = parse_ytdlp_percent(&line) {
+                            on_percent(pct);
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(e) => return Err(format!("yt-dlp read error: {}", e)),
+                }
+            }
+        }
+    }
+
+    let status = child.wait().await.map_err(|e| format!("yt-dlp wait failed: {}", e))?;
+    if !status.success() {
+        return Err(format!("yt-dlp exited with status: {:?}", status.code()));
+    }
+    on_percent(100.0);
+    Ok(out_str)
+}
+
+/// Parse a yt-dlp `[download]  42.3% of ...` progress line into a percentage.
+fn parse_ytdlp_percent(line: &str) -> Option<f64> {
+    if !line.contains("[download]") {
+        return None;
+    }
+    let pct_token = line.split_whitespace().find(|t| t.ends_with('%'))?;
+    pct_token.trim_end_matches('%').parse::<f64>().ok()
+}
+
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct DownloaderState {
     pub queue: Vec<DownloadItem>,
@@ -852,10 +951,12 @@ pub async fn downloader_enqueue(
     file_name: Option<String>,
     format_id: Option<String>,
     auto_save_folder: Option<String>,
+    chunk_count: Option<u64>,
 ) -> Result<DownloadItem, String> {
     let app_data_dir = get_app_data_dir(&app)?;
     let registry = registry.inner().clone();
-    start_download(&app_data_dir, &registry, url, file_name, format_id, auto_save_folder).await
+    let chunks = chunk_count.unwrap_or(DOWNLOAD_CHUNKS);
+    start_download(&app_data_dir, &registry, url, file_name, format_id, auto_save_folder, chunks).await
 }
 
 #[tauri::command]
@@ -942,7 +1043,7 @@ mod tests {
 
         let url = format!("http://{}/file.bin", addr);
         let registry = DownloaderRegistry::new();
-        let item = start_download(&data_dir, &registry, url, Some("file.bin".to_string()), None, None)
+        let item = start_download(&data_dir, &registry, url, Some("file.bin".to_string()), None, None, 8)
             .await
             .expect("download should succeed");
 
@@ -1007,6 +1108,7 @@ mod tests {
                 Some("slow.bin".to_string()),
                 None,
                 None,
+                8,
             )
             .await
         });
@@ -1037,5 +1139,15 @@ mod tests {
         assert!(cancelled, "item must be marked Cancelled in the queue");
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    // Gap 4 verification: yt-dlp progress-line parsing (binary-independent).
+    #[test]
+    fn parses_ytdlp_progress_lines() {
+        assert_eq!(parse_ytdlp_percent("[download]   0.0% of 10.00MiB"), Some(0.0));
+        assert_eq!(parse_ytdlp_percent("[download]  42.3% of 10.00MiB at 1.0MiB/s"), Some(42.3));
+        assert_eq!(parse_ytdlp_percent("[download] 100% of 10.00MiB"), Some(100.0));
+        assert_eq!(parse_ytdlp_percent("[info] downloading format"), None);
+        assert_eq!(parse_ytdlp_percent("random line"), None);
     }
 }

@@ -421,6 +421,7 @@ async function migrateUserSettingsStep(storage: StorageAdapter, fromVersion: num
     });
     await setDefaultObjectIfMissing(storage, 'meridian.downloader', {
       autoSaveFolder: '',
+      chunkCount: 8,
     });
   }
 

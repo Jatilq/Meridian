@@ -38,7 +38,7 @@ async function handleAddUrl() {
   const url = store.urlInput.trim();
   if (!url) return;
   try {
-    await invoke('downloader_enqueue', { url, fileName: null, formatId: null, autoSaveFolder: store.autoSaveFolder || null });
+    await invoke('downloader_enqueue', { url, fileName: null, formatId: null, autoSaveFolder: store.autoSaveFolder || null, chunkCount: store.chunkCount ?? null });
     store.setUrlInput('');
     void refreshState();
   }
