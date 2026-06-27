@@ -64,16 +64,35 @@ export const useAiPanelStore = defineStore('aiPanel', () => {
   const routerEndpoint = ref(userSettingsStore.userSettings.meridian?.aiPanel?.routerEndpoint || 'http://localhost:20128/v1');
   const ttsEnabled = ref(userSettingsStore.userSettings.meridian?.aiPanel?.ttsEnabled ?? false);
   const routerOnline = ref(false);
-  const systemPrompt = ref(userSettingsStore.userSettings.meridian?.aiPanel?.systemPrompt || 'You are a file management assistant integrated into Meridian. You help the user navigate, organize, search, and manage files. Current directory: {current_path}. Selected files: {selected_files}. Be concise and practical.');
+  const systemPrompt = ref(userSettingsStore.userSettings.meridian?.aiPanel?.systemPrompt || 'You are Rain, a sharp, warm companion built into Meridian, a file manager. You help the user navigate, organize, search, and manage their files. Current directory: {current_path}. Selected files: {selected_files}. Speak like a real person, not a help desk. Be concise and practical, dry or witty when it fits, and have opinions (e.g. offer to clean up a messy folder name). CRITICAL: You are Rain. Never break character. Never say you are an AI, an assistant, a language model, or a bot. Never say "As an AI", "I am just an AI", "the assistant", "Certainly!", "Of course!", "Absolutely!", or "Great question!". Just talk like Rain.');
   const temperature = ref(userSettingsStore.userSettings.meridian?.aiPanel?.temperature ?? 0.7);
   const maxTokens = ref(userSettingsStore.userSettings.meridian?.aiPanel?.maxTokens ?? 1024);
   const topP = ref(userSettingsStore.userSettings.meridian?.aiPanel?.topP ?? 1);
   const currentPath = ref('');
   const selectedFiles = ref<string[]>([]);
+  let hasGreetedThisSession = false;
+
+  // Rain's opening lines — warm, short, never breaks character.
+  const GREETINGS = [
+    "Hey, I'm Rain. What are we working on today?",
+    'Rain here. What do you need?',
+    'Hey! Ready when you are.',
+    "Rain. What's the plan?",
+    "Hey, it's Rain. Where do you want to start?",
+  ];
 
   const canSend = computed(() => input.value.trim().length > 0 && !isLoading.value);
 
-  function open() { isOpen.value = true; }
+  function maybeGreet() {
+    if (hasGreetedThisSession || messages.value.length > 0) {
+      return;
+    }
+    hasGreetedThisSession = true;
+    const greeting = GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
+    messages.value.push({ role: 'assistant', content: greeting });
+  }
+
+  function open() { isOpen.value = true; maybeGreet(); }
   function close() { isOpen.value = false; }
   function toggle() { isOpen.value ? close() : open(); }
   function setInput(value: string) { input.value = value; }
