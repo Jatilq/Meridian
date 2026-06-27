@@ -177,9 +177,18 @@ export type DownloaderSettings = {
   chunkCount: number;
 };
 
+export type SshConnectionSetting = {
+  host: string;
+  label: string;
+  port: number;
+  username: string;
+  keyPath: string;
+};
+
 export type MeridianSettings = {
   aiPanel: AiPanelSettings;
   downloader: DownloaderSettings;
+  sshConnections: SshConnectionSetting[];
 };
 
 export type TextSettings = {

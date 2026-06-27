@@ -486,6 +486,17 @@
       "downloader": {
         "title": "Downloader",
         "description": "Configure download settings"
+      },
+      "ssh": {
+        "title": "SSH Connections",
+        "description": "Configure remote SSH/SFTP connections for the file browser",
+        "label": "Label",
+        "host": "Host",
+        "port": "Port",
+        "username": "Username",
+        "keyPath": "Private key path",
+        "add": "Add connection",
+        "remove": "Remove"
       }
     }
   },

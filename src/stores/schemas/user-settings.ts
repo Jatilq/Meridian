@@ -16,7 +16,7 @@ import {
 import { BUILTIN_NAVIGATOR_ICON_THEME_IDS } from '@/types/icon-theme';
 
 export const USER_SETTINGS_SCHEMA_VERSION_KEY = '__schemaVersion';
-export const USER_SETTINGS_SCHEMA_VERSION = 20;
+export const USER_SETTINGS_SCHEMA_VERSION = 21;
 
 export const DEFAULT_GLOBAL_SEARCH_IGNORED_PATHS = [
   '/node_modules',
@@ -439,6 +439,15 @@ async function migrateUserSettingsStep(storage: StorageAdapter, fromVersion: num
     await setDefaultNumberIfMissing(storage, 'meridian.aiPanel.temperature', 0.7);
     await setDefaultNumberIfMissing(storage, 'meridian.aiPanel.maxTokens', 1024);
     await setDefaultNumberIfMissing(storage, 'meridian.aiPanel.topP', 1);
+  }
+
+  if (fromVersion === 20 && toVersion === 21) {
+    // Backfill the configurable SSH connections list (Phase 7 step 9) for
+    // installs created before it existed. Pre-populated with MAMBA + BLACK.
+    await setDefaultObjectIfMissing(storage, 'meridian.sshConnections', [
+      { host: '192.168.1.67', label: 'MAMBA', port: 22, username: 'jatilq', keyPath: 'C:\\Users\\jatilq\\.ssh\\meridian_black' },
+      { host: '192.168.1.64', label: 'BLACK', port: 22, username: 'jatilq', keyPath: 'C:\\Users\\jatilq\\.ssh\\meridian_black' },
+    ] as unknown as Record<string, unknown>);
   }
 
   if (fromVersion === 6 && toVersion === 7) {
