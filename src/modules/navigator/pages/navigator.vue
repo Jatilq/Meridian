@@ -1004,8 +1004,17 @@ function registerShortcutHandlers() {
   });
 }
 
-watch(currentDirEntry, (entry) => {
-  aiPanelStore.setCurrentPath(entry?.path ?? '');
+watch(currentDirEntry, () => {
+  // Drive the AI panel path from the ACTIVE pane's live currentPath (not the
+  // snapshot ref, which can lag or reflect the wrong pane in split view).
+  aiPanelStore.setCurrentPath(getActiveCurrentPath() ?? currentDirEntry.value?.path ?? '');
+});
+
+watch(activeTabId, () => {
+  // Pane/tab switched — resync the AI path + selection to the now-active pane.
+  aiPanelStore.setCurrentPath(getActiveCurrentPath() ?? '');
+  const activePane = getActivePaneRef();
+  aiPanelStore.setSelectedFiles(activePane?.selectedEntries?.map(e => e.path) ?? []);
 });
 
 watch(selectedEntries, (entries) => {
