@@ -70,52 +70,64 @@ const ttsEnabled = computed({
     :icon="BotIcon"
   >
     <div class="ai-panel-settings">
+      <!-- Primary AI: 9Router (handles all text inference) -->
+      <div class="ai-panel-settings__section-title">Primary AI (9Router)</div>
       <div class="ai-panel-settings__field">
-        <label class="ai-panel-settings__label" for="ai-panel-endpoint">
-          {{ t('aiPanel.endpointUrl') }}
+        <label class="ai-panel-settings__label" for="ai-panel-router">
+          Endpoint URL
         </label>
         <Input
-          id="ai-panel-endpoint"
-          v-model="endpointUrl"
-          placeholder="http://localhost:9777/api/text"
+          id="ai-panel-router"
+          v-model="routerEndpoint"
+          placeholder="http://localhost:20128/v1"
           class="ai-panel-settings__input"
         />
+        <span class="ai-panel-settings__hint">
+          {{ aiPanelStore.routerOnline ? 'Connected' : 'Offline' }}
+        </span>
       </div>
       <div class="ai-panel-settings__field">
         <label class="ai-panel-settings__label" for="ai-panel-model">
-          {{ t('aiPanel.model') }}
+          Model
         </label>
-        <Input
+        <select
           id="ai-panel-model"
           v-model="model"
-          placeholder="e.g. gpt-4, llama3"
-          class="ai-panel-settings__input"
-        />
+          class="ai-panel-settings__select"
+        >
+          <option v-if="aiPanelStore.models.length === 0" :value="model">
+            {{ model || 'No models loaded' }}
+          </option>
+          <option
+            v-for="m in aiPanelStore.models"
+            :key="m.id"
+            :value="m.id"
+          >
+            {{ m.id }}
+          </option>
+        </select>
       </div>
+
+      <!-- Local AI Enhancement: Omnix (optional, off by default) -->
+      <div class="ai-panel-settings__section-title">Local AI Enhancement (Omnix) — optional</div>
       <div class="ai-panel-settings__toggle">
-        <label class="ai-panel-settings__label" for="ai-panel-omnix">
-          {{ t('aiPanel.omnixEnabled') }}
-        </label>
+        <div>
+          <label class="ai-panel-settings__label" for="ai-panel-omnix">
+            Enable Omnix
+          </label>
+          <span class="ai-panel-settings__hint">
+            Adds Vision, TTS, and Director. App works fully without it via 9Router.
+          </span>
+        </div>
         <Switch
           id="ai-panel-omnix"
           :model-value="omnixEnabled"
           @update:model-value="omnixEnabled = $event"
         />
       </div>
-      <div class="ai-panel-settings__field">
-        <label class="ai-panel-settings__label" for="ai-panel-router">
-          9Router endpoint (text inference)
-        </label>
-        <Input
-          id="ai-panel-router"
-          v-model="routerEndpoint"
-          placeholder="http://192.168.1.67:9000"
-          class="ai-panel-settings__input"
-        />
-      </div>
-      <div class="ai-panel-settings__toggle">
+      <div v-if="omnixEnabled" class="ai-panel-settings__toggle">
         <label class="ai-panel-settings__label" for="ai-panel-tts">
-          Speak responses (Omnix TTS)
+          Speak responses (TTS)
         </label>
         <Switch
           id="ai-panel-tts"
@@ -155,5 +167,29 @@ const ttsEnabled = computed({
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
+}
+
+.ai-panel-settings__section-title {
+  color: hsl(var(--foreground));
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin-top: 0.5rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.ai-panel-settings__hint {
+  color: hsl(var(--muted-foreground));
+  font-size: 0.75rem;
+}
+
+.ai-panel-settings__select {
+  width: 100%;
+  padding: 0.5rem;
+  border-radius: 0.375rem;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-size: 0.875rem;
 }
 </style>

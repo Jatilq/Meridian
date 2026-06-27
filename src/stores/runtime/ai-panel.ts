@@ -55,7 +55,7 @@ export const useAiPanelStore = defineStore('aiPanel', () => {
   const messages = ref<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
   const input = ref('');
   const endpoint = ref(userSettingsStore.userSettings.meridian?.aiPanel?.endpointUrl || persisted.endpoint || 'http://localhost:9777/api/text');
-  const selectedModel = ref(userSettingsStore.userSettings.meridian?.aiPanel?.model || persisted.selectedModel || '');
+  const selectedModel = ref(userSettingsStore.userSettings.meridian?.aiPanel?.model || persisted.selectedModel || 'openrouter/openrouter/free');
   const models = ref<Array<{ id: string }>>([]);
   const modelsLoaded = ref(false);
   const useOmnix = ref(userSettingsStore.userSettings.meridian?.aiPanel?.omnixEnabled ?? persisted.useOmnix ?? false);
@@ -129,10 +129,10 @@ export const useAiPanelStore = defineStore('aiPanel', () => {
   }
 
   async function fetchModels() {
-    if (useOmnix.value) return;
-    const baseUrl = endpoint.value.replace(/\/+$/, '');
+    const baseUrl = (routerEndpoint.value || '').replace(/\/+$/, '');
+    if (!baseUrl) return;
     try {
-      const response = await fetch(`${baseUrl}/v1/models`);
+      const response = await fetch(`${baseUrl}/models`);
       if (!response.ok) return;
       const data = await response.json();
       const modelList = data.data ?? data.models ?? [];
@@ -153,7 +153,7 @@ export const useAiPanelStore = defineStore('aiPanel', () => {
   watch(
     () => isOpen.value,
     (open) => {
-      if (open && !modelsLoaded.value && !useOmnix.value) {
+      if (open && !modelsLoaded.value) {
         void fetchModels();
       }
     },

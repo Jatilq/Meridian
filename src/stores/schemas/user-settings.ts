@@ -416,7 +416,7 @@ async function migrateUserSettingsStep(storage: StorageAdapter, fromVersion: num
   if (fromVersion === 18 && toVersion === 19) {
     await setDefaultObjectIfMissing(storage, 'meridian.aiPanel', {
       endpointUrl: 'http://localhost:9777/api/text',
-      model: '',
+      model: 'openrouter/openrouter/free',
       omnixEnabled: false,
       omnixPath: 'E:\\ai\\Apps\\Omnix',
       routerEndpoint: 'http://localhost:20128/v1',
