@@ -205,7 +205,7 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
         model: '',
         omnixEnabled: false,
         omnixPath: 'E:\\ai\\Apps\\Omnix',
-        routerEndpoint: 'http://192.168.1.67:9000',
+        routerEndpoint: 'http://localhost:20128/v1',
         ttsEnabled: false,
       },
       downloader: {
