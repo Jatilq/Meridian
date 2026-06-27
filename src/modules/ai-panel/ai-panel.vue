@@ -169,36 +169,44 @@ async function handleSend() {
     }
 
     // Read as text first so a non-clean-JSON body (SSE/streaming "data:" lines,
-    // or JSON with trailing content) never throws on response.json().
+    // or JSON with a trailing "data: [DONE]" marker) never throws on .json().
     const rawBody = await response.text();
     let content = 'No response received.';
+
+    // Strip any trailing SSE "data: [DONE]" marker and surrounding whitespace.
+    const cleaned = rawBody
+      .replace(/\s*data:\s*\[DONE\]\s*$/i, '')
+      .trim();
+
+    const extractContent = (obj: any): string | null =>
+      obj?.choices?.[0]?.message?.content
+        ?? obj?.choices?.[0]?.delta?.content
+        ?? obj?.response
+        ?? obj?.text
+        ?? null;
+
     try {
-      const data = JSON.parse(rawBody);
-      content = data.choices?.[0]?.message?.content ?? data.response ?? data.text ?? content;
+      // Non-streaming: the body is a single JSON object (possibly with the
+      // trailing [DONE] already stripped above).
+      const data = JSON.parse(cleaned);
+      content = extractContent(data) ?? content;
     }
     catch {
-      // Not a single JSON object. Try SSE/streaming: concatenate the content
-      // deltas from each "data:" line; fall back to the raw text.
-      const lines = rawBody.split('\n').map(l => l.trim()).filter(l => l.startsWith('data:'));
+      // Streaming/SSE: concatenate the content deltas from each "data:" line.
+      const lines = cleaned.split('\n').map(l => l.trim()).filter(l => l.startsWith('data:'));
       if (lines.length > 0) {
         let acc = '';
         for (const line of lines) {
           const payload = line.slice(5).trim();
-          if (payload === '[DONE]') continue;
+          if (payload === '[DONE]' || payload === '') continue;
           try {
-            const chunk = JSON.parse(payload);
-            acc += chunk.choices?.[0]?.delta?.content
-              ?? chunk.choices?.[0]?.message?.content
-              ?? '';
+            acc += extractContent(JSON.parse(payload)) ?? '';
           }
           catch {
             // skip malformed SSE chunk
           }
         }
-        content = acc || rawBody.trim() || content;
-      }
-      else {
-        content = rawBody.trim() || content;
+        content = acc || content;
       }
     }
     aiPanelStore.addMessage('assistant', content);
