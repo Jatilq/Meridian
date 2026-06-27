@@ -119,6 +119,15 @@ impl DownloaderDb {
         }
         let db_path = db_dir.join(DB_FILE_NAME);
         let conn = rusqlite::Connection::open(db_path).map_err(|e| format!("Failed to open db: {}", e))?;
+        // Multiple short-lived connections are opened concurrently (per command
+        // + per progress-callback tick). Without these, concurrent writes throw
+        // "database is locked" and downloads fail (notably on a 2nd attempt).
+        // WAL allows concurrent readers/writer; busy_timeout makes writers wait
+        // for the lock instead of erroring immediately.
+        conn.busy_timeout(std::time::Duration::from_secs(10))
+            .map_err(|e| format!("Failed to set busy_timeout: {}", e))?;
+        let _ = conn.pragma_update(None, "journal_mode", "WAL");
+        let _ = conn.pragma_update(None, "synchronous", "NORMAL");
         let db = DownloaderDb { conn };
         db.init()?;
         Ok(db)
