@@ -50,6 +50,16 @@ const NODES = [
   { name: 'BLACK', host: '192.168.1.64', role: 'Daily driver / RPC slave (RX 6900 XT)', local: false, vendor: 'amd' },
 ];
 
+// SSH credentials for remote nodes (BLACK). Default to the passphrase-less
+// Meridian key; configurable in Settings → Cluster (pending). russh requires
+// an UNencrypted key file (no agent/passphrase prompt in headless mode).
+const BLACK_CREDS = {
+  host: '192.168.1.64',
+  port: 22,
+  username: 'jatilq',
+  keyPath: 'C:\\Users\\jatilq\\.ssh\\meridian_black',
+};
+
 const nodes = ref<NodeView[]>(
   NODES.map(n => ({ name: n.name, host: n.host, role: n.role, online: false, cpu: null, ram: null, gpus: [], error: null })),
 );
@@ -62,7 +72,7 @@ async function refreshNode(idx: number) {
   try {
     const snap = def.local
       ? await invoke<HardwareSnapshot>('get_local_hardware')
-      : await invoke<HardwareSnapshot>('get_remote_hardware', { vendor: def.vendor });
+      : await invoke<HardwareSnapshot>('get_remote_hardware', { creds: BLACK_CREDS, vendor: def.vendor });
     nodes.value[idx] = { name: def.name, host: def.host, role: def.role, ...snap };
   }
   catch (error) {
@@ -81,7 +91,10 @@ async function launchRpcSlave() {
   rpcLaunching.value = true;
   rpcMessage.value = '';
   try {
-    const out = await invoke<string>('launch_rpc_slave', { host: '192.168.1.64' });
+    const out = await invoke<string>('launch_rpc_slave', {
+      creds: BLACK_CREDS,
+      rpcCommand: 'llama-server --rpc 0.0.0.0:50052',
+    });
     rpcMessage.value = out || 'RPC slave launch requested.';
   }
   catch (error) {

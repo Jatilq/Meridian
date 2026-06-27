@@ -258,12 +258,13 @@ pub async fn get_local_hardware() -> Result<HardwareSnapshot, String> {
     })
 }
 
-/// Parse Linux /proc-style CPU name from `cat /proc/cpuinfo`.
-fn parse_proc_cpu_name(out: &str) -> Option<String> {
+/// Parse a `KEY=value` line from PowerShell Write-Output blocks.
+fn parse_kv(out: &str, key: &str) -> Option<String> {
     out.lines()
-        .find(|l| l.starts_with("model name"))
-        .and_then(|l| l.split(':').nth(1))
+        .find(|l| l.trim_start().starts_with(&format!("{}=", key)))
+        .and_then(|l| l.splitn(2, '=').nth(1))
         .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 /// Remote hardware snapshot over SSH (used for BLACK). Gathers CPU/RAM via
@@ -276,38 +277,65 @@ pub async fn get_remote_hardware(creds: SshCredentials, vendor: String) -> Resul
         return Ok(HardwareSnapshot { online: false, cpu: None, ram: None, gpus: vec![], error: Some(e) });
     }
 
-    // CPU name + core count.
-    let cpu_name = ssh_exec(&creds, "cat /proc/cpuinfo")
-        .await
-        .ok()
-        .and_then(|o| parse_proc_cpu_name(&o))
-        .unwrap_or_else(|| "Unknown CPU".to_string());
-    let cores = ssh_exec(&creds, "nproc")
-        .await
-        .ok()
-        .and_then(|o| o.trim().parse::<u32>().ok())
-        .unwrap_or(0);
-    // CPU utilization: 100 - idle% from `top` one-shot.
-    let cpu_util = ssh_exec(&creds, "top -bn1 | grep '%Cpu' | head -1")
-        .await
-        .ok()
-        .and_then(|o| parse_top_cpu_util(&o))
-        .unwrap_or(0.0);
+    // CPU via CIM (BLACK is Windows; wmic is deprecated, use PowerShell CIM).
+    let cpu_out = ssh_exec(
+        &creds,
+        "powershell -Command \"$c=Get-CimInstance Win32_Processor; Write-Output ('NAME='+$c.Name); Write-Output ('CORES='+$c.NumberOfCores); Write-Output ('LOAD='+$c.LoadPercentage)\"",
+    )
+    .await
+    .unwrap_or_default();
+    let cpu_name = parse_kv(&cpu_out, "NAME").unwrap_or_else(|| "Unknown CPU".to_string());
+    let cores = parse_kv(&cpu_out, "CORES").and_then(|s| s.trim().parse::<u32>().ok()).unwrap_or(0);
+    let cpu_util = parse_kv(&cpu_out, "LOAD").and_then(|s| s.trim().parse::<f32>().ok()).unwrap_or(0.0);
 
-    // RAM via `free -m` (MB).
-    let (total_mb, used_mb, free_mb) = ssh_exec(&creds, "free -m")
-        .await
-        .ok()
-        .and_then(|o| parse_free_mb(&o))
-        .unwrap_or((0, 0, 0));
+    // RAM via CIM (values in KB).
+    let ram_out = ssh_exec(
+        &creds,
+        "powershell -Command \"$o=Get-CimInstance Win32_OperatingSystem; Write-Output ('TOTAL_KB='+$o.TotalVisibleMemorySize); Write-Output ('FREE_KB='+$o.FreePhysicalMemory)\"",
+    )
+    .await
+    .unwrap_or_default();
+    let total_mb = parse_kv(&ram_out, "TOTAL_KB").and_then(|s| s.trim().parse::<u64>().ok()).map(|kb| kb / 1024).unwrap_or(0);
+    let free_mb = parse_kv(&ram_out, "FREE_KB").and_then(|s| s.trim().parse::<u64>().ok()).map(|kb| kb / 1024).unwrap_or(0);
+    let used_mb = total_mb.saturating_sub(free_mb);
     let ram_util = if total_mb > 0 { (used_mb as f32 / total_mb as f32) * 100.0 } else { 0.0 };
 
     // GPUs.
     let gpus = match vendor.as_str() {
-        "amd" => ssh_exec(&creds, "rocm-smi --showuse --showmemuse --showtemp --json")
-            .await
-            .map(|o| parse_rocm_smi(&o))
-            .unwrap_or_default(),
+        "amd" => {
+            // Try rocm-smi first (full stats if the ROCm SDK is installed).
+            let rocm = ssh_exec(&creds, "rocm-smi --showuse --showmemuse --showtemp --json")
+                .await
+                .map(|o| parse_rocm_smi(&o))
+                .unwrap_or_default();
+            if !rocm.is_empty() {
+                rocm
+            } else {
+                // Fallback: gaming AMD cards on Windows have no rocm-smi. Get the
+                // GPU NAME via CIM. VRAM/util are unavailable (Windows AdapterRAM
+                // is capped at 4GB by a DWORD overflow), so report them as 0 →
+                // the UI shows them as unavailable rather than a wrong number.
+                let cim = ssh_exec(
+                    &creds,
+                    "powershell -Command \"Get-CimInstance Win32_VideoController | Where-Object { $_.Name -notmatch 'Parsec|Virtual|Basic' } | Select-Object -ExpandProperty Name\"",
+                )
+                .await
+                .unwrap_or_default();
+                cim.lines()
+                    .map(|l| l.trim())
+                    .filter(|l| !l.is_empty())
+                    .enumerate()
+                    .map(|(i, name)| GpuStat {
+                        index: i as u32,
+                        name: name.to_string(),
+                        utilization: 0,
+                        memory_used: 0,
+                        memory_total: 0,
+                        temperature: 0,
+                    })
+                    .collect()
+            }
+        }
         _ => ssh_exec(&creds, NVIDIA_SMI_CMD)
             .await
             .map(|o| parse_nvidia_smi(&o))
@@ -324,6 +352,7 @@ pub async fn get_remote_hardware(creds: SshCredentials, vendor: String) -> Resul
 }
 
 /// Parse `top -bn1` %Cpu line → utilization percent (100 - idle).
+#[allow(dead_code)]
 fn parse_top_cpu_util(out: &str) -> Option<f32> {
     // e.g. "%Cpu(s):  3.2 us,  1.1 sy, ...,  94.5 id, ..."
     let idle = out
@@ -335,6 +364,7 @@ fn parse_top_cpu_util(out: &str) -> Option<f32> {
 }
 
 /// Parse `free -m` → (total, used, free) in MB from the Mem: line.
+#[allow(dead_code)]
 fn parse_free_mb(out: &str) -> Option<(u64, u64, u64)> {
     let line = out.lines().find(|l| l.starts_with("Mem:"))?;
     let cols: Vec<&str> = line.split_whitespace().collect();
