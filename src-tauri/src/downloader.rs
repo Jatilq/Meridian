@@ -5,7 +5,7 @@
 use crate::process_runner::run_command_blocking;
 use std::collections::HashMap;
 use std::fs;
-use std::io::Write;
+use std::io::{Write, Seek, SeekFrom};
 use std::path::Path;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
@@ -171,6 +171,19 @@ impl DownloaderDb {
                 [],
             )
             .map_err(|e| format!("Failed to create history table: {}", e))?;
+
+        // One-time cleanup: remove bogus "completed" history rows that were
+        // actually the HTML page of a YouTube URL fetched via the old direct-HTTP
+        // path (filename 'watch', tiny size). Real videos are far larger and
+        // come from the yt-dlp path now.
+        self.conn
+            .execute(
+                "DELETE FROM download_history
+                 WHERE (url LIKE '%youtube.com%' OR url LIKE '%youtu.be%')
+                   AND COALESCE(downloaded_bytes, 0) < 102400",
+                [],
+            )
+            .map_err(|e| format!("Failed to purge bogus history: {}", e))?;
 
         Ok(())
     }
@@ -352,16 +365,28 @@ fn generate_id() -> String {
 }
 
 pub fn find_ytdlp() -> Option<String> {
-    let candidates = vec![
-        "yt-dlp",
-        "yt-dlp.exe",
-        "./yt-dlp",
-        "./bin/yt-dlp",
+    let mut candidates: Vec<String> = vec![
+        "yt-dlp".to_string(),
+        "yt-dlp.exe".to_string(),
+        "./yt-dlp".to_string(),
+        "./bin/yt-dlp".to_string(),
     ];
-    for candidate in candidates {
+
+    // Bundled resource: Tauri places bundled binaries next to the executable.
+    // Check exe-dir/yt-dlp.exe and exe-dir/resources/yt-dlp.exe so the shipped
+    // copy is found even when yt-dlp isn't on PATH.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            for rel in ["yt-dlp.exe", "yt-dlp", "resources/yt-dlp.exe", "resources/yt-dlp"] {
+                candidates.push(dir.join(rel).to_string_lossy().to_string());
+            }
+        }
+    }
+
+    for candidate in &candidates {
         if let Ok(output) = Command::new(candidate).arg("--version").output() {
             if output.status.success() {
-                return Some(candidate.to_string());
+                return Some(candidate.clone());
             }
         }
     }
@@ -371,6 +396,36 @@ pub fn find_ytdlp() -> Option<String> {
 #[tauri::command]
 pub fn get_qt_downloader_status() -> Result<bool, String> {
     Ok(find_ytdlp().is_some())
+}
+
+/// Probe a URL with `yt-dlp --simulate --print filename`. Returns the filename
+/// yt-dlp would use if it recognizes the URL, or None if yt-dlp is missing or
+/// doesn't handle this URL (so the caller can fall back to direct HTTP).
+pub fn probe_ytdlp_filename(url: &str) -> Option<String> {
+    let binary = find_ytdlp()?;
+    let result = run_command_blocking(
+        &binary,
+        &["--simulate", "--no-warnings", "--print", "filename", "-o", "%(title)s.%(ext)s", url],
+        YTDLP_TIMEOUT,
+    )
+    .ok()?;
+
+    if !result.is_success() {
+        return None;
+    }
+
+    let name = String::from_utf8_lossy(&result.stdout)
+        .lines()
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+
+    if name.is_empty() {
+        None
+    } else {
+        Some(name)
+    }
 }
 
 #[tauri::command]
@@ -469,34 +524,32 @@ async fn download_chunked(
     let chunk_count = chunk_count.max(1);
     let dest_path = Path::new(dest_dir).join(safe_file_name(file_name));
     let chunk_size = (total_size + chunk_count - 1) / chunk_count;
-    let mut handles = Vec::new();
+
+    // Pre-create the file at full size so we can write each chunk at its offset
+    // as it arrives — reporting progress incrementally instead of buffering the
+    // whole download in memory and only writing/reporting at the end.
+    let mut file = fs::File::create(&dest_path).map_err(|e| format!("Failed to create file: {}", e))?;
+    let mut downloaded: u64 = 0;
 
     for chunk_idx in 0..chunk_count {
+        if token.is_cancelled() {
+            drop(file);
+            let _ = fs::remove_file(&dest_path);
+            return Err(CANCELLED_MARKER.to_string());
+        }
         let start = chunk_idx * chunk_size;
-        let end = if start + chunk_size > total_size { total_size - 1 } else { start + chunk_size - 1 };
         if start >= total_size {
             break;
         }
-        let url = url.to_string();
-        let handle = tauri::async_runtime::spawn(async move { fetch_chunk(&url, start, end).await });
-        handles.push((chunk_idx, handle));
-    }
+        let end = if start + chunk_size > total_size { total_size - 1 } else { start + chunk_size - 1 };
 
-    let mut parts: Vec<(u64, Vec<u8>)> = Vec::new();
-    for (chunk_idx, handle) in handles {
-        let data = handle.await.map_err(|e| format!("Chunk task failed: {}", e))??;
-        parts.push((chunk_idx, data));
-    }
-
-    parts.sort_by_key(|(idx, _)| *idx);
-
-    let mut file = fs::File::create(&dest_path).map_err(|e| format!("Failed to create file: {}", e))?;
-    let mut downloaded: u64 = 0;
-    for (_, data) in &parts {
-        file.write_all(data).map_err(|e| format!("Failed to write file: {}", e))?;
+        let data = fetch_chunk(url, start, end).await?;
+        file.seek(SeekFrom::Start(start)).map_err(|e| format!("Seek error: {}", e))?;
+        file.write_all(&data).map_err(|e| format!("Failed to write file: {}", e))?;
         downloaded += data.len() as u64;
         on_progress(downloaded, total_size);
     }
+    file.flush().map_err(|e| format!("Flush error: {}", e))?;
     drop(file);
 
     let metadata = fs::metadata(&dest_path).map_err(|e| format!("Failed to stat output: {}", e))?;
@@ -577,9 +630,23 @@ pub async fn start_download(
     auto_save_folder: Option<String>,
     chunk_count: u64,
 ) -> Result<DownloadItem, String> {
-    let file_name = file_name_hint.unwrap_or_else(|| {
-        url.rsplit('/').next().unwrap_or("download").split('?').next().unwrap_or("download").to_string()
-    });
+    // Decide route + filename up front:
+    // - explicit format selected -> yt-dlp path
+    // - no format -> probe yt-dlp; if it recognizes the URL, use yt-dlp + the
+    //   name it reports; otherwise fall back to direct HTTP with URL-derived name.
+    let explicit_format = _format_id.as_ref().filter(|f| !f.trim().is_empty()).cloned();
+    let probed_name = if explicit_format.is_none() && file_name_hint.is_none() {
+        probe_ytdlp_filename(&url)
+    } else {
+        None
+    };
+    let use_ytdlp = explicit_format.is_some() || probed_name.is_some();
+
+    let file_name = file_name_hint
+        .or_else(|| probed_name.clone())
+        .unwrap_or_else(|| {
+            url.rsplit('/').next().unwrap_or("download").split('?').next().unwrap_or("download").to_string()
+        });
 
     let id = generate_id();
     let now = now_ts();
@@ -625,55 +692,60 @@ pub async fn start_download(
     };
 
     // Route to yt-dlp when a format was selected (Gap 4); otherwise use the
-    // direct/chunked HTTP path.
-    let result = if let Some(fmt) = _format_id.as_ref().filter(|f| !f.trim().is_empty()) {
-        let pct_data_dir = app_data_dir.to_string();
-        let pct_id = id.clone();
-        download_with_ytdlp(&url, &dest_dir, &file_name, fmt, token.clone(), move |pct| {
-            if let Ok(db) = DownloaderDb::open(&pct_data_dir) {
-                let _ = db.update_progress(&pct_id, (pct / 100.0).clamp(0.0, 1.0), None, 0);
+    // direct/chunked HTTP path. The transfer runs in a BACKGROUND task so this
+    // command returns immediately — the frontend polls downloader_get_state for
+    // live progress instead of blocking on the whole download.
+    let returned_item = item.clone();
+    let bg_data_dir = app_data_dir.to_string();
+    let bg_registry = registry.clone();
+    let bg_token = token.clone();
+    let bg_use_ytdlp = use_ytdlp;
+    // Explicit format if chosen, else "best" when yt-dlp recognized the URL.
+    let bg_format = explicit_format.clone().unwrap_or_else(|| "best".to_string());
+    tauri::async_runtime::spawn(async move {
+        let mut item = item;
+        let result = if bg_use_ytdlp {
+            let pct_data_dir = bg_data_dir.clone();
+            let pct_id = id.clone();
+            download_with_ytdlp(&url, &dest_dir, &file_name, &bg_format, bg_token.clone(), move |pct| {
+                if let Ok(db) = DownloaderDb::open(&pct_data_dir) {
+                    let _ = db.update_progress(&pct_id, (pct / 100.0).clamp(0.0, 1.0), None, 0);
+                }
+            }).await
+        } else {
+            download_direct(&url, &dest_dir, &file_name, chunk_count, bg_token.clone(), progress_cb).await
+        };
+
+        match result {
+            Ok(path) => {
+                item.status = DownloadStatus::Completed;
+                item.progress = 1.0;
+                item.file_path = Some(path);
+                item.finished_at = Some(now_ts());
             }
-        }).await
-    } else {
-        download_direct(&url, &dest_dir, &file_name, chunk_count, token.clone(), progress_cb).await
-    };
-
-    match result {
-        Ok(path) => {
-            item.status = DownloadStatus::Completed;
-            item.progress = 1.0;
-            item.file_path = Some(path);
-            item.finished_at = Some(now_ts());
-        }
-        Err(err) if err == CANCELLED_MARKER => {
-            // Cancelled/paused: leave status as already set in DB by the command,
-            // remove the registry entry and return without moving to history.
-            registry.remove(&id);
-            let db = DownloaderDb::open(app_data_dir)?;
-            let queue = db.load_queue()?;
-            if let Some(existing) = queue.into_iter().find(|i| i.id == id) {
-                return Ok(existing);
+            Err(err) if err == CANCELLED_MARKER => {
+                // Cancelled/paused: status already set in DB by the command;
+                // just release the registry slot and leave the row in place.
+                bg_registry.remove(&id);
+                return;
             }
-            return Ok(item);
+            Err(err) => {
+                item.status = DownloadStatus::Failed;
+                item.error = Some(err);
+                item.finished_at = Some(now_ts());
+            }
         }
-        Err(err) => {
-            item.status = DownloadStatus::Failed;
-            item.error = Some(err);
-            item.finished_at = Some(now_ts());
+
+        // Move the finished/failed item from queue to history (Gap 1).
+        if let Ok(mut db) = DownloaderDb::open(&bg_data_dir) {
+            let _ = db.update(&item);
+            let _ = db.move_to_history(&item);
         }
-    }
+        bg_registry.remove(&id);
+    });
 
-    // Move the finished/failed item from queue to history (Gap 1).
-    {
-        let mut db = DownloaderDb::open(app_data_dir)?;
-        let _ = db.update(&item);
-        db.move_to_history(&item)?;
-    }
-
-    registry.remove(&id);
-    let final_item = item;
-
-    Ok(final_item)
+    // Return the queued item immediately; progress is polled by the frontend.
+    Ok(returned_item)
 }
 
 pub async fn cancel_download(db: &mut DownloaderDb, registry: &DownloaderRegistry, id: String) -> Result<(), String> {
