@@ -2,7 +2,7 @@
 
 ## Who You Are Working For
 
-JC. Hobbyist. Retired network engineer. Non-programmer — does not write code, does not want to. Runs a two-machine AI inference homelab: MAMBA (192.168.1.67, 3× RTX 3060, 36GB VRAM) and BLACK (192.168.1.64, RX 6900 XT, 16GB VRAM). Combined via llama.cpp RPC: 52GB effective VRAM. Uses 9Router as OpenAI-compatible proxy. All development is agent-driven.
+JC. Hobbyist. Non-programmer — does not write code, does not want to. Runs a two-machine AI inference homelab: MAMBA (<MAMBA_IP>, 3× RTX 3060, 36GB VRAM) and BLACK (<BLACK_IP>, RX 6900 XT, 16GB VRAM). Combined via llama.cpp RPC: 52GB effective VRAM. Uses 9Router as OpenAI-compatible proxy. All development is agent-driven.
 
 ## The Project
 
@@ -59,6 +59,19 @@ No random fixes. No asking JC to try things.
 ## When Unsure
 
 State the uncertainty. Propose two options max. Ask JC to choose. Never proceed on assumptions for anything affecting files, credentials, or project structure.
+
+---
+
+## JC's Workflow — Read This Carefully
+
+JC manages this project asynchronously. He is often on another machine doing other things and checks in when he thinks the agent is ready for input. He is NOT sitting watching the terminal.
+
+This means:
+- If JC does not respond, he is busy — WAIT. Do not start a timer and proceed when it expires.
+- Never make unilateral decisions because a timeout was reached. Hold your position and wait indefinitely.
+- If you need a decision before proceeding, state clearly what you need and stop. Do not proceed, do not guess, do not pick the "safe" option on your own.
+- The only exception: if the current operation is clearly safe and reversible (like running a read-only diagnostic), you may complete it and report. Never take external or destructive actions without explicit confirmation.
+- Push to GitHub, SSH commands, file deletions, and anything with external side effects always require explicit confirmation — no timeouts apply.
 
 ---
 

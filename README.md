@@ -100,8 +100,8 @@ Meridian (Electron + Vue)
 
 | Machine | IP | GPU | Role |
 |---|---|---|---|
-| MAMBA | 192.168.1.67 | 3× RTX 3060 (36GB) | Primary inference, headless server |
-| BLACK | 192.168.1.64 | RX 6900 XT (16GB) | Daily driver, RPC slave |
+| MAMBA | <MAMBA_IP> | 3× RTX 3060 (36GB) | Primary inference, headless server |
+| BLACK | <BLACK_IP> | RX 6900 XT (16GB) | Daily driver, RPC slave |
 | Combined | — | 52GB effective | Large model inference |
 | 9Router | localhost on MAMBA | — | OpenAI-compatible proxy |
 | Omnix | embedded in Meridian | WebGPU | Lightweight on-device AI |

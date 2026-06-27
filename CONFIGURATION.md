@@ -82,8 +82,8 @@ Omnix's transformers.js (unsupported architecture or WebGPU memory limits).
 ## Cluster (Phase 6 — in progress)
 
 SSH-based control of the inference cluster:
-- MAMBA `192.168.1.67` (3× RTX 3060, 36GB) — primary inference, headless
-- BLACK `192.168.1.64` (RX 6900 XT, 16GB) — daily driver, RPC slave
+- MAMBA `<MAMBA_IP>` (3× RTX 3060, 36GB) — primary inference, headless
+- BLACK `<BLACK_IP>` (RX 6900 XT, 16GB) — daily driver, RPC slave
 - Combined via llama.cpp RPC: ~52GB effective VRAM
 
 (Configuration UI documented when Phase 6 lands.)

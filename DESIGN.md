@@ -127,12 +127,12 @@ Before sending to the model, route the query through `/api/director` to classify
 ┌─────────────────────────────────────┐
 │ CLUSTER CONTROL                     │
 ├─────────────────────────────────────┤
-│ MAMBA (192.168.1.67)               │
+│ MAMBA (<MAMBA_IP>)               │
 │ ● Online  |  3× RTX 3060  |  36GB  │
 │ Models: [loaded model name]         │
 │ GPU: [utilization bar]              │
 ├─────────────────────────────────────┤
-│ BLACK (192.168.1.64)               │
+│ BLACK (<BLACK_IP>)               │
 │ ● Online  |  RX 6900 XT  |  16GB  │
 │ RPC Slave: [OFF]    [LAUNCH SLAVE] │
 ├─────────────────────────────────────┤
@@ -141,12 +141,12 @@ Before sending to the model, route the query through `/api/director` to classify
 │ ● 52GB (MAMBA + BLACK)  [ACTIVE]   │
 ├─────────────────────────────────────┤
 │ 9Router Status: ● Connected        │
-│ Endpoint: http://192.168.1.67:PORT │
+│ Endpoint: http://<MAMBA_IP>:PORT │
 └─────────────────────────────────────┘
 ```
 
 ### Launch Slave Button
-1. SSH into BLACK (192.168.1.64) using stored credentials
+1. SSH into BLACK (<BLACK_IP>) using stored credentials
 2. Run llama.cpp RPC slave command on BLACK
 3. 9Router detects expanded pool
 4. Status updates to 52GB combined
@@ -230,10 +230,10 @@ Pre-configured for MAMBA and BLACK. User can add more in settings.
 |---|---|---|
 | AI — Omnix | Enable Omnix | on |
 | AI — Omnix | Default model | qwen-3-0.6b |
-| AI — 9Router | Endpoint URL | http://192.168.1.67:PORT |
+| AI — 9Router | Endpoint URL | http://<MAMBA_IP>:PORT |
 | AI — 9Router | Default model | (from dropdown) |
-| Cluster | MAMBA IP | 192.168.1.67 |
-| Cluster | BLACK IP | 192.168.1.64 |
+| Cluster | MAMBA IP | <MAMBA_IP> |
+| Cluster | BLACK IP | <BLACK_IP> |
 | Cluster | SSH username | jatilq |
 | Cluster | SSH key path | (configurable) |
 | Cluster | RPC slave command | (configurable) |
