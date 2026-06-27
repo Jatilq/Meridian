@@ -52,6 +52,7 @@ import {
   shouldPrependLocationsCrumb,
 } from '@/utils/virtual-locations';
 import { useOpenCopiedPath } from './composables/use-open-copied-path';
+import { isSshPath, parseSshPath, buildSshPath } from '@/utils/ssh-connections';
 
 const props = defineProps<{
   currentPath: string;
@@ -94,6 +95,28 @@ const addressParts = computed(() => {
       isLast: true,
       virtual: true,
     }];
+  }
+
+  // Remote SSH path: show "ssh://host" as the root crumb, then each remote
+  // path segment, each navigable as ssh://host/seg1/seg2/...
+  if (isSshPath(props.currentPath)) {
+    const parsed = parseSshPath(props.currentPath);
+    const host = parsed?.host ?? '';
+    const label = parsed?.connection?.label ?? host;
+    const remoteParts = (parsed?.remotePath ?? '').split('/').filter(Boolean);
+    const sshParts: AddressBarPart[] = [{
+      path: buildSshPath(host, ''),
+      name: `ssh://${label}`,
+      isLast: remoteParts.length === 0,
+    }];
+    remoteParts.forEach((seg, index) => {
+      sshParts.push({
+        path: buildSshPath(host, remoteParts.slice(0, index + 1).join('/')),
+        name: seg,
+        isLast: index === remoteParts.length - 1,
+      });
+    });
+    return sshParts;
   }
 
   const normalizedPath = normalizePath(props.currentPath).replace(/\/+$/, '');
