@@ -558,8 +558,64 @@ export function useFileBrowserSelection(
     return true;
   }
 
+  // Transfer files across the local/remote boundary via SFTP. Returns the
+  // count successfully transferred. Handles local->remote (upload),
+  // remote->local (download), and remote->remote on the same host (rename).
+  async function handleSftpTransfer(sourcePaths: string[], targetPath: string): Promise<number> {
+    const targetSftp = sftpContextForPath(targetPath);
+    let count = 0;
+
+    for (const source of sourcePaths) {
+      const sourceSftp = sftpContextForPath(source);
+      const leaf = source.replace(/\/+$/, '').split('/').pop() || 'file';
+      try {
+        if (!sourceSftp && targetSftp) {
+          // local -> remote (upload)
+          const sep = targetSftp.remotePath && !targetSftp.remotePath.endsWith('/') ? '/' : '';
+          const remoteDest = `${targetSftp.remotePath}${sep}${leaf}`;
+          await invoke('sftp_upload', { creds: targetSftp.creds, localPath: source, remotePath: remoteDest });
+          count++;
+        }
+        else if (sourceSftp && !targetSftp) {
+          // remote -> local (download)
+          const sep = targetPath.endsWith('/') ? '' : '/';
+          const localDest = `${targetPath}${sep}${leaf}`;
+          await invoke('sftp_download', { creds: sourceSftp.creds, remotePath: sourceSftp.remotePath, localPath: localDest });
+          count++;
+        }
+        else if (sourceSftp && targetSftp && sourceSftp.host === targetSftp.host) {
+          // remote -> remote on same host (move/rename)
+          const sep = targetSftp.remotePath && !targetSftp.remotePath.endsWith('/') ? '/' : '';
+          const remoteDest = `${targetSftp.remotePath}${sep}${leaf}`;
+          await invoke('sftp_rename', { creds: targetSftp.creds, from: sourceSftp.remotePath, to: remoteDest });
+          count++;
+        }
+        else {
+          console.error('Unsupported SFTP transfer (cross-host not supported):', source, '->', targetPath);
+        }
+      }
+      catch (error) {
+        console.error('SFTP transfer failed:', error);
+      }
+    }
+    return count;
+  }
+
   async function handleExternalDrop(sourcePaths: string[], targetPath: string, operation: 'copy' | 'move' = 'copy'): Promise<boolean> {
     if (isVirtualLocationPath(targetPath)) {
+      return false;
+    }
+
+    // Cross-boundary transfers between local and remote (SSH) panes route to
+    // SFTP upload/download instead of the local copy/move job.
+    const targetSftp = sftpContextForPath(targetPath);
+    const anySourceRemote = sourcePaths.some(p => isSshPath(p));
+    if (targetSftp || anySourceRemote) {
+      const transferred = await handleSftpTransfer(sourcePaths, targetPath);
+      if (transferred > 0) {
+        onRefresh();
+        return true;
+      }
       return false;
     }
 
