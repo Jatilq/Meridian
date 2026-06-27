@@ -16,7 +16,7 @@ import {
 import { BUILTIN_NAVIGATOR_ICON_THEME_IDS } from '@/types/icon-theme';
 
 export const USER_SETTINGS_SCHEMA_VERSION_KEY = '__schemaVersion';
-export const USER_SETTINGS_SCHEMA_VERSION = 19;
+export const USER_SETTINGS_SCHEMA_VERSION = 20;
 
 export const DEFAULT_GLOBAL_SEARCH_IGNORED_PATHS = [
   '/node_modules',
@@ -428,6 +428,15 @@ async function migrateUserSettingsStep(storage: StorageAdapter, fromVersion: num
     });
   }
 
+  if (fromVersion === 19 && toVersion === 20) {
+    // Backfill per-key aiPanel defaults for installs that already had a
+    // meridian.aiPanel object (where setDefaultObjectIfMissing skipped the
+    // new keys, leaving routerEndpoint/model/ttsEnabled unset).
+    await setDefaultStringIfMissing(storage, 'meridian.aiPanel.routerEndpoint', 'http://localhost:20128/v1');
+    await setDefaultStringIfMissing(storage, 'meridian.aiPanel.model', 'openrouter/openrouter/free');
+    await setDefaultBooleanIfMissing(storage, 'meridian.aiPanel.ttsEnabled', false);
+  }
+
   if (fromVersion === 6 && toVersion === 7) {
     const appData = await appDataDir();
     const mediaDir = `${appData.replace(/\\/g, '/')}/user-data/media`.replace(/\/+/g, '/');
@@ -492,6 +501,18 @@ async function setDefaultObjectIfMissing(
   const existingValue = await storage.get<unknown>(key);
 
   if (!existingValue || typeof existingValue !== 'object' || Array.isArray(existingValue)) {
+    await storage.set(key, defaultValue);
+  }
+}
+
+async function setDefaultStringIfMissing(
+  storage: StorageAdapter,
+  key: string,
+  defaultValue: string,
+) {
+  const existingValue = await storage.get<unknown>(key);
+
+  if (typeof existingValue !== 'string' || existingValue.trim() === '') {
     await storage.set(key, defaultValue);
   }
 }

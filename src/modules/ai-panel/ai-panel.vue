@@ -325,13 +325,10 @@ const omnixStatusLabel = computed(() => {
 let omnixPollTimer: ReturnType<typeof setInterval> | null = null;
 
 onMounted(() => {
-  if (aiPanelStore.useOmnix) {
-    void checkOmnixStatus();
-  }
+  void checkOmnixStatus();
+  void aiPanelStore.fetchModels();
   omnixPollTimer = setInterval(() => {
-    if (aiPanelStore.useOmnix) {
-      void checkOmnixStatus();
-    }
+    void checkOmnixStatus();
   }, 5000);
 });
 
