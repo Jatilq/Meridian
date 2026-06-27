@@ -41,10 +41,10 @@ const confirmDialogData = ref<{ title: string; description: string; onConfirm: (
 watch(
   () => aiPanelStore.isOpen,
   (open) => {
-    if (open && !aiPanelStore.modelsLoaded && !aiPanelStore.useOmnix) {
+    if (open && !aiPanelStore.modelsLoaded) {
       void aiPanelStore.fetchModels();
     }
-    if (open && aiPanelStore.useOmnix) {
+    if (open) {
       void checkOmnixStatus();
     }
   },
@@ -109,7 +109,9 @@ async function handleSend() {
       return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(ext || '');
     });
 
-    const systemPrompt = `You are a file management assistant inside Meridian.\nCurrent directory: ${currentPath}\nSelected files: ${selectedFiles.length > 0 ? selectedFiles.join(', ') : 'none'}\n\nRespond ONLY with valid JSON:\n{\n  "intent": "search|organize|analyze|rename|chat|vision",\n  "scope": "current|selected|all",\n  "preview_only": true,\n  "action": {},\n  "message": "human readable explanation"\n}`;
+    const systemPrompt = (aiPanelStore.systemPrompt || '')
+      .replace(/\{current_path\}/g, currentPath || '')
+      .replace(/\{selected_files\}/g, selectedFiles.length > 0 ? selectedFiles.join(', ') : 'none');
 
     let response: Response;
     if (omnixVisionReady && hasImage) {
@@ -155,8 +157,9 @@ async function handleSend() {
             ...aiPanelStore.messages.map((m: { role: 'user' | 'assistant'; content: string }) => ({ role: m.role, content: m.content })),
             { role: 'user', content: prompt },
           ],
-          temperature: 0.7,
-          max_tokens: 1024,
+          temperature: aiPanelStore.temperature,
+          max_tokens: aiPanelStore.maxTokens,
+          top_p: aiPanelStore.topP,
         }),
       });
     }
@@ -364,16 +367,14 @@ const confirmDescription = computed(() => confirmDialogData.value?.description |
     </div>
     <div class="ai-panel__controls">
       <Input
-        v-model="aiPanelStore.endpoint"
+        v-model="aiPanelStore.routerEndpoint"
         :placeholder="t('aiPanel.endpointPlaceholder')"
         class="ai-panel__endpoint-input"
-        :disabled="aiPanelStore.useOmnix"
       />
       <select
         :value="aiPanelStore.selectedModel"
         @change="aiPanelStore.setSelectedModel(($event.target as HTMLSelectElement).value)"
         class="ai-panel__model-select"
-        :disabled="aiPanelStore.useOmnix"
       >
         <option value="">{{ t('aiPanel.defaultModel') }}</option>
         <option

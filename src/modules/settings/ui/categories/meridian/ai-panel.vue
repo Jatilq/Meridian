@@ -4,7 +4,7 @@ Copyright © 2021 - present Aleksey Hoffman. All rights reserved.
 -->
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { BotIcon } from '@lucide/vue';
 import { SettingsItem } from '@/modules/settings';
@@ -16,6 +16,12 @@ import { useAiPanelStore } from '@/stores/runtime/ai-panel';
 const { t } = useI18n();
 const userSettingsStore = useUserSettingsStore();
 const aiPanelStore = useAiPanelStore();
+
+onMounted(() => {
+  // Populate the model dropdown from 9Router when the settings page opens,
+  // independent of whether the AI panel has been opened yet.
+  void aiPanelStore.fetchModels();
+});
 
 const endpointUrl = computed({
   get: () => userSettingsStore.userSettings.meridian.aiPanel.endpointUrl,
@@ -59,6 +65,42 @@ const ttsEnabled = computed({
     userSettingsStore.userSettings.meridian.aiPanel.ttsEnabled = value;
     userSettingsStore.setUserSettingsStorage('meridian.aiPanel.ttsEnabled', value);
     aiPanelStore.setTtsEnabled(value);
+  },
+});
+
+const systemPrompt = computed({
+  get: () => userSettingsStore.userSettings.meridian.aiPanel.systemPrompt,
+  set: (value: string) => {
+    userSettingsStore.userSettings.meridian.aiPanel.systemPrompt = value;
+    userSettingsStore.setUserSettingsStorage('meridian.aiPanel.systemPrompt', value);
+    aiPanelStore.setSystemPrompt(value);
+  },
+});
+
+const temperature = computed({
+  get: () => userSettingsStore.userSettings.meridian.aiPanel.temperature,
+  set: (value: number) => {
+    userSettingsStore.userSettings.meridian.aiPanel.temperature = value;
+    userSettingsStore.setUserSettingsStorage('meridian.aiPanel.temperature', value);
+    aiPanelStore.setTemperature(value);
+  },
+});
+
+const maxTokens = computed({
+  get: () => userSettingsStore.userSettings.meridian.aiPanel.maxTokens,
+  set: (value: number) => {
+    userSettingsStore.userSettings.meridian.aiPanel.maxTokens = value;
+    userSettingsStore.setUserSettingsStorage('meridian.aiPanel.maxTokens', value);
+    aiPanelStore.setMaxTokens(value);
+  },
+});
+
+const topP = computed({
+  get: () => userSettingsStore.userSettings.meridian.aiPanel.topP,
+  set: (value: number) => {
+    userSettingsStore.userSettings.meridian.aiPanel.topP = value;
+    userSettingsStore.setUserSettingsStorage('meridian.aiPanel.topP', value);
+    aiPanelStore.setTopP(value);
   },
 });
 </script>
@@ -106,6 +148,61 @@ const ttsEnabled = computed({
             {{ m.id }}
           </option>
         </select>
+      </div>
+      <div class="ai-panel-settings__field">
+        <label class="ai-panel-settings__label" for="ai-panel-system-prompt">
+          System prompt
+        </label>
+        <textarea
+          id="ai-panel-system-prompt"
+          v-model="systemPrompt"
+          rows="4"
+          class="ai-panel-settings__select"
+        />
+        <span class="ai-panel-settings__hint">
+          Placeholders: {current_path}, {selected_files}
+        </span>
+      </div>
+      <div class="ai-panel-settings__field">
+        <label class="ai-panel-settings__label" for="ai-panel-temperature">
+          Temperature ({{ temperature }})
+        </label>
+        <Input
+          id="ai-panel-temperature"
+          v-model.number="temperature"
+          type="number"
+          step="0.1"
+          min="0"
+          max="2"
+          class="ai-panel-settings__input"
+        />
+      </div>
+      <div class="ai-panel-settings__field">
+        <label class="ai-panel-settings__label" for="ai-panel-max-tokens">
+          Max tokens
+        </label>
+        <Input
+          id="ai-panel-max-tokens"
+          v-model.number="maxTokens"
+          type="number"
+          step="64"
+          min="1"
+          class="ai-panel-settings__input"
+        />
+      </div>
+      <div class="ai-panel-settings__field">
+        <label class="ai-panel-settings__label" for="ai-panel-top-p">
+          Top-p ({{ topP }})
+        </label>
+        <Input
+          id="ai-panel-top-p"
+          v-model.number="topP"
+          type="number"
+          step="0.05"
+          min="0"
+          max="1"
+          class="ai-panel-settings__input"
+        />
       </div>
 
       <!-- Local AI Enhancement: Omnix (optional, off by default) -->
