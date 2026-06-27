@@ -2,45 +2,73 @@
 
 ## Core Philosophy
 
-Meridian is Sigma File Manager with three additions. Do not redesign Sigma. Do not change Sigma's existing UI, layout, colors, or behavior unless directly required to integrate a new Meridian feature. Sigma's design is the design — match it exactly for all new components.
+Meridian is a local-first AI workstation built on Sigma File Manager. Do not redesign Sigma. Add to it. Every new component must match Sigma's existing dark aesthetic exactly — same colors, fonts, spacing, border radius.
 
-> Stack note: Meridian is **Tauri 2 + Vue 3 + Rust** (not Electron). New backend logic goes in Rust in `src-tauri/` and is exposed to the Vue frontend as Tauri commands (`#[tauri::command]`, registered in `lib.rs`, called with `invoke()`). Networking uses `reqwest`/`axum` (already in `Cargo.toml`); persistence uses `rusqlite` (`meridian.db`).
-
----
-
-## Sigma's Existing Design (reference — do not change)
-
-- Dark theme: near-black backgrounds, subtle borders, clean typography
-- Left icon sidebar for navigation (home, files, bookmarks, settings, extensions)
-- Home page: hero banner with background image, user directory shortcuts, drive cards with usage %
-- File view: grouped by type (FOLDERS / VIDEOS / OTHER FILES), card thumbnails for media
-- Right panel: file/folder metadata (size, path, items, dates)
-- Tabs at top with folder names
-- Breadcrumb navigation bar
-
-All new Meridian UI must match this aesthetic — same colors, same font sizes, same border radius, same spacing rhythm.
+The file manager is the shell. Everything else — AI, cluster control, SSH, coding agent — lives inside it.
 
 ---
 
-## Addition 1: AI Panel
+## Sigma's Existing Design (do not change)
+
+- Dark theme: near-black backgrounds (#1a1a1a range), subtle borders, clean typography
+- Left icon sidebar: home, files, bookmarks, settings, extensions
+- Home page: hero banner, user directory shortcuts, drive cards with usage %
+- File view: grouped by type, card thumbnails for media
+- Right panel: file/folder metadata
+- Tabs at top, breadcrumb navigation
+- Extensions system
+
+All new Meridian UI matches this aesthetic exactly.
+
+---
+
+## Component 1: Omnix Embedded Engine
+
+### Architecture Change (critical)
+Omnix does NOT run as a separate spawned process. It runs INSIDE Meridian's Electron main process:
+- Omnix's `server.ts` Express API starts when Meridian starts
+- A hidden `BrowserWindow` loads Omnix's compute worker renderer (provides WebGPU for model inference)
+- All models including large ones have full WebGPU access through Meridian's own renderer
+- No separate Omnix install, no spawn/kill complexity, no process management
+
+### Startup Sequence
+1. Meridian Electron main process starts
+2. Main window loads (Sigma UI)
+3. Hidden BrowserWindow created → loads Omnix compute worker
+4. Omnix Express server starts on port 9777
+5. AI panel polls `/api/health` → status dot updates
+6. Ready
+
+### Settings (simplified from previous design)
+- Enable/disable Omnix toggle (default: on)
+- Model selector (populated from Omnix's available models)
+- No path config needed — Omnix is bundled
+
+---
+
+## Component 2: AI Panel
 
 ### Placement
-Collapsible panel, right side of file view or bottom bar — whichever integrates more cleanly with Sigma's existing layout. Toggle with `Ctrl+Space`.
+Collapsible right-side panel. Toggle with `Ctrl+Space`. Independent of info panel.
+
+### Modes
+- **Omnix mode** — calls `localhost:9777` — lightweight, always available, embedded
+- **9Router mode** — calls configured endpoint — full model pool, requires MAMBA
 
 ### Components
-- **Endpoint field:** text input, default: `http://localhost:11434` (user will set to 9Router URL)
-- **Model dropdown:** populated by `GET /v1/models` from configured endpoint — refreshes when endpoint changes
-- **Omnix toggle:** switch to use Omnix at `http://localhost:7770/api` instead
-- **Input field:** natural language, placeholder: `Ask about files or give an instruction...`
-- **Result area:** scrollable, shows AI response or action result
-- **Send:** Enter key or button
+- Mode toggle: Omnix / 9Router
+- Model dropdown (fetches from active endpoint's `/v1/models`)
+- Three-state status dot: grey = offline, yellow = running/no worker, green = inference ready
+- Natural language input field
+- Result/response area (scrollable)
+- Send button + Enter
 
-### System Prompt (injected automatically)
+### System Prompt (Omnix mode)
 ```
-You are a file management assistant inside Meridian.
+You are a file management assistant embedded in Meridian.
 Current directory: {current_path}
 Selected files: {selected_files}
-Directory listing: {file_list}
+Directory contents: {file_list}
 
 Respond ONLY with JSON:
 {
@@ -52,94 +80,189 @@ Respond ONLY with JSON:
 }
 ```
 
-### Intent Routing
-| Intent | Behavior |
-|---|---|
-| `search` | Highlight matching files in current pane |
-| `organize` | Show proposed move/rename plan, await confirmation |
-| `analyze` | Show summary in result area, no file action |
-| `rename` | Show batch rename diff, await confirmation |
-| `chat` | Show response in result area, no file action |
+### Intent Routing (via Omnix /api/director)
+Before sending to the model, route the query through `/api/director` to classify intent. Director returns the intent type, then the appropriate handler runs.
+
+### Voice Input (STT)
+- Microphone button in AI panel input field
+- Records audio → sends to `/api/stt` → populates input field with transcript
+- User reviews and hits Send
+
+### Voice Output (TTS)
+- Speaker button on any AI response
+- Sends response text to `/api/tts` → plays audio
+
+### Vision
+- When an image file is selected in the active pane and a query is submitted → automatically sends to `/api/vision` as multipart
+- No manual mode switching — Meridian detects the selected file type
 
 ### Safety
-- Never execute organize / rename / delete without confirmation dialog
-- Dialog shows exactly what changes, which files, with visible Cancel
-- Log all executed actions: timestamp, intent, files, outcome, confirmed/cancelled
+- Never execute organize/rename/delete without confirmation dialog
+- Log all AI actions to SQLite: timestamp, intent, files, outcome, confirmed/cancelled
 
 ---
 
-## Addition 2: Enhanced Downloader
+## Component 3: Enhanced Downloader
 
-Sigma already has a downloader. Extend it — do not replace it.
+### Already built — do not rebuild
+- Parallel chunk downloader (HTTP Range requests)
+- yt-dlp integration with format/quality selector
+- Persistent queue (SQLite) with pause/resume/cancel
+- Browser extension receiver on port 7771
 
-### Format/Quality Selector
-- Before any download, fetch formats via `yt-dlp --list-formats` (or `-J` for JSON)
-- User picks: Video+Audio / Audio only / quality level
-- Remember last choice per domain
-
-### Parallel Chunk Downloading (IDM-style)
-- For direct file URLs (not yt-dlp streams): check `Accept-Ranges: bytes` header
-- If supported: split into N chunks (default 8), download in parallel, reassemble
-- Implemented in Rust in `src-tauri/` using `reqwest` + `tokio` (already in `Cargo.toml`) — not Node
-- Show individual chunk progress merged into one overall bar
-- Verify file size after reassembly before deleting temp chunks
-
-### Download Queue
-- All downloads go through queue (max concurrent: configurable, default 3)
-- Per-item controls: Pause / Resume / Cancel
-- Queue persists across restarts via SQLite (`meridian.db` / `rusqlite`)
-- Shows: filename, source domain, progress %, speed, ETA
-
-### Auto-Save
-- Configurable default download folder in settings
-- Optional: auto-organize into subfolders (Videos/ Audio/ Files/)
-
-### Browser Extension (Chrome/Edge)
-- Manifest V3
-- Detects video/audio on page (m3u8, mp4, webm, common CDN patterns)
-- Overlay button on detected media elements
-- Click sends URL to Meridian. The receiver reuses Sigma's existing `axum` HTTP server pattern (see `src-tauri/src/lan_share/`) to expose a `localhost` endpoint (e.g. `POST /download`), with CORS headers so the extension can POST. (Optionally a Tauri command reachable via `@tauri-apps/plugin-http`.) This is a Rust-side HTTP server, not a Node server.
-- Meridian opens format selector, adds to queue
-- Extension needs CORS headers on Meridian's receiver
+### Remaining work
+- Browser extension icons (placeholder PNG files)
+- End-to-end test with real YouTube URL
 
 ---
 
-## Addition 3: Omnix Integration
+## Component 4: Cluster Control Panel
 
-- Settings toggle: "Use Omnix for AI"
-- When enabled: Meridian spawns `omnix --silent --dependent-pid <pid>` on startup (from Rust via `src-tauri/src/omnix.rs`, which exposes `spawn_omnix` / `kill_omnix` / `get_omnix_status` Tauri commands)
-- Meridian shuts Omnix down on exit (via dependent-pid it is automatic)
-- AI panel calls `/api/text` for text queries, `/api/vision` for image files
-- Status dot in AI panel: green = Omnix online, grey = offline
-- Falls back to configured endpoint if Omnix is offline
+### Access
+- Left sidebar icon (new icon below extensions)
+- Or via View menu → Cluster Control
+
+### Layout
+```
+┌─────────────────────────────────────┐
+│ CLUSTER CONTROL                     │
+├─────────────────────────────────────┤
+│ MAMBA (192.168.1.67)               │
+│ ● Online  |  3× RTX 3060  |  36GB  │
+│ Models: [loaded model name]         │
+│ GPU: [utilization bar]              │
+├─────────────────────────────────────┤
+│ BLACK (192.168.1.64)               │
+│ ● Online  |  RX 6900 XT  |  16GB  │
+│ RPC Slave: [OFF]    [LAUNCH SLAVE] │
+├─────────────────────────────────────┤
+│ Combined Pool                       │
+│ ○ 36GB (MAMBA only)                │
+│ ● 52GB (MAMBA + BLACK)  [ACTIVE]   │
+├─────────────────────────────────────┤
+│ 9Router Status: ● Connected        │
+│ Endpoint: http://192.168.1.67:PORT │
+└─────────────────────────────────────┘
+```
+
+### Launch Slave Button
+1. SSH into BLACK (192.168.1.64) using stored credentials
+2. Run llama.cpp RPC slave command on BLACK
+3. 9Router detects expanded pool
+4. Status updates to 52GB combined
+5. AI panel model dropdown refreshes
+
+### Node Monitoring
+- Poll MAMBA and BLACK status every 30 seconds
+- GPU utilization via SSH command (nvidia-smi for MAMBA, rocm-smi for BLACK)
+- Loaded model name via 9Router API
+
+### SSH Credentials
+- Stored in Meridian settings (encrypted)
+- Username, host, port, key file path or password
 
 ---
 
-## Settings Panel (new Meridian section within Sigma's Settings)
+## Component 5: SSH / SFTP File Browser
 
-Add a **Meridian** category in Sigma's existing Settings sidebar:
+### Integration
+- Remote machines appear as bookmarks in the bookmarks sidebar
+- Click a remote bookmark → one pane navigates to the remote filesystem
+- Remote pane looks identical to local pane (same columns, same operations)
+- Breadcrumb shows: `ssh://mamba/home/jatilq/` style paths
 
-| Setting | Type | Default |
+### Operations
+- Browse directories, open files (downloads to temp, opens locally)
+- Copy files between local and remote panes (drag and drop)
+- Rename, delete, new folder on remote
+- Upload: drag local files to remote pane
+- Download: drag remote files to local pane
+
+### Connections
+Pre-configured for MAMBA and BLACK. User can add more in settings.
+
+### Tech
+- Node `ssh2` library in Electron main process
+- SFTP subsystem for file operations
+- IPC between renderer (file pane) and main (ssh2 client)
+
+---
+
+## Component 6: Agent Coding Extension
+
+### Built on Sigma's Extension System
+- First-party extension, ships with Meridian
+- Appears in Extensions sidebar
+
+### Panel Layout
+```
+┌─────────────────────────────────────┐
+│ AGENT CODER                [model▼] │
+├─────────────────────────────────────┤
+│ Working on: [file path]             │
+│ [local] [remote: mamba] [remote: black] │
+├─────────────────────────────────────┤
+│                                     │
+│  [conversation / code output area]  │
+│                                     │
+├─────────────────────────────────────┤
+│ [input field]              [Send]   │
+└─────────────────────────────────────┘
+```
+
+### Behavior
+- Works on file currently selected in active pane (local or remote)
+- Remote files: read/write via SSH/SFTP
+- Calls AI panel API (9Router mode for coding tasks — needs Qwen3.6 or equivalent)
+- Can read, edit, create files directly
+- Shows diff before applying changes
+- Confirmation required before writes
+
+### Model Recommendation
+- Coding tasks → 9Router → Qwen3.6 35B (or whatever is loaded on the full 52GB pool)
+- Quick questions → Omnix → Qwen 0.6B
+
+---
+
+## Settings Panel (Meridian section)
+
+| Category | Setting | Default |
 |---|---|---|
-| AI endpoint URL | text | `http://localhost:11434` |
-| Default model | text | (blank = use dropdown) |
-| Use Omnix | toggle | off |
-| Auto-start Omnix | toggle | off |
-| Omnix path | text | auto-detect |
-| Download folder | folder picker | Downloads |
-| Max concurrent downloads | number | 3 |
-| Chunk count | number | 8 |
-| Auto-organize downloads | toggle | off |
-| Browser extension status | read-only | shows connected/disconnected |
+| AI — Omnix | Enable Omnix | on |
+| AI — Omnix | Default model | qwen-3-0.6b |
+| AI — 9Router | Endpoint URL | http://192.168.1.67:PORT |
+| AI — 9Router | Default model | (from dropdown) |
+| Cluster | MAMBA IP | 192.168.1.67 |
+| Cluster | BLACK IP | 192.168.1.64 |
+| Cluster | SSH username | jatilq |
+| Cluster | SSH key path | (configurable) |
+| Cluster | RPC slave command | (configurable) |
+| Cluster | Poll interval | 30s |
+| SSH/SFTP | Saved connections | MAMBA, BLACK |
+| Downloader | Save folder | E:\Downloads |
+| Downloader | Max concurrent | 3 |
+| Downloader | Chunk count | 8 |
+
+---
+
+## Build Phases (updated)
+
+- ✅ Phase 1 — Sigma running
+- ✅ Phase 2 — AI Panel
+- ✅ Phase 3 — Enhanced Downloader
+- ✅ Phase 4 — Settings
+- 🔄 Phase 5 — Omnix embedded (architectural change: hidden BrowserWindow, not spawn)
+- ⬜ Phase 6 — Cluster Control Panel
+- ⬜ Phase 7 — SSH/SFTP File Browser
+- ⬜ Phase 8 — Agent Coding Extension
+- ⬜ Phase 9 — Package & installer (bundle Omnix, sign, Start Menu)
 
 ---
 
 ## What NOT to Change in Sigma
 
-- Home page layout and hero banner
-- Navigation sidebar icons and behavior
+- Home page, hero banner, drive cards
+- Navigation sidebar icons (add new ones, don't replace)
 - File grouping and thumbnail display
-- Existing downloader UI (extend only)
-- Existing extensions system
-- Existing search
-- Color scheme, fonts, spacing, border radius
+- Existing extensions system (extend, don't replace)
+- Color scheme, fonts, spacing

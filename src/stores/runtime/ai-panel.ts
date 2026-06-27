@@ -4,6 +4,7 @@
 
 import { defineStore } from 'pinia';
 import { ref, computed, watch } from 'vue';
+import { invoke } from '@tauri-apps/api/core';
 import { useUserSettingsStore } from '@/stores/storage/user-settings';
 
 const STORAGE_KEY = 'meridian-ai-panel';
@@ -53,12 +54,16 @@ export const useAiPanelStore = defineStore('aiPanel', () => {
   const isLoading = ref(false);
   const messages = ref<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
   const input = ref('');
-  const endpoint = ref(userSettingsStore.userSettings.meridian?.aiPanel?.endpointUrl || persisted.endpoint || 'http://localhost:7770/api/text');
+  const endpoint = ref(userSettingsStore.userSettings.meridian?.aiPanel?.endpointUrl || persisted.endpoint || 'http://localhost:9777/api/text');
   const selectedModel = ref(userSettingsStore.userSettings.meridian?.aiPanel?.model || persisted.selectedModel || '');
   const models = ref<Array<{ id: string }>>([]);
   const modelsLoaded = ref(false);
   const useOmnix = ref(userSettingsStore.userSettings.meridian?.aiPanel?.omnixEnabled ?? persisted.useOmnix ?? false);
   const omnixOnline = ref(false);
+  const omnixPath = ref(userSettingsStore.userSettings.meridian?.aiPanel?.omnixPath || 'E:\\ai\\Apps\\Omnix');
+  const routerEndpoint = ref(userSettingsStore.userSettings.meridian?.aiPanel?.routerEndpoint || 'http://192.168.1.67:9000');
+  const ttsEnabled = ref(userSettingsStore.userSettings.meridian?.aiPanel?.ttsEnabled ?? false);
+  const routerOnline = ref(false);
   const currentPath = ref('');
   const selectedFiles = ref<string[]>([]);
 
@@ -87,8 +92,32 @@ export const useAiPanelStore = defineStore('aiPanel', () => {
     userSettingsStore.userSettings.meridian.aiPanel.omnixEnabled = value;
     userSettingsStore.setUserSettingsStorage('meridian.aiPanel.omnixEnabled', value);
     persistState({ endpoint: endpoint.value, selectedModel: selectedModel.value, useOmnix: value });
+    // Auto-start / stop the Omnix engine to match the toggle (Step 4).
+    if (value) {
+      invoke('spawn_omnix', { omnixPath: omnixPath.value || null })
+        .catch((error) => { console.error('Failed to start Omnix:', error); });
+    }
+    else {
+      invoke('kill_omnix').catch(() => { /* ignore */ });
+    }
   }
   function setOmnixOnline(value: boolean) { omnixOnline.value = value; }
+  function setOmnixPath(value: string) {
+    omnixPath.value = value;
+    userSettingsStore.userSettings.meridian.aiPanel.omnixPath = value;
+    userSettingsStore.setUserSettingsStorage('meridian.aiPanel.omnixPath', value);
+  }
+  function setRouterEndpoint(value: string) {
+    routerEndpoint.value = value;
+    userSettingsStore.userSettings.meridian.aiPanel.routerEndpoint = value;
+    userSettingsStore.setUserSettingsStorage('meridian.aiPanel.routerEndpoint', value);
+  }
+  function setTtsEnabled(value: boolean) {
+    ttsEnabled.value = value;
+    userSettingsStore.userSettings.meridian.aiPanel.ttsEnabled = value;
+    userSettingsStore.setUserSettingsStorage('meridian.aiPanel.ttsEnabled', value);
+  }
+  function setRouterOnline(value: boolean) { routerOnline.value = value; }
   function setCurrentPath(path: string) { currentPath.value = path; }
   function setSelectedFiles(files: string[]) { selectedFiles.value = files; }
   function addMessage(role: 'user' | 'assistant', content: string) { messages.value.push({ role, content }); }
@@ -140,9 +169,9 @@ export const useAiPanelStore = defineStore('aiPanel', () => {
 
   return {
     isOpen, isLoading, messages, input, endpoint, selectedModel, models, modelsLoaded,
-    useOmnix, omnixOnline, currentPath, selectedFiles, canSend,
+    useOmnix, omnixOnline, omnixPath, routerEndpoint, ttsEnabled, routerOnline, currentPath, selectedFiles, canSend,
     open, close, toggle, setInput, setEndpoint, setSelectedModel, setUseOmnix,
-    setOmnixOnline, setCurrentPath, setSelectedFiles, addMessage, clearMessages,
+    setOmnixOnline, setOmnixPath, setRouterEndpoint, setTtsEnabled, setRouterOnline, setCurrentPath, setSelectedFiles, addMessage, clearMessages,
     setLoading, setModels, fetchModels,
   };
 });

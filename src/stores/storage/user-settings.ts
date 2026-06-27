@@ -201,9 +201,12 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     },
     meridian: {
       aiPanel: {
-        endpointUrl: 'http://localhost:7770/api/text',
+        endpointUrl: 'http://localhost:9777/api/text',
         model: '',
         omnixEnabled: false,
+        omnixPath: 'E:\\ai\\Apps\\Omnix',
+        routerEndpoint: 'http://192.168.1.67:9000',
+        ttsEnabled: false,
       },
       downloader: {
         autoSaveFolder: '',

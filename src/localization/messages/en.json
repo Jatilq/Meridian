@@ -4,6 +4,43 @@
     "description": "is a free, open source, advanced, modern file manager app, licensed under GNU GPLv3 or later.",
     "copyright": "Copyright © 2021 - present Aleksey Hoffman. All rights reserved."
   },
+  "aiPanel": {
+    "title": "AI Panel",
+    "endpointPlaceholder": "Endpoint URL (e.g. http://localhost:9777)",
+    "endpointUrl": "Endpoint URL",
+    "model": "Model",
+    "omnixEnabled": "Use Omnix",
+    "defaultModel": "Default model",
+    "you": "You",
+    "assistant": "Assistant",
+    "placeholder": "Ask anything about your files, or give a command.",
+    "inputPlaceholder": "Type a message…",
+    "confirmOrganizeTitle": "Organize files?",
+    "confirmOrganizeDescription": "Organize files by {criteria}?",
+    "organized": "Files organized",
+    "confirmRenameTitle": "Rename files?",
+    "confirmRenameDescription": "Rename files using {pattern}?",
+    "renamed": "Files renamed",
+    "confirmDeleteTitle": "Delete files?",
+    "confirmDeleteDescription": "Delete {count} item(s)?",
+    "deleted": "Files deleted"
+  },
+  "downloader": {
+    "title": "Downloader",
+    "urlPlaceholder": "Paste a URL to download…",
+    "add": "Add",
+    "queue": "Queue",
+    "history": "History",
+    "emptyQueue": "No active downloads",
+    "emptyHistory": "No download history",
+    "autoSaveFolder": "Auto-save folder",
+    "statusDownloading": "Downloading",
+    "statusPaused": "Paused",
+    "statusCompleted": "Completed",
+    "statusFailed": "Failed",
+    "statusCancelled": "Cancelled",
+    "statusPending": "Pending"
+  },
   "units": {
     "px": "px"
   },

@@ -163,6 +163,9 @@ export type AiPanelSettings = {
   endpointUrl: string;
   model: string;
   omnixEnabled: boolean;
+  omnixPath: string;
+  routerEndpoint: string;
+  ttsEnabled: boolean;
 };
 
 export type DownloaderSettings = {

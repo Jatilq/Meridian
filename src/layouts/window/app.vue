@@ -4,7 +4,11 @@ Copyright © 2021 - present Aleksey Hoffman. All rights reserved.
 -->
 
 <script setup lang="ts">
+import { onMounted } from 'vue';
 import { NavSidebar, WindowToolbar } from '@/modules/shell';
+import { AiPanel } from '@/modules/ai-panel';
+import { useAiPanelStore } from '@/stores/runtime/ai-panel';
+import { invoke } from '@tauri-apps/api/core';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/toaster';
 import { InfusionWrapper } from '@/components/ui/infusion';
@@ -18,7 +22,16 @@ import CommandPalette from '@/modules/extensions/components/command-palette.vue'
 import ExtensionModalsContainer from '@/modules/extensions/components/extension-modals-container.vue';
 
 const userSettingsStore = useUserSettingsStore();
+const aiPanelStore = useAiPanelStore();
 const { activeEmbedPageId, visitedEmbedPages } = useEmbedPages();
+
+// Auto-start Omnix on launch when the toggle was previously enabled (Step 4).
+onMounted(() => {
+  if (aiPanelStore.useOmnix) {
+    invoke('spawn_omnix', { omnixPath: aiPanelStore.omnixPath || null })
+      .catch((error) => { console.error('Failed to auto-start Omnix:', error); });
+  }
+});
 </script>
 
 <template>
@@ -36,7 +49,8 @@ const { activeEmbedPageId, visitedEmbedPages } = useEmbedPages();
       <NavSidebar />
       <div class="app-layout__main">
         <WindowToolbar />
-        <div class="app-layout__content">
+        <div class="app-layout__body">
+          <div class="app-layout__content">
           <PageIframeLayout
             v-for="embedPage in visitedEmbedPages"
             :key="embedPage.pageId"
@@ -69,6 +83,8 @@ const { activeEmbedPageId, visitedEmbedPages } = useEmbedPages();
               </KeepAlive>
             </div>
           </RouterView>
+          </div>
+          <AiPanel v-if="aiPanelStore.isOpen" class="app-layout__ai-panel" />
         </div>
       </div>
     </TooltipProvider>
@@ -98,6 +114,21 @@ const { activeEmbedPageId, visitedEmbedPages } = useEmbedPages();
 
 .app-layout__main > .window-toolbar {
   flex-shrink: 0;
+}
+
+.app-layout__body {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.app-layout__ai-panel {
+  flex: 0 0 auto;
+  width: 380px;
+  min-width: 320px;
+  max-width: 40%;
+  border-inline-start: 1px solid hsl(var(--border));
 }
 
 .app-layout__content {

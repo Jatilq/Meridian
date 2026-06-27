@@ -2,94 +2,125 @@
 
 ## Who You Are Working For
 
-James. Retired Verizon FiOS employee. Homelab AI enthusiast. Non-programmer — does not write code, does not want to. Two-machine inference setup: MAMBA (192.168.1.67, 3× RTX 3060) and BLACK (192.168.1.64, RX 6900 XT). Uses 9Router as OpenAI-compatible proxy. All development is agent-driven.
+JC. Hobbyist. Retired network engineer. Non-programmer — does not write code, does not want to. Runs a two-machine AI inference homelab: MAMBA (192.168.1.67, 3× RTX 3060, 36GB VRAM) and BLACK (192.168.1.64, RX 6900 XT, 16GB VRAM). Combined via llama.cpp RPC: 52GB effective VRAM. Uses 9Router as OpenAI-compatible proxy. All development is agent-driven.
 
 ## The Project
 
-Meridian is a fork of Sigma File Manager (**Tauri 2 + Vue 3 + Rust**, GPL3) — *not Electron*. The backend is Rust in `src-tauri/` (Tauri commands via `#[tauri::command]`, registered in `src-tauri/src/lib.rs` with `generate_handler!`); the frontend is Vue 3 + TypeScript in `src/` and calls the backend with `invoke()` from `@tauri-apps/api/core`. SQLite is `rusqlite` (`meridian.db` in app data); HTTP/networking is `reqwest` + `axum`; async runtime is `tokio`. Sigma is excellent. Your job is to add three things on top without breaking or redesigning what Sigma already does:
-1. AI panel connected to 9Router/local models
-2. IDM-style parallel chunk downloader + browser extension
-3. Omnix local AI integration
+Meridian is a local-first AI workstation built on Sigma File Manager (Electron + Vue, GPL3). It combines:
+- File management (Sigma)
+- Embedded local AI engine (Omnix — hidden BrowserWindow inside Meridian's Electron process)
+- Natural language file operations (AI panel → Omnix or 9Router)
+- Cluster control (SSH slave launcher, MAMBA + BLACK = 52GB)
+- Remote file access (SSH/SFTP browser)
+- Agent coding (extension using full model pool)
 
-Read DESIGN.md. Read AGENTS.md. Then read Sigma's existing code. Then act.
+Everything runs locally. Nothing cloud-dependent except by user choice.
+
+Read DESIGN.md. Read AGENTS.md. Read existing source. Then act.
 
 ---
 
 ## Hard Rules
 
 ### Never:
-- Ask James to edit a file manually
-- Ask James to run more than one command
-- Report a task complete without verifying
-- Guess at a fix — always diagnose first
-- Redesign or replace Sigma's existing UI
-- Hardcode endpoint URLs, IPs, or file paths
-- Execute destructive file operations without a confirmation dialog
-- Add new JS/TS frameworks or Rust crates not already in the project (check `package.json` and `src-tauri/Cargo.toml` first)
+- Ask JC to manually edit a file
+- Ask JC to run more than one command
+- Report complete without verifying
+- Guess — always diagnose first
+- Redesign Sigma's existing UI
+- Hardcode IPs, ports, credentials, or paths
+- Execute destructive operations without confirmation dialog
+- Add frameworks not already in the project
+- Store credentials in plaintext
 
 ### Always:
 - Read CLAUDE.md before starting
-- Read Sigma's source before modifying it
-- Match Sigma's coding patterns exactly (Vue 3 Composition API + `<script setup lang="ts">`; Rust `#[tauri::command]` registered in `lib.rs`)
-- Verify each phase builds and runs before moving to the next
-- Show previews before any rename/move/delete
-- Write and run scripts for multi-step operations yourself
+- Read source files before modifying them
+- Match Sigma's existing patterns (Vue components, IPC, store)
+- Verify each phase before moving to next
+- Show previews/diffs before file changes
+- Run scripts yourself, don't ask JC to run them
 
 ---
 
 ## When Something Is Broken
 
-1. Read the full error — do not truncate
+1. Read full error output — never truncate
 2. Identify root cause
-3. State what you believe the cause is
-4. Apply one fix
+3. State the cause clearly
+4. Apply one targeted fix
 5. Verify it worked
-6. Report: what was wrong, what you changed, confirmed working
+6. Report: what was wrong, what changed, confirmed working
 
-No random fixes. No asking James to try things.
+No random fixes. No asking JC to try things.
 
 ---
 
-## When You Are Unsure
+## When Unsure
 
-State the uncertainty clearly. Propose two options maximum. Ask James to choose. Never proceed on assumptions for anything that affects files or project structure.
+State the uncertainty. Propose two options max. Ask JC to choose. Never proceed on assumptions for anything affecting files, credentials, or project structure.
 
 ---
 
 ## AI Panel — Special Care
 
-The AI panel executes file operations from model output. Most sensitive part of the project.
-
-- Never execute organize/rename/delete without a confirmation dialog
-- Dialog must show: what changes, which files, visible Cancel button
-- If model response is not valid JSON → display as plain chat, do not execute
-- Log every AI action to SQLite: timestamp, intent, files affected, outcome, confirmed/cancelled
+- Never execute organize/rename/delete without confirmation dialog
+- Confirmation shows: what changes, which files, visible Cancel
+- If model response not valid JSON → show as plain chat, don't execute
+- Log every AI action: timestamp, intent, files, outcome, confirmed/cancelled
 
 ---
 
-## Downloader — Special Care
+## SSH/SFTP — Special Care
 
-- Never overwrite existing files without asking
-- Chunk reassembly: verify final file size matches Content-Length before deleting temp chunks
-- Browser extension: only intercept URLs the user explicitly clicks — no silent background capture
-- Queue must resume on restart, not restart from zero
+- Never store credentials in plaintext — use Electron safeStorage
+- Never log SSH passwords or key contents
+- All destructive remote operations (delete, overwrite) require confirmation
+- If SSH connection drops mid-operation, report clearly, do not retry silently
 
 ---
 
-## Reporting to James
+## Omnix Embedding — Special Care
+
+- Hidden BrowserWindow must NOT be offscreen — WebGPU requires real GPU context
+- If Omnix server fails to start, Meridian still launches — AI panel shows Omnix offline
+- Never block main window render on Omnix startup
+- One restart attempt if compute worker crashes, then mark offline
+
+---
+
+## Cluster Control — Special Care
+
+- SSH credentials for cluster control same rules as SSH/SFTP
+- RPC slave command is configurable — never hardcode it
+- Confirm before launching slave (it consumes BLACK's full GPU)
+- Show clear status when combined pool is active vs MAMBA only
+
+---
+
+## Reporting to JC
 
 When a phase is done:
 - What was built (one sentence per feature)
-- How to test it (one action James can take)
+- How to test it (one action JC can take)
 - Known limitations if any
+- Commit hash
 - Nothing else — concise only
 
 ---
 
-## Context Window Management (for local models)
+## Context Management (local models)
 
 If running on Qwen3.6 35B or similar via 9Router:
-- Do not read the entire Sigma codebase at once
-- Read only files relevant to the current task
-- Use file tree scan first to orient, then targeted reads
-- If context feels stale, say so — James will start a new session with START_SESSION.md
+- Do not read entire Sigma codebase at once
+- Scan file tree first, then targeted reads
+- One phase at a time
+- If context stale, say so — JC will start fresh session with START_SESSION.md
+
+---
+
+## The Vision (never lose sight of this)
+
+Meridian is the tool that doesn't exist yet: a local-first AI workstation where the file manager is the shell for everything. File ops, embedded AI, cluster management, remote access, agent coding — one Electron app, one installer, runs entirely on JC's own hardware. No subscriptions, no cloud, no data leaving the machine.
+
+Every decision should serve this vision. If a shortcut compromises it, take the longer road.

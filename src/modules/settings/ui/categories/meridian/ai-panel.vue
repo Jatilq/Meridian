@@ -43,6 +43,24 @@ const omnixEnabled = computed({
     aiPanelStore.setUseOmnix(value);
   },
 });
+
+const routerEndpoint = computed({
+  get: () => userSettingsStore.userSettings.meridian.aiPanel.routerEndpoint,
+  set: (value: string) => {
+    userSettingsStore.userSettings.meridian.aiPanel.routerEndpoint = value;
+    userSettingsStore.setUserSettingsStorage('meridian.aiPanel.routerEndpoint', value);
+    aiPanelStore.setRouterEndpoint(value);
+  },
+});
+
+const ttsEnabled = computed({
+  get: () => userSettingsStore.userSettings.meridian.aiPanel.ttsEnabled,
+  set: (value: boolean) => {
+    userSettingsStore.userSettings.meridian.aiPanel.ttsEnabled = value;
+    userSettingsStore.setUserSettingsStorage('meridian.aiPanel.ttsEnabled', value);
+    aiPanelStore.setTtsEnabled(value);
+  },
+});
 </script>
 
 <template>
@@ -59,7 +77,7 @@ const omnixEnabled = computed({
         <Input
           id="ai-panel-endpoint"
           v-model="endpointUrl"
-          placeholder="http://localhost:7770/api/text"
+          placeholder="http://localhost:9777/api/text"
           class="ai-panel-settings__input"
         />
       </div>
@@ -82,6 +100,27 @@ const omnixEnabled = computed({
           id="ai-panel-omnix"
           :model-value="omnixEnabled"
           @update:model-value="omnixEnabled = $event"
+        />
+      </div>
+      <div class="ai-panel-settings__field">
+        <label class="ai-panel-settings__label" for="ai-panel-router">
+          9Router endpoint (text inference)
+        </label>
+        <Input
+          id="ai-panel-router"
+          v-model="routerEndpoint"
+          placeholder="http://192.168.1.67:9000"
+          class="ai-panel-settings__input"
+        />
+      </div>
+      <div class="ai-panel-settings__toggle">
+        <label class="ai-panel-settings__label" for="ai-panel-tts">
+          Speak responses (Omnix TTS)
+        </label>
+        <Switch
+          id="ai-panel-tts"
+          :model-value="ttsEnabled"
+          @update:model-value="ttsEnabled = $event"
         />
       </div>
     </div>

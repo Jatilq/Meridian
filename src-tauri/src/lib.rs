@@ -397,6 +397,9 @@ pub fn run() {
             omnix::spawn_omnix,
             omnix::kill_omnix,
             omnix::get_omnix_status,
+            omnix::omnix_vision,
+            omnix::omnix_tts,
+            omnix::omnix_director,
         ])
         .setup(setup_handler)
         .on_window_event(|window, event| {

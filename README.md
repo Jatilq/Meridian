@@ -1,67 +1,128 @@
 # Meridian
 
-**A fork of Sigma File Manager with local AI integration and IDM-style downloading.**
+**The local-first AI workstation. File manager, AI engine, cluster control, remote access — one package.**
 
-Meridian is built on top of [Sigma File Manager](https://github.com/aleksey-hoffman/sigma-file-manager) (Electron + Vue, GPL3) — one of the best open-source file managers available. Rather than rebuild what Sigma already does beautifully, Meridian adds the features Sigma is missing:
+Meridian is built on [Sigma File Manager](https://github.com/aleksey-hoffman/sigma-file-manager) (Electron + Vue, GPL3) and extends it into something that doesn't exist anywhere else: a complete local AI workstation where everything runs on your own hardware, nothing touches the cloud unless you want it to.
 
-1. **Local AI panel** — natural language file operations routed through 9Router to any local model
-2. **IDM-style downloader** — multi-segment parallel downloading, browser interception, queue management
-3. **Omnix integration** — lightweight on-device AI for file analysis without hitting MAMBA
+---
 
-## What Sigma Already Provides (don't rebuild these)
+## The Vision
 
-- Beautiful dark UI with hero banner and custom backgrounds
-- Home page with drive cards showing usage %
+Most AI tools are cloud-dependent. Cursor, GitHub Copilot, ChatGPT — they all phone home. Meridian is the opposite: a single Electron app that combines everything a serious AI hobbyist or developer needs, running entirely on local hardware.
+
+---
+
+## What Meridian Is
+
+### 1. File Manager (Sigma foundation)
 - Dual-pane layout with tabs
-- File grouping by type with video thumbnails
-- Built-in yt-dlp video downloader
+- File grouping with media thumbnails
+- Bookmarks, search, preview panel
+- Copy/move/rename with undo
+- Archive browsing, WSL integration
 - Extensions system
-- WSL drive integration
-- Breadcrumb navigation, bookmarks, search
 
-## What Meridian Adds
+### 2. Embedded Local AI (Omnix — integrated, not separate)
+Omnix runs **inside** Meridian's own Electron process as a hidden compute window. No separate app, no separate install, no process management.
+- **Text** — natural language file queries via `/api/text`
+- **Vision** — analyze selected images via `/api/vision`
+- **STT** — speak file commands instead of typing
+- **TTS** — AI panel reads responses out loud
+- **Director** — Omnix's intent router classifies queries before sending to models
+- **Image generation** — local Flux nodes via `/api/image`
+- **Music** — local audio synthesis via `/api/music`
+- Models: Qwen 3 0.6B confirmed working; larger models via WebGPU in the embedded renderer
 
-### 1. AI Panel
-- Collapsible panel matching Sigma's existing UI style
-- OpenAI-compatible endpoint (default: 9Router)
-- Model selector fetching from `/v1/models`
-- Natural language input with current directory context injected
-- Intent routing: search / organize / analyze / rename / chat
-- Model returns JSON action — confirmation required before destructive ops
-- All AI actions logged to SQLite
+### 3. AI Panel (Natural Language File Operations)
+- Collapsible panel, connects to any OpenAI-compatible endpoint
+- Model selector fetches live from `/v1/models`
+- Toggle between Omnix (lightweight, embedded) and 9Router (full model pool)
+- Intent routing: search / organize / rename / analyze / chat
+- Confirmation required before any destructive action
+- SQLite action log
 
-### 2. IDM-Style Downloader (extending Sigma's existing yt-dlp downloader)
-- Multi-segment parallel downloading via HTTP range requests
-- Download queue with pause / resume / cancel per item
-- Format and quality selector before download starts
-- Auto-save to configurable default folder
-- Chrome/Edge browser extension to intercept video URLs and send to Meridian automatically
+### 4. Enhanced Downloader (IDM-style)
+- Extends Sigma's existing yt-dlp downloader
+- Parallel chunk downloading via HTTP Range requests
+- Format/quality selector, persistent queue, pause/resume/cancel
+- Chrome/Edge browser extension intercepts video URLs automatically
 
-### 3. Omnix Integration
-- Optional mode toggle in AI panel settings
-- When enabled, calls Omnix local API at `http://localhost:7770/api`
-- Zero overhead AI path when MAMBA models are busy
-- Vision endpoint: auto-sends selected image with query to `/api/vision`
+### 5. Cluster Control Panel
+- Shows MAMBA and BLACK online/offline status
+- One-click SSH slave launch: fires up llama.cpp RPC on BLACK via SSH
+- 36GB VRAM (MAMBA alone) → 52GB VRAM (MAMBA + BLACK combined)
+- 9Router automatically gains access to the expanded pool
+- Monitor active nodes, GPU utilization, loaded models
 
-## Stack
+### 6. SSH / SFTP File Browser
+- Browse and manage files on remote machines directly in Meridian's file panes
+- MAMBA and BLACK appear as bookmarked SSH connections
+- Drag files between local and remote panes
+- Full file operations (copy, move, rename, delete) over SSH/SFTP
+- Foundation for agent coding on remote files
 
-- **Base:** Sigma File Manager (Electron + Vue)
-- **AI:** HTTP fetch to OpenAI-compatible endpoint (9Router → MAMBA/BLACK)
-- **Downloader:** yt-dlp (existing) + custom parallel chunk downloader
-- **Database:** SQLite (AI action log, download history)
-- **Browser Extension:** Chrome/Edge Manifest V3
+### 7. Agent Coding Extension
+- Built on Sigma's existing extension system
+- Opens a coding agent panel connected to the full model pool (via 9Router)
+- Works on local files OR remote files via SSH
+- Powered by the AI panel API — extensions call the same endpoints the UI uses
+- The AI panel becomes a first-class API for all extensions to build on
+
+---
+
+## Architecture
+
+```
+Meridian (Electron + Vue)
+├── Sigma File Manager (base — file ops, UI, extensions)
+├── Omnix Engine (embedded hidden BrowserWindow — WebGPU compute worker)
+│   ├── Express API server (localhost:9777)
+│   ├── /api/text, /api/vision, /api/director, /api/stt, /api/tts
+│   └── Models: Qwen 0.6B (fast) + larger via WebGPU
+├── AI Panel (Vue component)
+│   ├── Omnix mode → localhost:9777
+│   └── 9Router mode → MAMBA:PORT (heavy models, full VRAM pool)
+├── Cluster Control Panel
+│   ├── SSH to BLACK → launch llama.cpp RPC slave
+│   ├── 9Router gains 52GB combined VRAM
+│   └── Node status monitoring
+├── SSH/SFTP Browser
+│   ├── Remote panes alongside local panes
+│   └── Foundation for remote agent coding
+├── Enhanced Downloader
+│   ├── yt-dlp + parallel chunk downloader
+│   └── Browser extension receiver
+└── Extension System (Sigma's existing)
+    └── Agent Coding Extension (first-party)
+```
+
+## Hardware
+
+| Machine | IP | GPU | Role |
+|---|---|---|---|
+| MAMBA | 192.168.1.67 | 3× RTX 3060 (36GB) | Primary inference, headless server |
+| BLACK | 192.168.1.64 | RX 6900 XT (16GB) | Daily driver, RPC slave |
+| Combined | — | 52GB effective | Large model inference |
+| 9Router | localhost on MAMBA | — | OpenAI-compatible proxy |
+| Omnix | embedded in Meridian | WebGPU | Lightweight on-device AI |
+
+## Why This Matters
+
+Every component is Electron + Node:
+- Sigma — Electron + Vue
+- Omnix — Electron + WebGPU
+- llama-cluster-launcher — Electron
+- SSH/SFTP — Node `ssh2` library
+- Agent coding — extension calling AI panel API
+
+One stack. One package. One installer. Everything local.
+
+No Cursor. No Copilot. No cloud. Your hardware, your models, your data.
 
 ## Owner
 
-James. Non-programmer. All development is agent-driven. See CLAUDE.md.
+JC. Hobbyist. All development is agent-driven. See CLAUDE.md.
 
 ## Project Location
 
 `E:\ai\Projects\Meridian\`
-
-## Quick Start for Agents
-
-1. Read CLAUDE.md first — always
-2. Read AGENTS.md for build order and technical rules
-3. Read DESIGN.md for UI/UX decisions
-4. Clone Sigma, get it building, then add Meridian features on top

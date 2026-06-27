@@ -6,32 +6,44 @@
 
 Read CLAUDE.md, then AGENTS.md, then DESIGN.md.
 
-Then run this command to get the project structure without reading every file:
-`dir E:\ai\Projects\Meridian\ /s /b | findstr /v "node_modules" | findstr /v ".git"`
+Then scan the project tree:
+`dir E:\ai\Projects\Meridian\ /s /b | findstr /v "node_modules" | findstr /v ".git" | findstr /v "\dist\" | findstr /v "\target\"`
 
-Based on the file tree, identify what phase we are in by checking which phases from AGENTS.md have already been completed. Read only the source files directly relevant to today's task — do not read the entire codebase at once.
+Based on the file tree, identify what phase we are in. The phases are:
+- Phase 5: Omnix embedded as hidden BrowserWindow (CURRENT PRIORITY)
+- Phase 6: Cluster Control Panel (SSH slave launcher, node monitoring)
+- Phase 7: SSH/SFTP File Browser (remote panes)
+- Phase 8: Agent Coding Extension
+- Phase 9: Package and installer
 
-Then give me a one-paragraph status summary: what phase we are on, what is done, and what the next step is. Wait for my confirmation before doing anything.
+Read only the source files relevant to the current phase. Do not read the entire codebase.
 
----
-
-## If Something Is Broken, Paste This:
-
-Read CLAUDE.md. Do not attempt any fixes yet.
-
-Run the app and capture the full error output. Read the files mentioned in the error. Identify the root cause. Tell me what you found and propose one fix. Wait for my go-ahead before applying it.
-
----
-
-## If You Want a Status Report, Paste This:
-
-Read CLAUDE.md, AGENTS.md, and DESIGN.md. Then scan the project file tree (exclude node_modules and .git). Based on what exists, give me a full status report: what phases are complete, what is in progress, what is missing, and what the next action should be.
+Give me a one-paragraph status summary: what phase we are on, what is done, what the next step is. Wait for my confirmation before doing anything.
 
 ---
 
-## Model Tips (Qwen3.6 35B locally)
+## The Vision (remind yourself every session)
 
-- Keep sessions focused on one phase at a time
-- If context feels like it is getting stale, start a new session with the starter prompt above
-- For large file reads (Sigma source), ask it to summarize rather than dump full contents
-- Nemotron at 1M context is better for full codebase audits — use it for planning, Qwen3.6 for writing
+Meridian is a local-first AI workstation. File manager + embedded Omnix AI engine + cluster control (MAMBA + BLACK = 52GB VRAM) + SSH/SFTP remote access + agent coding extension. One Electron app. One installer. Everything local. No cloud.
+
+---
+
+## If Something Is Broken:
+
+Read CLAUDE.md. Do not attempt fixes yet.
+Run the app and capture the full error. Read files mentioned in the error. Identify root cause. Tell me what you found and propose one fix. Wait for go-ahead.
+
+---
+
+## If You Want a Status Report:
+
+Read CLAUDE.md, AGENTS.md, DESIGN.md. Scan the project tree. Give a full status: phases complete, in progress, missing, next action.
+
+---
+
+## Model Tips
+
+- Use Nemotron 1M context for full codebase audits and planning
+- Use Qwen3.6 35B for writing code
+- Keep sessions focused on one phase
+- Start new session if context feels stale — paste this prompt again

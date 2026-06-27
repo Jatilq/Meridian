@@ -4,7 +4,7 @@ Copyright © 2021 - present Aleksey Hoffman. All rights reserved.
 -->
 
 <script setup lang="ts">
-import { computed, watch, nextTick, ref } from 'vue';
+import { computed, watch, nextTick, ref, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useAiPanelStore } from '@/stores/runtime/ai-panel';
 import { useUserSettingsStore } from '@/stores/storage/user-settings';
@@ -61,6 +61,32 @@ watch(
   },
 );
 
+async function maybeSpeak(text: string) {
+  // Optional TTS: speak the assistant response via Omnix Kokoro when enabled
+  // and Omnix is online. Plays the returned float audio through Web Audio.
+  if (!aiPanelStore.ttsEnabled || !aiPanelStore.omnixOnline) return;
+  try {
+    const raw = await invoke<string>('omnix_tts', { text, voiceId: null });
+    const data = JSON.parse(raw);
+    const samples: number[] = data.audio || [];
+    const rate = Number(data.sampling_rate) || 24000;
+    if (!samples.length) return;
+    const AudioCtx = (window as unknown as { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext }).AudioContext
+      || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const buffer = ctx.createBuffer(1, samples.length, rate);
+    buffer.copyToChannel(Float32Array.from(samples), 0);
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.connect(ctx.destination);
+    src.start();
+  }
+  catch {
+    // TTS is best-effort; ignore failures
+  }
+}
+
 async function handleSend() {
   const prompt = aiPanelStore.input.trim();
   if (!prompt || aiPanelStore.isLoading) return;
@@ -70,8 +96,11 @@ async function handleSend() {
   aiPanelStore.setLoading(true);
 
   try {
-    const useOmnix = aiPanelStore.useOmnix && aiPanelStore.omnixOnline;
-    const apiEndpoint = useOmnix ? 'http://localhost:7770/api' : aiPanelStore.endpoint;
+    // Revised architecture: Omnix handles ONLY vision (+ TTS/Director).
+    // ALL text inference goes to 9Router (OpenAI-compatible). Vision is used
+    // when an image is selected and Omnix is online; everything else is text.
+    const omnixVisionReady = aiPanelStore.useOmnix && aiPanelStore.omnixOnline;
+    const routerBase = (aiPanelStore.routerEndpoint || '').replace(/\/+$/, '');
     const model = aiPanelStore.selectedModel || undefined;
     const currentPath = aiPanelStore.currentPath;
     const selectedFiles = aiPanelStore.selectedFiles;
@@ -83,29 +112,37 @@ async function handleSend() {
     const systemPrompt = `You are a file management assistant inside Meridian.\nCurrent directory: ${currentPath}\nSelected files: ${selectedFiles.length > 0 ? selectedFiles.join(', ') : 'none'}\n\nRespond ONLY with valid JSON:\n{\n  "intent": "search|organize|analyze|rename|chat|vision",\n  "scope": "current|selected|all",\n  "preview_only": true,\n  "action": {},\n  "message": "human readable explanation"\n}`;
 
     let response: Response;
-    if (useOmnix && hasImage) {
-      response = await fetch(`${apiEndpoint}/vision`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt,
-          images: selectedFiles,
-          system: systemPrompt,
-        }),
+    if (omnixVisionReady && hasImage) {
+      // Vision: send the image file to Omnix as multipart via the Rust command
+      // (the /api/vision contract requires multipart/form-data, not JSON).
+      const imageFile = selectedFiles.find((file: string) => {
+        const ext = file.split('.').pop()?.toLowerCase();
+        return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(ext || '');
       });
-    }
-    else if (useOmnix) {
-      response = await fetch(`${apiEndpoint}/text`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt,
-          system: systemPrompt,
-        }),
+      const visionText = await invoke<string>('omnix_vision', {
+        imagePath: imageFile,
+        prompt: `${systemPrompt}\n\nUser: ${prompt}`,
       });
+      aiPanelStore.addMessage('assistant', visionText);
+      await maybeSpeak(visionText);
+      try {
+        const parsed = JSON.parse(visionText);
+        if (parsed.intent && ['organize', 'rename', 'delete'].includes(parsed.intent)) {
+          handleIntentConfirmation(parsed);
+        }
+      }
+      catch {
+        // response was not JSON, leave as plain text
+      }
+      aiPanelStore.setLoading(false);
+      return;
     }
     else {
-      response = await fetch(`${apiEndpoint}/chat/completions`, {
+      // Text inference -> 9Router (OpenAI-compatible chat completions).
+      if (!routerBase) {
+        throw new Error('9Router endpoint not configured. Set it in Settings.');
+      }
+      response = await fetch(`${routerBase}/v1/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -131,6 +168,7 @@ async function handleSend() {
     const data = await response.json();
     const content = data.choices?.[0]?.message?.content ?? data.response ?? data.text ?? 'No response received.';
     aiPanelStore.addMessage('assistant', content);
+    await maybeSpeak(content);
 
     try {
       const parsed = JSON.parse(content);
@@ -230,23 +268,34 @@ function handleKeyDown(event: KeyboardEvent) {
 }
 
 async function checkOmnixStatus() {
-  if (!aiPanelStore.useOmnix) return;
-  try {
-    const response = await fetch('http://localhost:7770/api/text', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: '' }),
-    });
-    aiPanelStore.setOmnixOnline(response.ok);
+  if (aiPanelStore.useOmnix) {
+    try {
+      const online = await invoke<boolean>('get_omnix_status');
+      aiPanelStore.setOmnixOnline(online);
+    }
+    catch {
+      aiPanelStore.setOmnixOnline(false);
+    }
   }
-  catch {
-    aiPanelStore.setOmnixOnline(false);
+  // 9Router health (text inference backend) — probe /v1/models.
+  const routerBase = (aiPanelStore.routerEndpoint || '').replace(/\/+$/, '');
+  if (routerBase) {
+    try {
+      const res = await fetch(`${routerBase}/v1/models`, { method: 'GET' });
+      aiPanelStore.setRouterOnline(res.ok);
+    }
+    catch {
+      aiPanelStore.setRouterOnline(false);
+    }
+  }
+  else {
+    aiPanelStore.setRouterOnline(false);
   }
 }
 
 async function spawnOmnix() {
   try {
-    await invoke('spawn_omnix');
+    await invoke('spawn_omnix', { omnixPath: aiPanelStore.omnixPath || null });
   }
   catch {
     // ignore spawn errors
@@ -270,6 +319,27 @@ watch(
 const omnixStatusLabel = computed(() => {
   if (!aiPanelStore.useOmnix) return '';
   return aiPanelStore.omnixOnline ? 'Omnix online' : 'Omnix offline';
+});
+
+// Poll Omnix health on an interval so the status dot stays live (Step 6).
+let omnixPollTimer: ReturnType<typeof setInterval> | null = null;
+
+onMounted(() => {
+  if (aiPanelStore.useOmnix) {
+    void checkOmnixStatus();
+  }
+  omnixPollTimer = setInterval(() => {
+    if (aiPanelStore.useOmnix) {
+      void checkOmnixStatus();
+    }
+  }, 5000);
+});
+
+onUnmounted(() => {
+  if (omnixPollTimer !== null) {
+    clearInterval(omnixPollTimer);
+    omnixPollTimer = null;
+  }
 });
 
 const confirmTitle = computed(() => confirmDialogData.value?.title || '');

@@ -197,13 +197,13 @@
   .animate-fade-in {
     --animate-fade-in-duration: 0.5s;
 
-    animation: sigma-ui-fade-in var(--animate-fade-in-duration) ease;
+    animation: sigma-ui-fade-in var(--animate-fade-in-duration) ease forwards;
   }
 
   .animate-fade-in-x2 {
     --animate-fade-in-duration: 1s;
 
-    animation: sigma-ui-fade-in var(--animate-fade-in-duration) ease;
+    animation: sigma-ui-fade-in var(--animate-fade-in-duration) ease forwards;
   }
 
   .animate-sigma-ui-spin {
