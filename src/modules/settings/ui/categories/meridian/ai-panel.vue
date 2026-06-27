@@ -78,7 +78,7 @@ const systemPrompt = computed({
 });
 
 const temperature = computed({
-  get: () => userSettingsStore.userSettings.meridian.aiPanel.temperature,
+  get: () => userSettingsStore.userSettings.meridian.aiPanel.temperature ?? 0.7,
   set: (value: number) => {
     userSettingsStore.userSettings.meridian.aiPanel.temperature = value;
     userSettingsStore.setUserSettingsStorage('meridian.aiPanel.temperature', value);
@@ -87,7 +87,7 @@ const temperature = computed({
 });
 
 const maxTokens = computed({
-  get: () => userSettingsStore.userSettings.meridian.aiPanel.maxTokens,
+  get: () => userSettingsStore.userSettings.meridian.aiPanel.maxTokens ?? 1024,
   set: (value: number) => {
     userSettingsStore.userSettings.meridian.aiPanel.maxTokens = value;
     userSettingsStore.setUserSettingsStorage('meridian.aiPanel.maxTokens', value);
@@ -96,12 +96,23 @@ const maxTokens = computed({
 });
 
 const topP = computed({
-  get: () => userSettingsStore.userSettings.meridian.aiPanel.topP,
+  get: () => userSettingsStore.userSettings.meridian.aiPanel.topP ?? 1,
   set: (value: number) => {
     userSettingsStore.userSettings.meridian.aiPanel.topP = value;
     userSettingsStore.setUserSettingsStorage('meridian.aiPanel.topP', value);
     aiPanelStore.setTopP(value);
   },
+});
+
+// Read-only: context window of the selected model, if the endpoint reports it.
+// 9Router's /v1/models currently returns only id/object/owned_by, so this is
+// informational and falls back to "Not reported by endpoint".
+const contextWindow = computed(() => {
+  const selected = aiPanelStore.models.find(m => m.id === model.value) as
+    | { id: string; contextWindow?: number }
+    | undefined;
+  const ctx = selected?.contextWindow;
+  return ctx && ctx > 0 ? `${ctx.toLocaleString()} tokens` : 'Not reported by endpoint';
 });
 </script>
 
@@ -148,6 +159,14 @@ const topP = computed({
             {{ m.id }}
           </option>
         </select>
+      </div>
+      <div class="ai-panel-settings__field">
+        <label class="ai-panel-settings__label">
+          Context window
+        </label>
+        <div class="ai-panel-settings__readonly">
+          {{ contextWindow }}
+        </div>
       </div>
       <div class="ai-panel-settings__field">
         <label class="ai-panel-settings__label" for="ai-panel-system-prompt">
@@ -278,6 +297,16 @@ const topP = computed({
 .ai-panel-settings__hint {
   color: hsl(var(--muted-foreground));
   font-size: 0.75rem;
+}
+
+.ai-panel-settings__readonly {
+  width: 100%;
+  padding: 0.5rem;
+  border-radius: 0.375rem;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--muted) / 30%);
+  color: hsl(var(--muted-foreground));
+  font-size: 0.875rem;
 }
 
 .ai-panel-settings__select {

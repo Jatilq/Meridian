@@ -164,7 +164,10 @@ export const useAiPanelStore = defineStore('aiPanel', () => {
         setModels(
           modelList
             .filter((item: { id?: string }) => typeof item.id === 'string')
-            .map((item: { id: string }) => ({ id: item.id })),
+            .map((item: { id: string; context_length?: number; context_window?: number; max_context?: number }) => ({
+              id: item.id,
+              contextWindow: item.context_length ?? item.context_window ?? item.max_context,
+            })),
         );
       }
     }
