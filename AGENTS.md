@@ -75,6 +75,17 @@ Omnix runs INSIDE Meridian's Electron process. Not spawned separately.
 8. Poll node status every 30 seconds, update Vue store
 9. 9Router endpoint status: GET configured endpoint `/v1/models`, show model list
 10. Add Cluster section to Meridian settings (IPs, SSH credentials, RPC command)
+11. Model launch configuration (Option 2 from AI panel work): the Cluster Control
+    panel is where llama.cpp model-LOAD parameters belong, because they take
+    effect when the model is launched/reloaded — NOT per-request (Meridian is an
+    OpenAI API client and cannot set these per-query). When launching/reloading a
+    model from Cluster Control, pass these to llama.cpp via the RPC/launch command:
+    - **GPU split** across MAMBA's 3 GPUs → `--tensor-split` / `--n-gpu-layers`
+    - **Context size** → `--ctx-size`
+    - **KV cache type** → `--cache-type-k` / `--cache-type-v`
+    Expose them as fields in the Cluster model-launch config, substituted into the
+    configurable launch command string. (Per-request params — system prompt,
+    temperature, max tokens, top-p — already live in AI panel settings.)
 
 **Completion check:** Panel shows MAMBA and BLACK status, Launch Slave button SSHs to BLACK and starts RPC, combined VRAM shows 52GB.
 
