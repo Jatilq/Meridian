@@ -70,6 +70,9 @@ export const useAiPanelStore = defineStore('aiPanel', () => {
   const topP = ref(userSettingsStore.userSettings.meridian?.aiPanel?.topP ?? 1);
   const currentPath = ref('');
   const selectedFiles = ref<string[]>([]);
+  // Search scope: where Rain looks when asked to search.
+  // 'current' = active folder, 'all' = all drives, or a specific drive path.
+  const searchScope = ref<string>('current');
   let hasGreetedThisSession = false;
 
   // Rain's opening lines — warm, short, never breaks character.
@@ -163,6 +166,7 @@ export const useAiPanelStore = defineStore('aiPanel', () => {
   }
   function setCurrentPath(path: string) { currentPath.value = path; }
   function setSelectedFiles(files: string[]) { selectedFiles.value = files; }
+  function setSearchScope(scope: string) { searchScope.value = scope; }
   function addMessage(role: 'user' | 'assistant', content: string) { messages.value.push({ role, content }); }
   function clearMessages() { messages.value = []; }
   function setLoading(value: boolean) { isLoading.value = value; }
@@ -215,10 +219,10 @@ export const useAiPanelStore = defineStore('aiPanel', () => {
 
   return {
     isOpen, isLoading, messages, input, endpoint, selectedModel, models, modelsLoaded,
-    useOmnix, omnixOnline, omnixPath, routerEndpoint, ttsEnabled, routerOnline, currentPath, selectedFiles, canSend,
+    useOmnix, omnixOnline, omnixPath, routerEndpoint, ttsEnabled, routerOnline, currentPath, selectedFiles, searchScope, canSend,
     systemPrompt, temperature, maxTokens, topP,
     open, close, toggle, setInput, setEndpoint, setSelectedModel, setUseOmnix,
-    setOmnixOnline, setOmnixPath, setRouterEndpoint, setTtsEnabled, setRouterOnline, setCurrentPath, setSelectedFiles, addMessage, clearMessages,
+    setOmnixOnline, setOmnixPath, setRouterEndpoint, setTtsEnabled, setRouterOnline, setCurrentPath, setSelectedFiles, setSearchScope, addMessage, clearMessages,
     setSystemPrompt, setTemperature, setMaxTokens, setTopP,
     setLoading, setModels, fetchModels,
   };

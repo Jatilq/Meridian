@@ -295,6 +295,26 @@ export function useFileBrowser(options: UseFileBrowserOptions) {
     layout: options.layout,
     entryDescription: options.entryDescription,
   });
+
+  // [BUG-2 DIAGNOSTIC] Log when filtered entries / rendered rows diverge so we
+  // can see whether the pane-empty bug is a filter issue or a viewport-measure
+  // issue. Remove once the F:/ empty-pane bug is root-caused.
+  watch(
+    () => [dataSource.currentPath.value, dataSource.entries.value.length, virtualLayout.rows.value.length, virtualLayout.visibleRows.value.length] as const,
+    ([path, filtered, rows, visible]) => {
+      const raw = dataSource.dirContents.value?.entries?.length ?? 0;
+      // eslint-disable-next-line no-console
+      console.log('[BUG-2 file-browser]', {
+        path,
+        rawDirContents: raw,
+        filteredEntries: filtered,
+        rows,
+        visibleRows: visible,
+        viewportHeight: virtualLayout.viewportHeight?.value ?? 'n/a',
+      });
+    },
+    { flush: 'post' },
+  );
   const linkMetadata = useFileBrowserLinkMetadata({
     enabled: !isExternalMode,
     currentPath: dataSource.currentPath,

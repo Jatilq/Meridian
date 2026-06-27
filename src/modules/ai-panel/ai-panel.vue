@@ -34,6 +34,23 @@ const { t } = useI18n();
 const aiPanelStore = useAiPanelStore();
 const userSettingsStore = useUserSettingsStore();
 
+// Drives available as explicit search-scope targets (loaded on demand).
+const scopeDrives = ref<string[]>([]);
+
+async function loadScopeDrives() {
+  try {
+    const drives = await invoke<Array<{ path: string }>>('get_system_drives');
+    scopeDrives.value = drives.map(d => d.path).filter(Boolean);
+  }
+  catch (error) {
+    console.error('Failed to load drives for search scope:', error);
+  }
+}
+
+function handleScopeChange(value: string) {
+  aiPanelStore.setSearchScope(value);
+}
+
 const resultAreaRef = ref<InstanceType<typeof ScrollArea> | null>(null);
 const confirmDialogOpen = ref(false);
 const confirmDialogData = ref<{ title: string; description: string; onConfirm: () => void | Promise<void> } | null>(null);
@@ -109,9 +126,18 @@ async function handleSend() {
       return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(ext || '');
     });
 
+    const scope = aiPanelStore.searchScope || 'current';
+    const scopeText = scope === 'current'
+      ? `the current folder (${currentPath || 'unknown'})`
+      : scope === 'all'
+        ? 'all drives on this machine'
+        : `the drive ${scope}`;
+
     const systemPrompt = (aiPanelStore.systemPrompt || '')
       .replace(/\{current_path\}/g, currentPath || '')
-      .replace(/\{selected_files\}/g, selectedFiles.length > 0 ? selectedFiles.join(', ') : 'none');
+      .replace(/\{selected_files\}/g, selectedFiles.length > 0 ? selectedFiles.join(', ') : 'none')
+      .replace(/\{search_scope\}/g, scopeText)
+      + `\n\nWhen searching for files, search ${scopeText} unless the user says otherwise.`;
 
     let response: Response;
     if (omnixVisionReady && hasImage) {
@@ -374,6 +400,7 @@ let omnixPollTimer: ReturnType<typeof setInterval> | null = null;
 onMounted(() => {
   void checkOmnixStatus();
   void aiPanelStore.fetchModels();
+  void loadScopeDrives();
   omnixPollTimer = setInterval(() => {
     void checkOmnixStatus();
   }, 5000);
@@ -451,6 +478,24 @@ const confirmDescription = computed(() => confirmDialogData.value?.description |
         </div>
       </div>
     </ScrollArea>
+    <div class="ai-panel__scope-row">
+      <span class="ai-panel__scope-label">{{ t('aiPanel.searchScope') }}</span>
+      <select
+        :value="aiPanelStore.searchScope"
+        class="ai-panel__scope-select"
+        @change="handleScopeChange(($event.target as HTMLSelectElement).value)"
+      >
+        <option value="current">{{ t('aiPanel.scopeCurrent') }}</option>
+        <option value="all">{{ t('aiPanel.scopeAll') }}</option>
+        <option
+          v-for="drive in scopeDrives"
+          :key="drive"
+          :value="drive"
+        >
+          {{ drive }}
+        </option>
+      </select>
+    </div>
     <div class="ai-panel__input-row">
       <Input
         v-model="aiPanelStore.input"
@@ -630,6 +675,29 @@ const confirmDescription = computed(() => confirmDialogData.value?.description |
 .ai-panel__message--assistant .ai-panel__message-content {
   background-color: hsl(var(--secondary));
   color: hsl(var(--foreground));
+}
+
+.ai-panel__scope-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 0;
+}
+
+.ai-panel__scope-label {
+  color: hsl(var(--muted-foreground));
+  font-size: 0.75rem;
+}
+
+.ai-panel__scope-select {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-sm);
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-size: 0.75rem;
 }
 
 .ai-panel__input-row {
