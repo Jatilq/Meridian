@@ -7,6 +7,7 @@ mod archive;
 mod background_sources;
 mod clipboard_source;
 mod clipboard_watcher;
+mod cluster;
 mod copy_move_job;
 mod default_file_manager;
 mod delete_job;
@@ -400,6 +401,11 @@ pub fn run() {
             omnix::omnix_vision,
             omnix::omnix_tts,
             omnix::omnix_director,
+            cluster::check_node_status,
+            cluster::get_gpu_stats,
+            cluster::launch_rpc_slave,
+            cluster::get_local_hardware,
+            cluster::get_remote_hardware,
         ])
         .setup(setup_handler)
         .on_window_event(|window, event| {
