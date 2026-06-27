@@ -68,6 +68,7 @@
     "title": "Quick access",
     "favorites": "Favorites",
     "tagged": "Tagged",
+    "remote": "Remote (SSH)",
     "emptyFavorites": "No favorites",
     "emptyTagged": "No tagged items",
     "unknownTagGroup": "Unknown tag"

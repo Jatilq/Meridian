@@ -18,6 +18,7 @@ import {
   LOCATIONS_VIRTUAL_PATH,
 } from '@/utils/virtual-path-constants';
 import { createDriveEntryMetadata } from '@/utils/drive-icon';
+import { isSshPath, parseSshPath, buildSshPath } from '@/utils/ssh-connections';
 
 export { isVirtualLocationPath, LOCATIONS_VIRTUAL_PATH } from '@/utils/virtual-path-constants';
 
@@ -107,10 +108,67 @@ export async function resolveDirectoryContents(
     return readLocationsDirectory();
   }
 
+  if (isSshPath(path)) {
+    return resolveSftpDirectoryContents(path);
+  }
+
   return invoke<DirContents>('read_dir', {
     path,
     options,
   });
+}
+
+interface SftpContents {
+  path: string;
+  entries: Array<Omit<DirEntry, 'link_type' | 'link_target' | 'link_status' | 'hard_link_count'>>;
+  total_count: number;
+  dir_count: number;
+  file_count: number;
+}
+
+// List a remote directory over SFTP and map it into the local DirContents
+// shape so the same file pane renders it. The returned `path` stays an
+// ssh://host/... URL so navigation/breadcrumbs remain remote-aware.
+async function resolveSftpDirectoryContents(path: string): Promise<DirContents> {
+  const parsed = parseSshPath(path);
+  if (!parsed || !parsed.connection) {
+    throw new Error(`Unknown SSH host in path: ${path}`);
+  }
+
+  const creds = {
+    host: parsed.connection.host,
+    port: parsed.connection.port,
+    username: parsed.connection.username,
+    keyPath: parsed.connection.keyPath,
+  };
+
+  const remote = await invoke<SftpContents>('sftp_read_dir', {
+    creds,
+    path: parsed.remotePath,
+  });
+
+  const entries: DirEntry[] = remote.entries.map(entry => ({
+    ...entry,
+    // Re-wrap the entry path as an ssh:// URL so clicks keep navigating remote.
+    path: buildSshPath(parsed.connection!.host, entry.path),
+    link_type: null,
+    link_target: null,
+    link_status: null,
+    hard_link_count: null,
+  }));
+
+  return {
+    path: buildSshPath(parsed.connection.host, remote.path),
+    entries,
+    total_count: remote.total_count,
+    dir_count: remote.dir_count,
+    file_count: remote.file_count,
+    opened_directory_times: {
+      modified_time: 0,
+      accessed_time: 0,
+      created_time: 0,
+    },
+  };
 }
 
 export async function resolveDirEntry(

@@ -17,6 +17,7 @@ import { useRouter } from 'vue-router';
 import {
   ChevronDownIcon,
   ChevronRightIcon,
+  ServerIcon,
   StarIcon,
   TagIcon,
 } from '@lucide/vue';
@@ -36,6 +37,7 @@ import { getPathDisplayName } from '@/utils/normalize-path';
 import { isVirtualLocationPath } from '@/utils/virtual-locations';
 import { resolveNavigableItemTarget } from '@/utils/resolve-navigable-item-target';
 import { arePathsEquivalent } from '@/utils/file-operation-paths';
+import { SSH_CONNECTIONS, buildSshPath } from '@/utils/ssh-connections';
 
 const { t } = useI18n();
 const router = useRouter();
@@ -150,6 +152,20 @@ async function openFavoriteItem(item: FavoriteItem) {
 function openTaggedItem(item: TaggedItem) {
   openItem(item.path, item.isFile);
 }
+
+// Open a pre-configured SSH connection: navigate the active pane to the
+// remote home via an ssh://host/ URL, which routes through sftp_read_dir.
+const sshConnections = SSH_CONNECTIONS;
+
+async function openSshConnection(host: string) {
+  try {
+    await workspacesStore.openNewTabGroup(buildSshPath(host, ''));
+    router.push({ name: 'navigator' });
+  }
+  catch (error) {
+    console.error('Failed to open SSH connection:', error);
+  }
+}
 </script>
 
 <template>
@@ -224,6 +240,45 @@ function openTaggedItem(item: TaggedItem) {
                 <span class="quick-access-panel__item-name">{{ getItemName(item.path) }}</span>
               </button>
             </DirEntryInteractive>
+          </CollapsibleContent>
+        </Collapsible>
+
+        <Collapsible
+          :default-open="true"
+          class="quick-access-panel__section"
+        >
+          <CollapsibleTrigger class="quick-access-panel__section-trigger">
+            <button
+              type="button"
+              class="quick-access-panel__section-header"
+            >
+              <ChevronDownIcon
+                :size="14"
+                class="quick-access-panel__chevron"
+              />
+              <ServerIcon
+                :size="14"
+                class="quick-access-panel__section-icon"
+              />
+              <span class="quick-access-panel__section-title">{{ t('quickAccess.remote') }}</span>
+              <span class="quick-access-panel__badge">{{ sshConnections.length }}</span>
+            </button>
+          </CollapsibleTrigger>
+          <CollapsibleContent class="quick-access-panel__section-content">
+            <button
+              v-for="conn in sshConnections"
+              :key="conn.host"
+              type="button"
+              class="quick-access-panel__item"
+              :title="`ssh://${conn.username}@${conn.host}`"
+              @click="openSshConnection(conn.host)"
+            >
+              <ServerIcon
+                :size="14"
+                class="quick-access-panel__item-icon"
+              />
+              <span class="quick-access-panel__item-name">{{ conn.label }}</span>
+            </button>
           </CollapsibleContent>
         </Collapsible>
 
