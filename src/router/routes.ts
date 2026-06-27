@@ -4,7 +4,7 @@
 
 import HomePage from '@/modules/home/pages/home.vue';
 import {
-  BlocksIcon, FolderClosedIcon, HomeIcon, BookmarkIcon, SettingsIcon, XIcon,
+  BlocksIcon, FolderClosedIcon, HomeIcon, BookmarkIcon, ServerIcon, SettingsIcon, XIcon,
 } from '@lucide/vue';
 import type { RouteRecordRaw } from 'vue-router';
 
@@ -47,6 +47,12 @@ export const routes: Array<RouteRecordRaw & { icon: typeof XIcon }> = [
     name: 'dashboard',
     icon: BookmarkIcon,
     component: () => import('@/modules/dashboard/pages/dashboard.vue'),
+  },
+  {
+    path: '/cluster',
+    name: 'cluster',
+    icon: ServerIcon,
+    component: () => import('@/modules/cluster/pages/cluster.vue'),
   },
   {
     path: '/settings',
