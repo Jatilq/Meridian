@@ -64,6 +64,10 @@ export const useAiPanelStore = defineStore('aiPanel', () => {
   const routerEndpoint = ref(userSettingsStore.userSettings.meridian?.aiPanel?.routerEndpoint || 'http://localhost:20128/v1');
   const ttsEnabled = ref(userSettingsStore.userSettings.meridian?.aiPanel?.ttsEnabled ?? false);
   const routerOnline = ref(false);
+  const systemPrompt = ref(userSettingsStore.userSettings.meridian?.aiPanel?.systemPrompt || 'You are a file management assistant integrated into Meridian. You help the user navigate, organize, search, and manage files. Current directory: {current_path}. Selected files: {selected_files}. Be concise and practical.');
+  const temperature = ref(userSettingsStore.userSettings.meridian?.aiPanel?.temperature ?? 0.7);
+  const maxTokens = ref(userSettingsStore.userSettings.meridian?.aiPanel?.maxTokens ?? 1024);
+  const topP = ref(userSettingsStore.userSettings.meridian?.aiPanel?.topP ?? 1);
   const currentPath = ref('');
   const selectedFiles = ref<string[]>([]);
 
@@ -118,6 +122,26 @@ export const useAiPanelStore = defineStore('aiPanel', () => {
     userSettingsStore.setUserSettingsStorage('meridian.aiPanel.ttsEnabled', value);
   }
   function setRouterOnline(value: boolean) { routerOnline.value = value; }
+  function setSystemPrompt(value: string) {
+    systemPrompt.value = value;
+    userSettingsStore.userSettings.meridian.aiPanel.systemPrompt = value;
+    userSettingsStore.setUserSettingsStorage('meridian.aiPanel.systemPrompt', value);
+  }
+  function setTemperature(value: number) {
+    temperature.value = value;
+    userSettingsStore.userSettings.meridian.aiPanel.temperature = value;
+    userSettingsStore.setUserSettingsStorage('meridian.aiPanel.temperature', value);
+  }
+  function setMaxTokens(value: number) {
+    maxTokens.value = value;
+    userSettingsStore.userSettings.meridian.aiPanel.maxTokens = value;
+    userSettingsStore.setUserSettingsStorage('meridian.aiPanel.maxTokens', value);
+  }
+  function setTopP(value: number) {
+    topP.value = value;
+    userSettingsStore.userSettings.meridian.aiPanel.topP = value;
+    userSettingsStore.setUserSettingsStorage('meridian.aiPanel.topP', value);
+  }
   function setCurrentPath(path: string) { currentPath.value = path; }
   function setSelectedFiles(files: string[]) { selectedFiles.value = files; }
   function addMessage(role: 'user' | 'assistant', content: string) { messages.value.push({ role, content }); }
@@ -170,8 +194,10 @@ export const useAiPanelStore = defineStore('aiPanel', () => {
   return {
     isOpen, isLoading, messages, input, endpoint, selectedModel, models, modelsLoaded,
     useOmnix, omnixOnline, omnixPath, routerEndpoint, ttsEnabled, routerOnline, currentPath, selectedFiles, canSend,
+    systemPrompt, temperature, maxTokens, topP,
     open, close, toggle, setInput, setEndpoint, setSelectedModel, setUseOmnix,
     setOmnixOnline, setOmnixPath, setRouterEndpoint, setTtsEnabled, setRouterOnline, setCurrentPath, setSelectedFiles, addMessage, clearMessages,
+    setSystemPrompt, setTemperature, setMaxTokens, setTopP,
     setLoading, setModels, fetchModels,
   };
 });

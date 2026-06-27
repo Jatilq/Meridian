@@ -166,6 +166,10 @@ export type AiPanelSettings = {
   omnixPath: string;
   routerEndpoint: string;
   ttsEnabled: boolean;
+  systemPrompt: string;
+  temperature: number;
+  maxTokens: number;
+  topP: number;
 };
 
 export type DownloaderSettings = {

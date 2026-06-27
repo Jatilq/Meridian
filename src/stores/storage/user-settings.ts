@@ -207,6 +207,10 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
         omnixPath: 'E:\\ai\\Apps\\Omnix',
         routerEndpoint: 'http://localhost:20128/v1',
         ttsEnabled: false,
+        systemPrompt: 'You are a file management assistant integrated into Meridian. You help the user navigate, organize, search, and manage files. Current directory: {current_path}. Selected files: {selected_files}. Be concise and practical.',
+        temperature: 0.7,
+        maxTokens: 1024,
+        topP: 1,
       },
       downloader: {
         autoSaveFolder: '',

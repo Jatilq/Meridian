@@ -435,6 +435,10 @@ async function migrateUserSettingsStep(storage: StorageAdapter, fromVersion: num
     await setDefaultStringIfMissing(storage, 'meridian.aiPanel.routerEndpoint', 'http://localhost:20128/v1');
     await setDefaultStringIfMissing(storage, 'meridian.aiPanel.model', 'openrouter/openrouter/free');
     await setDefaultBooleanIfMissing(storage, 'meridian.aiPanel.ttsEnabled', false);
+    await setDefaultStringIfMissing(storage, 'meridian.aiPanel.systemPrompt', 'You are a file management assistant integrated into Meridian. You help the user navigate, organize, search, and manage files. Current directory: {current_path}. Selected files: {selected_files}. Be concise and practical.');
+    await setDefaultNumberIfMissing(storage, 'meridian.aiPanel.temperature', 0.7);
+    await setDefaultNumberIfMissing(storage, 'meridian.aiPanel.maxTokens', 1024);
+    await setDefaultNumberIfMissing(storage, 'meridian.aiPanel.topP', 1);
   }
 
   if (fromVersion === 6 && toVersion === 7) {
@@ -513,6 +517,18 @@ async function setDefaultStringIfMissing(
   const existingValue = await storage.get<unknown>(key);
 
   if (typeof existingValue !== 'string' || existingValue.trim() === '') {
+    await storage.set(key, defaultValue);
+  }
+}
+
+async function setDefaultNumberIfMissing(
+  storage: StorageAdapter,
+  key: string,
+  defaultValue: number,
+) {
+  const existingValue = await storage.get<unknown>(key);
+
+  if (typeof existingValue !== 'number' || Number.isNaN(existingValue)) {
     await storage.set(key, defaultValue);
   }
 }
