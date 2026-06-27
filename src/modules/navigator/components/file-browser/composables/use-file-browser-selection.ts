@@ -21,6 +21,7 @@ import { useLanShare } from '@/composables/use-lan-share';
 import { useCopyMoveWithConflicts } from '@/composables/use-copy-move-with-conflicts';
 import normalizePath, { getPathDisplayName } from '@/utils/normalize-path';
 import { isVirtualLocationPath } from '@/utils/virtual-locations';
+import { isSshPath, parseSshPath } from '@/utils/ssh-connections';
 import {
   getSharedSourceDirectory,
   isDestinationInsideAnySourceDirectory,
@@ -35,6 +36,25 @@ import { resolveNavigableItemTarget } from '@/utils/resolve-navigable-item-targe
 import type { CreateLinksResult, LinkCreationKind } from '@/utils/link-operations';
 
 export const FILE_BROWSER_REVEAL_STALE_FOCUS_GUARD_MS = 500;
+
+// Build SFTP credentials + remote path from an ssh://host/path URL so the
+// file-op handlers can route to the sftp_* Tauri commands. Returns null for
+// non-ssh paths or unknown hosts.
+function sftpContextForPath(path: string): { creds: Record<string, unknown>; remotePath: string; host: string } | null {
+  if (!isSshPath(path)) return null;
+  const parsed = parseSshPath(path);
+  if (!parsed || !parsed.connection) return null;
+  return {
+    creds: {
+      host: parsed.connection.host,
+      port: parsed.connection.port,
+      username: parsed.connection.username,
+      keyPath: parsed.connection.keyPath,
+    },
+    remotePath: parsed.remotePath,
+    host: parsed.connection.host,
+  };
+}
 
 export function useFileBrowserSelection(
   entriesRef: Ref<DirEntry[]>,
@@ -744,6 +764,26 @@ export function useFileBrowserSelection(
     }
 
     try {
+      const sftpCtx = sftpContextForPath(entry.path);
+      if (sftpCtx) {
+        // Remote rename: same directory, new leaf name.
+        const slash = sftpCtx.remotePath.lastIndexOf('/');
+        const parent = slash >= 0 ? sftpCtx.remotePath.slice(0, slash) : '';
+        const target = parent ? `${parent}/${trimmedName}` : trimmedName;
+        await invoke('sftp_rename', { creds: sftpCtx.creds, from: sftpCtx.remotePath, to: target });
+        toast.custom(markRaw(ToastStatic), {
+          componentProps: {
+            data: {
+              title: t('notifications.renamed'),
+              description: '',
+            },
+          },
+        });
+        cancelRename();
+        onRefresh();
+        return true;
+      }
+
       const result = await invoke<FileOperationResult>('rename_item', {
         sourcePath: entry.path,
         newName: trimmedName,
@@ -832,6 +872,20 @@ export function useFileBrowserSelection(
 
     for (const directoryPath of directoryPaths) {
       try {
+        const sftpCtx = sftpContextForPath(directoryPath);
+        if (sftpCtx) {
+          // Remote: only directory creation is supported over SFTP here.
+          if (itemType !== 'directory') {
+            lastError = 'Creating files is not supported on remote (SSH) locations';
+            continue;
+          }
+          const sep = sftpCtx.remotePath.endsWith('/') || sftpCtx.remotePath === '' ? '' : '/';
+          const remoteTarget = `${sftpCtx.remotePath}${sep}${trimmedName}`;
+          await invoke('sftp_mkdir', { creds: sftpCtx.creds, path: remoteTarget });
+          successCount++;
+          continue;
+        }
+
         const result = await invoke<FileOperationResult>('create_item', {
           directoryPath,
           name: trimmedName,
@@ -1026,6 +1080,27 @@ export function useFileBrowserSelection(
       if (!confirmed) {
         return false;
       }
+    }
+
+    // Remote (SSH) entries: delete each over SFTP (no trash on remote).
+    if (entries.every(entry => isSshPath(entry.path))) {
+      let removed = 0;
+      for (const entry of entries) {
+        const sftpCtx = sftpContextForPath(entry.path);
+        if (!sftpCtx) continue;
+        try {
+          await invoke('sftp_delete', { creds: sftpCtx.creds, path: sftpCtx.remotePath, isDir: entry.is_dir });
+          removed++;
+        }
+        catch (error) {
+          console.error('SFTP delete failed:', error);
+        }
+      }
+      if (removed > 0) {
+        clearSelection();
+        onRefresh();
+      }
+      return removed > 0;
     }
 
     const paths = entries.map(entry => entry.path);
