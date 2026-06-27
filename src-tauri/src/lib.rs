@@ -11,6 +11,7 @@ mod cluster;
 mod copy_move_job;
 mod default_file_manager;
 mod delete_job;
+mod sftp;
 mod dir_reader;
 mod dir_size;
 mod dir_watcher;
@@ -406,6 +407,7 @@ pub fn run() {
             cluster::launch_rpc_slave,
             cluster::get_local_hardware,
             cluster::get_remote_hardware,
+            sftp::sftp_read_dir,
         ])
         .setup(setup_handler)
         .on_window_event(|window, event| {

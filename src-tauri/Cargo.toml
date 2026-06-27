@@ -73,6 +73,10 @@ dunce = "1"
 arboard = "3.6.1"
 which = "6.0.0"
 rusqlite = { version = "0.32", features = ["bundled"] }
+russh = "0.45"
+russh-keys = "0.45"
+russh-sftp = "2.0"
+async-trait = "0.1"
 
 # TODO: Remove this patch once drag-rs ships a fix for network-path outbound drag on Windows.
 # Upstream: https://github.com/crabnebula-dev/drag-rs/issues/72
