@@ -360,6 +360,9 @@ export function useFileBrowserVirtualLayout(options: {
   const scrollTop = ref(0);
   const virtualContentOffset = ref(0);
   let viewportResizeObserver: ResizeObserver | null = null;
+  // Re-measure guard for the drive-root render-timing race (see updateViewportSize).
+  let viewportRemeasureAttempts = 0;
+  const MAX_VIEWPORT_REMEASURE_ATTEMPTS = 10;
 
   const gridColumnCount = computed(() => getGridColumnCount(viewportWidth.value));
 
@@ -434,7 +437,28 @@ export function useFileBrowserVirtualLayout(options: {
     const fileBrowser = viewport.closest<HTMLElement>(FILE_BROWSER_SELECTOR);
     const statusBar = fileBrowser?.querySelector<HTMLElement>(STATUS_BAR_SELECTOR);
 
-    viewportHeight.value = viewport.clientHeight;
+    const measuredHeight = viewport.clientHeight;
+
+    // Render-timing race on (drive-root) navigation: the viewport can report a
+    // 0/too-small clientHeight before layout settles, which makes only a handful
+    // of virtual rows render even though the directory has many entries. If the
+    // measurement looks unsettled, defer to the next frame and re-measure once
+    // the container has its real dimensions instead of locking in the bad value.
+    if (measuredHeight < 200 && viewportRemeasureAttempts < MAX_VIEWPORT_REMEASURE_ATTEMPTS) {
+      viewportRemeasureAttempts += 1;
+      // Apply the best value we have for now so something renders…
+      viewportHeight.value = measuredHeight;
+      viewportWidth.value = entriesContainer?.clientWidth ?? viewport.clientWidth;
+      virtualContentOffset.value = getVirtualContentOffset(viewport);
+      bottomScrollMargin.value = getStatusBarOverlap(viewport, statusBar);
+      scrollTop.value = Math.max(0, viewport.scrollTop);
+      // …then re-measure next frame once layout has settled.
+      requestAnimationFrame(() => updateViewportSize());
+      return;
+    }
+
+    viewportRemeasureAttempts = 0;
+    viewportHeight.value = measuredHeight;
     viewportWidth.value = entriesContainer?.clientWidth ?? viewport.clientWidth;
     virtualContentOffset.value = getVirtualContentOffset(viewport);
     bottomScrollMargin.value = getStatusBarOverlap(viewport, statusBar);
