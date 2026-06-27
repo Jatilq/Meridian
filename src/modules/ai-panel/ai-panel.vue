@@ -168,19 +168,55 @@ async function handleSend() {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
 
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content ?? data.response ?? data.text ?? 'No response received.';
+    // Read as text first so a non-clean-JSON body (SSE/streaming "data:" lines,
+    // or JSON with trailing content) never throws on response.json().
+    const rawBody = await response.text();
+    let content = 'No response received.';
+    try {
+      const data = JSON.parse(rawBody);
+      content = data.choices?.[0]?.message?.content ?? data.response ?? data.text ?? content;
+    }
+    catch {
+      // Not a single JSON object. Try SSE/streaming: concatenate the content
+      // deltas from each "data:" line; fall back to the raw text.
+      const lines = rawBody.split('\n').map(l => l.trim()).filter(l => l.startsWith('data:'));
+      if (lines.length > 0) {
+        let acc = '';
+        for (const line of lines) {
+          const payload = line.slice(5).trim();
+          if (payload === '[DONE]') continue;
+          try {
+            const chunk = JSON.parse(payload);
+            acc += chunk.choices?.[0]?.delta?.content
+              ?? chunk.choices?.[0]?.message?.content
+              ?? '';
+          }
+          catch {
+            // skip malformed SSE chunk
+          }
+        }
+        content = acc || rawBody.trim() || content;
+      }
+      else {
+        content = rawBody.trim() || content;
+      }
+    }
     aiPanelStore.addMessage('assistant', content);
     await maybeSpeak(content);
 
-    try {
-      const parsed = JSON.parse(content);
-      if (parsed.intent && ['organize', 'rename', 'delete'].includes(parsed.intent)) {
-        handleIntentConfirmation(parsed);
+    // Only attempt intent routing when the response actually looks like JSON.
+    // General chat returns plain text — display it as-is, never error.
+    const trimmed = content.trim();
+    if (trimmed.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed.intent && ['organize', 'rename', 'delete'].includes(parsed.intent)) {
+          handleIntentConfirmation(parsed);
+        }
       }
-    }
-    catch {
-      // response was not JSON, leave as plain text
+      catch {
+        // Looked like JSON but wasn't valid — leave the text as a chat reply.
+      }
     }
   }
   catch (error) {
