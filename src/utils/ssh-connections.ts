@@ -17,8 +17,9 @@ export interface SshConnection {
   keyPath: string;
 }
 
-// Pre-configured cluster connections (Phase 7 step 3). Both use the
-// passphrase-less meridian_black key proven working for key-only auth.
+// Pre-configured cluster connections (Phase 7 step 3) — used as the DEFAULT
+// seed. The live list is driven by user settings via setSshConnections();
+// lookups below read the runtime registry, falling back to these defaults.
 export const SSH_CONNECTIONS: SshConnection[] = [
   {
     host: '192.168.1.67',
@@ -35,6 +36,22 @@ export const SSH_CONNECTIONS: SshConnection[] = [
     keyPath: 'C:\\Users\\jatilq\\.ssh\\meridian_black',
   },
 ];
+
+// Runtime registry — populated from user settings at app start / on change.
+// Defaults to the seed list so lookups work even before settings load.
+let activeConnections: SshConnection[] = [...SSH_CONNECTIONS];
+
+/** Replace the live SSH connection list (called from user settings). */
+export function setSshConnections(connections: SshConnection[]): void {
+  activeConnections = Array.isArray(connections) && connections.length > 0
+    ? connections.filter(c => c && c.host)
+    : [...SSH_CONNECTIONS];
+}
+
+/** Read the live SSH connection list (settings-driven, seed fallback). */
+export function getSshConnections(): SshConnection[] {
+  return activeConnections;
+}
 
 const SSH_PREFIX = 'ssh://';
 
@@ -64,10 +81,10 @@ export function parseSshPath(path: string): ParsedSshPath | null {
   const slash = rest.indexOf('/');
   const host = slash === -1 ? rest : rest.slice(0, slash);
   const remotePath = slash === -1 ? '' : rest.slice(slash + 1);
-  const connection = SSH_CONNECTIONS.find(c => c.host === host) ?? null;
+  const connection = activeConnections.find(c => c.host === host) ?? null;
   return { host, remotePath, connection };
 }
 
 export function findSshConnection(host: string): SshConnection | null {
-  return SSH_CONNECTIONS.find(c => c.host === host) ?? null;
+  return activeConnections.find(c => c.host === host) ?? null;
 }

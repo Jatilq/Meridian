@@ -3,6 +3,7 @@
 // Copyright © 2021 - present Aleksey Hoffman. All rights reserved.
 
 import cloneDeep from 'lodash.clonedeep';
+import { setSshConnections } from '@/utils/ssh-connections';
 import { defineStore } from 'pinia';
 import { LazyStore } from '@tauri-apps/plugin-store';
 import { ref, computed, watch } from 'vue';
@@ -410,9 +411,22 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
       if (userSettingsDefault.value && allowedUserSettingsStorageKeys.value.size === 0) {
         allowedUserSettingsStorageKeys.value = buildAllowedUserSettingsStorageKeys(userSettingsDefault.value);
       }
+
+      // Sync the SFTP connection registry from loaded settings so ssh://
+      // routing uses the user's configured connections, not the seed defaults.
+      syncSshConnectionsFromSettings();
     }
     catch (error) {
       console.error('Failed to initialize user settings storage:', error);
+    }
+  }
+
+  // Push the configured SSH connections into the SFTP routing registry so
+  // ssh:// path resolution uses the user's settings, not the seed defaults.
+  function syncSshConnectionsFromSettings() {
+    const connections = userSettings.value?.meridian?.sshConnections;
+    if (Array.isArray(connections)) {
+      setSshConnections(connections);
     }
   }
 
@@ -425,6 +439,11 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     }
     catch (error: unknown) {
       console.error(`Failed to save to storage: ${key}: ${value}`, error);
+    }
+
+    // Keep the SFTP registry in sync when connections change.
+    if (key === 'meridian.sshConnections') {
+      syncSshConnectionsFromSettings();
     }
   }
 
