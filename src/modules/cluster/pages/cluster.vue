@@ -4,16 +4,8 @@ Copyright © 2021 - present Aleksey Hoffman. All rights reserved.
 -->
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
-
-interface NodeStatus {
-  name: string;
-  host: string;
-  online: boolean;
-  gpus: GpuStat[];
-  error?: string;
-}
 
 interface GpuStat {
   index: number;
@@ -24,14 +16,42 @@ interface GpuStat {
   temperature: number;  // celsius
 }
 
-// Static node definitions (IPs configurable in Settings → Cluster later).
+interface CpuInfo {
+  name: string;
+  cores: number;
+  utilization: number; // percent
+}
+
+interface RamInfo {
+  totalMb: number;
+  usedMb: number;
+  freeMb: number;
+  utilization: number; // percent
+}
+
+interface HardwareSnapshot {
+  online: boolean;
+  cpu: CpuInfo | null;
+  ram: RamInfo | null;
+  gpus: GpuStat[];
+  error: string | null;
+}
+
+interface NodeView extends HardwareSnapshot {
+  name: string;
+  host: string;
+  role: string;
+}
+
+// MAMBA runs Meridian (local); BLACK is remote over SSH.
+// IPs/credentials are configurable in Settings → Cluster (pending).
 const NODES = [
-  { name: 'MAMBA', host: '192.168.1.67', role: 'Primary inference (3× RTX 3060)' },
-  { name: 'BLACK', host: '192.168.1.64', role: 'Daily driver / RPC slave (RX 6900 XT)' },
+  { name: 'MAMBA', host: '192.168.1.67', role: 'Primary inference (3× RTX 3060)', local: true, vendor: 'nvidia' },
+  { name: 'BLACK', host: '192.168.1.64', role: 'Daily driver / RPC slave (RX 6900 XT)', local: false, vendor: 'amd' },
 ];
 
-const nodes = ref<NodeStatus[]>(
-  NODES.map(n => ({ name: n.name, host: n.host, online: false, gpus: [] })),
+const nodes = ref<NodeView[]>(
+  NODES.map(n => ({ name: n.name, host: n.host, role: n.role, online: false, cpu: null, ram: null, gpus: [], error: null })),
 );
 const rpcLaunching = ref(false);
 const rpcMessage = ref('');
@@ -40,25 +60,15 @@ let pollTimer: ReturnType<typeof setInterval> | null = null;
 async function refreshNode(idx: number) {
   const def = NODES[idx];
   try {
-    // Rust command (Phase 6 backend, pending): returns { online, gpus }.
-    const result = await invoke<{ online: boolean; gpus: GpuStat[] }>(
-      'check_node_status',
-      { host: def.host },
-    );
-    nodes.value[idx] = {
-      name: def.name,
-      host: def.host,
-      online: result.online,
-      gpus: result.gpus ?? [],
-    };
+    const snap = def.local
+      ? await invoke<HardwareSnapshot>('get_local_hardware')
+      : await invoke<HardwareSnapshot>('get_remote_hardware', { vendor: def.vendor });
+    nodes.value[idx] = { name: def.name, host: def.host, role: def.role, ...snap };
   }
   catch (error) {
     nodes.value[idx] = {
-      name: def.name,
-      host: def.host,
-      online: false,
-      gpus: [],
-      error: String(error),
+      name: def.name, host: def.host, role: def.role,
+      online: false, cpu: null, ram: null, gpus: [], error: String(error),
     };
   }
 }
@@ -82,11 +92,15 @@ async function launchRpcSlave() {
   }
 }
 
-function combinedVram(): string {
+const combinedVram = computed(() => {
   const totalMb = nodes.value
     .flatMap(n => n.gpus)
     .reduce((sum, g) => sum + (g.memoryTotal || 0), 0);
   return totalMb > 0 ? `${(totalMb / 1024).toFixed(0)}GB` : '—';
+});
+
+function gb(mb: number): string {
+  return (mb / 1024).toFixed(1);
 }
 
 onMounted(() => {
@@ -104,7 +118,7 @@ onUnmounted(() => {
     <div class="cluster__header">
       <h1 class="cluster__title">Cluster Control</h1>
       <div class="cluster__summary">
-        Combined VRAM: <strong>{{ combinedVram() }}</strong>
+        Combined VRAM: <strong>{{ combinedVram }}</strong>
       </div>
     </div>
 
@@ -121,25 +135,50 @@ onUnmounted(() => {
           />
           <span class="cluster__node-name">{{ node.name }}</span>
           <span class="cluster__node-host">{{ node.host }}</span>
+          <span class="cluster__node-role">{{ node.role }}</span>
           <button class="cluster__refresh" @click="refreshNode(idx)">Refresh</button>
         </div>
 
-        <div v-if="node.online && node.gpus.length" class="cluster__gpus">
-          <div
-            v-for="gpu in node.gpus"
-            :key="gpu.index"
-            class="cluster__gpu"
-          >
-            <div class="cluster__gpu-name">GPU {{ gpu.index }}: {{ gpu.name }}</div>
-            <div class="cluster__gpu-stats">
-              <span>{{ gpu.utilization }}% util</span>
-              <span>{{ (gpu.memoryUsed / 1024).toFixed(1) }}/{{ (gpu.memoryTotal / 1024).toFixed(1) }}GB</span>
-              <span>{{ gpu.temperature }}°C</span>
+        <template v-if="node.online">
+          <!-- CPU -->
+          <div v-if="node.cpu" class="cluster__hw-row">
+            <span class="cluster__hw-label">CPU</span>
+            <span class="cluster__hw-value">
+              {{ node.cpu.name }} · {{ node.cpu.cores }} cores · {{ node.cpu.utilization.toFixed(0) }}%
+            </span>
+          </div>
+
+          <!-- RAM -->
+          <div v-if="node.ram" class="cluster__hw-row">
+            <span class="cluster__hw-label">RAM</span>
+            <span class="cluster__hw-value">
+              {{ gb(node.ram.usedMb) }} / {{ gb(node.ram.totalMb) }}GB used
+              ({{ gb(node.ram.freeMb) }}GB free · {{ node.ram.utilization.toFixed(0) }}%)
+            </span>
+          </div>
+
+          <!-- GPUs -->
+          <div v-if="node.gpus.length" class="cluster__gpus">
+            <div
+              v-for="gpu in node.gpus"
+              :key="gpu.index"
+              class="cluster__gpu"
+            >
+              <div class="cluster__gpu-name">GPU {{ gpu.index }}: {{ gpu.name }}</div>
+              <div class="cluster__gpu-stats">
+                <span>{{ gpu.utilization }}% util</span>
+                <span>{{ gb(gpu.memoryUsed) }}/{{ gb(gpu.memoryTotal) }}GB</span>
+                <span>{{ gpu.temperature }}°C</span>
+              </div>
             </div>
           </div>
-        </div>
+          <div v-else class="cluster__hw-row">
+            <span class="cluster__hw-label">GPU</span>
+            <span class="cluster__hw-value">No GPU data</span>
+          </div>
+        </template>
         <div v-else class="cluster__offline">
-          {{ node.error ? `Offline — ${node.error}` : 'Offline (no SSH connection)' }}
+          {{ node.error ? `Offline — ${node.error}` : 'Offline (no connection)' }}
         </div>
       </div>
     </div>
@@ -214,6 +253,31 @@ onUnmounted(() => {
 
 .cluster__node-name { font-weight: 600; color: hsl(var(--foreground)); }
 .cluster__node-host { color: hsl(var(--muted-foreground)); font-size: 0.8rem; }
+
+.cluster__node-role {
+  color: hsl(var(--muted-foreground));
+  font-size: 0.75rem;
+  font-style: italic;
+}
+
+.cluster__hw-row {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  align-items: baseline;
+}
+
+.cluster__hw-label {
+  flex-shrink: 0;
+  width: 40px;
+  font-weight: 600;
+  color: hsl(var(--muted-foreground));
+}
+
+.cluster__hw-value {
+  color: hsl(var(--foreground));
+}
 
 .cluster__refresh {
   margin-left: auto;
