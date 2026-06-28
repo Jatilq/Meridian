@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build"
+    "beforeDevCommand": "E:\\ai\\apps\\pinokio\\bin\\miniconda\\pkgs\\nodejs-22.21.1-he453025_2\\npm.cmd run dev",
+    "beforeBuildCommand": "E:\\ai\\apps\\pinokio\\bin\\miniconda\\pkgs\\nodejs-22.21.1-he453025_2\\npm.cmd run build"
   },
   "app": {
     "windows": [
