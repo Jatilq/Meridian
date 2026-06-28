@@ -18,11 +18,11 @@ Last updated: June 28, 2026
 - GitHub repo live: https://github.com/Jatilq/Meridian
 
 **Recent commits:**
-- 05c3b571 feat: What's New popup + onboarding refinements
+- d9d1462a fix(cluster): auto-detect GPU vendor via WMI, Windows AMD VRAM, hide SSH terminal popup
+- 77df0ca6 feat: Universal onboarding flow (intro → local/API/basic → download folder → done)
+- 680cc38e feat: Phase 10 Hardware Scanner panel + HuggingFace recommender
+- 0a5abd93 feat: What's New popup + onboarding refinements
 - df7d8738 feat: Rain first-run onboarding + cluster topology map
-- 9e409962 feat: bundle Omnix with installer, auto-extract on first run
-- 27e4d970 feat: rebrand to Meridian, maintain Sigma attribution
-- a39a210d feat: auto-detect default download folder on first run
 
 ---
 
@@ -58,16 +58,6 @@ Completed:
 ---
 
 ## Phase 11 — Backend Manager (ready to implement)
-
-New sidebar panel showing:
-- llama.cpp, llamafile, koboldcpp variants
-- Status, Download, Start/Stop, Port, Active Model per backend
-- RPC Slave Auto-Setup (copies binary to worker via SFTP)
-
-New sidebar panel:
-- llama.cpp, llamafile, koboldcpp variants
-- Status, Download, Start/Stop, Port, Active Model per backend
-- RPC Slave Auto-Setup (copies binary to worker via SFTP)
 
 ---
 

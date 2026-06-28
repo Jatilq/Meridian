@@ -50,14 +50,7 @@ interface NodeDef {
   host: string;
   role: string;
   local: boolean;
-  vendor: string;
 }
-
-// Load SSH connections from settings (dynamic node list)
-import { useUserSettingsStore } from '@/stores/storage/user-settings';
-const userSettingsStore = useUserSettingsStore();
-
-const sshConnections = computed(() => userSettingsStore.userSettings.meridian.sshConnections);
 
 // Build node list from SSH connections + mark local status
 const nodeDefs = computed<NodeDef[]>(() => {
@@ -73,8 +66,22 @@ const nodeDefs = computed<NodeDef[]>(() => {
       host: mambaConn.host,
       role: 'Primary inference',
       local: true,
-      vendor: 'nvidia',
     });
+  }
+
+  // Other connections are remote
+  conns.filter(c => c.label !== 'MAMBA').forEach(c => {
+    nodes.push({
+      id: c.host,
+      name: c.label || c.host,
+      host: c.host,
+      role: 'Worker node',
+      local: false,
+    });
+  });
+
+  return nodes;
+});
   }
 
   // Other connections are remote
@@ -104,15 +111,15 @@ async function refreshNodeViews() {
     const conn = sshConnections.value?.find(c => c.host === def.host);
     const creds = {
       host: def.host,
-      port: conn?.port ?? def.local ? 22 : 22,
-      username: conn?.username ?? (def.local ? 'jatilq' : 'jatilq'),
+      port: conn?.port ?? 22,
+      username: conn?.username ?? 'jatilq',
       keyPath: conn?.keyPath ?? 'C:\\Users\\jatilq\\.ssh\\meridian_black',
     };
 
     try {
       const snap = def.local
         ? await invoke<HardwareSnapshot>('get_local_hardware')
-        : await invoke<HardwareSnapshot>('get_remote_hardware', { creds, vendor: def.vendor });
+        : await invoke<HardwareSnapshot>('get_remote_hardware', { creds });
       views.push({
         name: def.name,
         host: def.host,

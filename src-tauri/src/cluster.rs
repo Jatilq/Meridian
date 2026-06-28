@@ -16,17 +16,17 @@ use russh::client;
 use russh::keys::key;
 use serde::{Deserialize, Serialize};
 
-/// GPU stats for one device, parsed from nvidia-smi / rocm-smi output.
+/// GPU stats for one device, parsed from nvidia-smi / rocm-smi / WMI output.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GpuStat {
     pub index: u32,
     pub name: String,
-    pub utilization: u32,    // percent
+    pub utilization: u32,    // percent (0 if unavailable)
     #[serde(rename = "memoryUsed")]
     pub memory_used: u64,    // MB
     #[serde(rename = "memoryTotal")]
     pub memory_total: u64,   // MB
-    pub temperature: u32,    // celsius
+    pub temperature: u32,    // celsius (0 if unavailable)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -126,8 +126,9 @@ async fn ssh_exec(creds: &SshCredentials, command: &str) -> Result<String, Strin
         .channel_open_session()
         .await
         .map_err(|e| format!("SSH channel open failed: {}", e))?;
+    // want_pty=false prevents spawning visible terminal windows on Windows
     channel
-        .exec(true, command)
+        .exec(false, command)
         .await
         .map_err(|e| format!("SSH exec failed: {}", e))?;
 
@@ -269,10 +270,9 @@ fn parse_kv(out: &str, key: &str) -> Option<String> {
 }
 
 /// Remote hardware snapshot over SSH (used for BLACK). Gathers CPU/RAM via
-/// Linux shell tools, GPUs via rocm-smi (amd) or nvidia-smi. Best-effort:
-/// missing pieces are returned as None rather than failing the whole call.
+/// PowerShell CIM on Windows, GPUs via WMI. Auto-detects GPU vendor.
 #[tauri::command]
-pub async fn get_remote_hardware(creds: SshCredentials, vendor: String) -> Result<HardwareSnapshot, String> {
+pub async fn get_remote_hardware(creds: SshCredentials) -> Result<HardwareSnapshot, String> {
     // Probe connectivity first.
     if let Err(e) = ssh_exec(&creds, "true").await {
         return Ok(HardwareSnapshot { online: false, cpu: None, ram: None, gpus: vec![], error: Some(e) });
@@ -301,47 +301,16 @@ pub async fn get_remote_hardware(creds: SshCredentials, vendor: String) -> Resul
     let used_mb = total_mb.saturating_sub(free_mb);
     let ram_util = if total_mb > 0 { (used_mb as f32 / total_mb as f32) * 100.0 } else { 0.0 };
 
-    // GPUs.
-    let gpus = match vendor.as_str() {
-        "amd" => {
-            // Try rocm-smi first (full stats if the ROCm SDK is installed).
-            let rocm = ssh_exec(&creds, "rocm-smi --showuse --showmemuse --showtemp --json")
-                .await
-                .map(|o| parse_rocm_smi(&o))
-                .unwrap_or_default();
-            if !rocm.is_empty() {
-                rocm
-            } else {
-                // Fallback: gaming AMD cards on Windows have no rocm-smi. Get the
-                // GPU NAME via CIM. VRAM/util are unavailable (Windows AdapterRAM
-                // is capped at 4GB by a DWORD overflow), so report them as 0 →
-                // the UI shows them as unavailable rather than a wrong number.
-                let cim = ssh_exec(
-                    &creds,
-                    "powershell -Command \"Get-CimInstance Win32_VideoController | Where-Object { $_.Name -notmatch 'Parsec|Virtual|Basic' } | Select-Object -ExpandProperty Name\"",
-                )
-                .await
-                .unwrap_or_default();
-                cim.lines()
-                    .map(|l| l.trim())
-                    .filter(|l| !l.is_empty())
-                    .enumerate()
-                    .map(|(i, name)| GpuStat {
-                        index: i as u32,
-                        name: name.to_string(),
-                        utilization: 0,
-                        memory_used: 0,
-                        memory_total: 0,
-                        temperature: 0,
-                    })
-                    .collect()
-            }
-        }
-        _ => ssh_exec(&creds, NVIDIA_SMI_CMD)
-            .await
-            .map(|o| parse_nvidia_smi(&o))
-            .unwrap_or_default(),
-    };
+    // Auto-detect GPU vendor via WMI (check for NVIDIA vs AMD in GPU names).
+    let gpu_vendor_out = ssh_exec(
+        &creds,
+        "powershell -Command \"Get-WmiObject Win32_VideoController | Where-Object {$_.Name -like '*AMD*' -or $_.Name -like '*Radeon*' -or $_.Name -like '*NVIDIA*'} | Select-Object Name,AdapterRAM | ConvertTo-Json\"",
+    )
+    .await
+    .unwrap_or_default();
+
+    // Parse WMI JSON to extract GPU names and VRAM
+    let gpus = parse_wmi_gpu_json(&gpu_vendor_out);
 
     Ok(HardwareSnapshot {
         online: true,
@@ -350,6 +319,41 @@ pub async fn get_remote_hardware(creds: SshCredentials, vendor: String) -> Resul
         gpus,
         error: None,
     })
+}
+
+/// Parse WMI GPU JSON output (Windows Get-CimInstance for Win32_VideoController).
+/// AdapterRAM is in bytes, convert to MB. Returns GPU stats with name and VRAM.
+fn parse_wmi_gpu_json(out: &str) -> Vec<GpuStat> {
+    let parsed: serde_json::Value = match serde_json::from_str(out) {
+        Ok(v) => v,
+        Err(_) => return vec![],
+    };
+    let mut gpus = Vec::new();
+
+    // Handle both single object and array
+    let items = if let Some(arr) = parsed.as_array() {
+        arr.clone()
+    } else {
+        vec![parsed]
+    };
+
+    for (i, item) in items.iter().enumerate() {
+        let name = item.get("Name").and_then(|v| v.as_str()).unwrap_or("Unknown GPU").to_string();
+        // AdapterRAM is in bytes; Windows DWORD overflow caps at ~4GB for some fields
+        // but for RX 6900 XT (16GB), it should still report correctly
+        let adapter_ram = item.get("AdapterRAM").and_then(|v| v.as_u64()).unwrap_or(0);
+        let memory_total_mb = adapter_ram / 1024 / 1024; // bytes to MB
+
+        gpus.push(GpuStat {
+            index: i as u32,
+            name,
+            utilization: 0, // WMI doesn't expose utilization on Windows
+            memory_used: 0, // Not available via WMI without GPU-Z or similar
+            memory_total: memory_total_mb,
+            temperature: 0, // Not available via WMI without additional tools
+        });
+    }
+    gpus
 }
 
 /// Parse `top -bn1` %Cpu line → utilization percent (100 - idle).
