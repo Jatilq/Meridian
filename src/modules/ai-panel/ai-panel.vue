@@ -178,21 +178,28 @@ async function runAgentLoop(
       catch { args = {}; }
 
       let resultJson: string;
+      let confirmation = 'immediate';
       if (DESTRUCTIVE.has(name)) {
         // Gate behind a confirmation card; await the user's decision.
         const confirmed = await requestToolConfirmation(name, args);
         if (confirmed) {
+          confirmation = 'confirmed';
           resultJson = await executeDestructiveTool(name, args);
         }
         else {
+          confirmation = 'cancelled';
           resultJson = JSON.stringify({ ok: false, cancelled: true, error: 'User cancelled the operation.' });
         }
+      }
+      else if (name === 'search_files') {
+        // Wire to Sigma's existing search index (client-side global_search_query).
+        resultJson = await runSearchFiles(args);
       }
       else {
         resultJson = await invoke<string>('rain_run_tool', { name, args });
       }
 
-      void logToolCall(name, args, resultJson);
+      void logToolCall(name, args, resultJson, confirmation);
       messages.push({ role: 'tool', tool_call_id: call.id, content: resultJson });
     }
   }
@@ -289,10 +296,42 @@ async function executeDestructiveTool(name: string, args: Record<string, unknown
   return JSON.stringify({ ok: false, error: `Unknown destructive tool: ${name}` });
 }
 
-async function logToolCall(name: string, args: Record<string, unknown>, resultJson: string): Promise<void> {
-  // Placeholder — SQLite logging wired in a later pass. Console for now.
-  // eslint-disable-next-line no-console
-  console.debug('[rain tool]', name, args, resultJson?.slice(0, 200));
+async function runSearchFiles(args: Record<string, unknown>): Promise<string> {
+  // Wire to Sigma's existing search index via global_search_query. Returns a
+  // compact JSON list of matches for the model. Scope is informational; the
+  // index spans configured locations.
+  try {
+    const query = String(args.query ?? '').trim();
+    if (!query) return JSON.stringify({ ok: false, error: 'Empty search query.' });
+    const matches = await invoke<Array<{ name: string; path: string; is_dir?: boolean }>>('global_search_query', {
+      query,
+      options: { limit: 50 },
+    });
+    const results = (matches || []).slice(0, 50).map(m => ({ name: m.name, path: m.path, is_dir: m.is_dir ?? false }));
+    return JSON.stringify({ ok: true, query, scope: args.scope ?? 'all', count: results.length, results });
+  }
+  catch (error) {
+    return JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
+async function logToolCall(name: string, args: Record<string, unknown>, resultJson: string, confirmation: string = 'immediate'): Promise<void> {
+  try {
+    let outcome = resultJson;
+    // Compact the outcome a little for storage.
+    if (outcome && outcome.length > 2000) outcome = outcome.slice(0, 2000);
+    await invoke('rain_log_tool_call', {
+      tool: name,
+      args: JSON.stringify(args),
+      outcome,
+      confirmation,
+    });
+  }
+  catch (error) {
+    // Logging is best-effort; never block the agent loop.
+    // eslint-disable-next-line no-console
+    console.debug('[rain tool log failed]', error);
+  }
 }
 
 async function maybeRememberFromTurn(prompt: string, finalText: string): Promise<void> {

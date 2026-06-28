@@ -14,6 +14,7 @@ mod delete_job;
 mod sftp;
 mod rain_memory;
 mod rain_tools;
+mod rain_log;
 mod dir_reader;
 mod dir_size;
 mod dir_watcher;
@@ -415,6 +416,7 @@ pub fn run() {
             rain_memory::rain_append_favorite,
             rain_tools::rain_tool_schemas,
             rain_tools::rain_run_tool,
+            rain_log::rain_log_tool_call,
         ])
         .setup(setup_handler)
         .on_window_event(|window, event| {

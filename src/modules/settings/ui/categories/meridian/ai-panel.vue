@@ -114,6 +114,26 @@ const contextWindow = computed(() => {
   const ctx = selected?.contextWindow;
   return ctx && ctx > 0 ? `${ctx.toLocaleString()} tokens` : 'Not reported by endpoint';
 });
+
+// Heuristic: does the selected model support OpenAI-style tool/function calling?
+// Rain's agent mode (tools + memory) needs this. We can't always know for sure
+// from the id alone, so we match known tool-capable families and warn otherwise.
+const TOOL_CAPABLE_PATTERNS = [
+  /qwen\s*3|qwen3|qwen2\.5/i,
+  /gpt-4|gpt-4o|gpt-3\.5-turbo|o1|o3/i,
+  /claude/i,
+  /mistral|mixtral|magistral/i,
+  /llama-?3\.[12]|llama-?3\.3/i,
+  /hermes\s*[23]|hermes-?[23]/i,
+  /command-?r/i,
+  /firefunction|functionary/i,
+];
+
+const modelSupportsTools = computed(() => {
+  const id = (model.value || '').toLowerCase();
+  if (!id) return true; // don't warn when nothing is selected yet
+  return TOOL_CAPABLE_PATTERNS.some(re => re.test(id));
+});
 </script>
 
 <template>
@@ -159,6 +179,12 @@ const contextWindow = computed(() => {
             {{ m.id }}
           </option>
         </select>
+        <div
+          v-if="!modelSupportsTools"
+          class="ai-panel-settings__tool-warning"
+        >
+          Rain agent mode requires a tool-capable model. Try Qwen3.6 via 9Router.
+        </div>
       </div>
       <div class="ai-panel-settings__field">
         <label class="ai-panel-settings__label">
@@ -307,6 +333,13 @@ const contextWindow = computed(() => {
   background: hsl(var(--muted) / 30%);
   color: hsl(var(--muted-foreground));
   font-size: 0.875rem;
+}
+
+.ai-panel-settings__tool-warning {
+  margin-top: 0.375rem;
+  color: hsl(var(--destructive, 38 92% 50%));
+  font-size: 0.75rem;
+  line-height: 1.3;
 }
 
 .ai-panel-settings__select {
