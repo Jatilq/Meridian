@@ -37,6 +37,8 @@
     "title": "Downloader",
     "urlPlaceholder": "Paste a URL to download…",
     "add": "Add",
+    "test": "Test",
+    "testTooltip": "Enqueue a known small public MP4 to verify downloads work",
     "queue": "Queue",
     "history": "History",
     "emptyQueue": "No active downloads",

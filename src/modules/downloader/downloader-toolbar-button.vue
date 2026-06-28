@@ -4,7 +4,7 @@ Copyright © 2021 - present Aleksey Hoffman. All rights reserved.
 -->
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, ref, watch, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useDownloaderStore } from '@/stores/runtime/downloader';
 import { Button } from '@/components/ui/button';
@@ -54,16 +54,65 @@ function handleKeyDown(event: KeyboardEvent) {
   }
 }
 
+// Test button: enqueue a known-good small public MP4 to verify the download
+// pipeline end-to-end without depending on clipboard paste.
+const TEST_MP4_URL = 'https://download.samplelib.com/mp4/sample-5s.mp4';
+
+async function handleTestDownload() {
+  try {
+    await invoke('downloader_enqueue', {
+      url: TEST_MP4_URL,
+      fileName: null,
+      formatId: null,
+      autoSaveFolder: store.autoSaveFolder || null,
+      chunkCount: store.chunkCount ?? null,
+    });
+    void refreshState();
+  }
+  catch (error) {
+    console.error('Test download failed:', error);
+  }
+}
+
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+function hasActiveDownloads(): boolean {
+  return store.queue.some(i => i.status === 'downloading');
+}
+
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
+function startPolling() {
+  if (pollTimer) return;
+  // Poll live progress every 500ms while any item is downloading; stop when idle.
+  pollTimer = setInterval(() => {
+    void refreshState();
+    if (!hasActiveDownloads()) {
+      stopPolling();
+    }
+  }, 500);
+}
+
 async function refreshState() {
   try {
     const state = await invoke<{ queue: unknown[]; history: unknown[] }>('downloader_get_state');
     store.setQueue(state.queue as any);
     store.setHistory(state.history as any);
+    if (hasActiveDownloads()) {
+      startPolling();
+    }
   }
   catch (error) {
     console.error('Failed to refresh downloader state:', error);
   }
 }
+
+onUnmounted(stopPolling);
 
 watch(() => store.isOpen, (open) => {
   if (open) void refreshState();
@@ -166,6 +215,15 @@ function timeAgo(ts: number) {
               />
               <Button size="sm" class="downloader__add-btn" @click="handleAddUrl">
                 {{ t('downloader.add') }}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                class="downloader__test-btn"
+                :title="t('downloader.testTooltip')"
+                @click="handleTestDownload"
+              >
+                {{ t('downloader.test') }}
               </Button>
             </div>
             <Tabs v-model:value="store.activeTab" class="downloader__tabs">
