@@ -46,8 +46,8 @@ interface NodeView extends HardwareSnapshot {
 // MAMBA runs Meridian (local); BLACK is remote over SSH.
 // IPs/credentials are configurable in Settings → Cluster (pending).
 const NODES = [
-  { name: 'MAMBA', host: '192.168.1.67', role: 'Primary inference (3× RTX 3060)', local: true, vendor: 'nvidia' },
-  { name: 'BLACK', host: '192.168.1.64', role: 'Daily driver / RPC slave (RX 6900 XT)', local: false, vendor: 'amd' },
+  { name: 'MAMBA', host: '192.168.1.67', role: 'Primary inference (3× RTX 3060)', local: true },
+  { name: 'BLACK', host: '192.168.1.64', role: 'Daily driver / RPC slave (RX 6900 XT)', local: false },
 ];
 
 // SSH credentials for remote nodes (BLACK). Default to the passphrase-less
@@ -72,7 +72,7 @@ async function refreshNode(idx: number) {
   try {
     const snap = def.local
       ? await invoke<HardwareSnapshot>('get_local_hardware')
-      : await invoke<HardwareSnapshot>('get_remote_hardware', { creds: BLACK_CREDS, vendor: def.vendor });
+      : await invoke<HardwareSnapshot>('get_remote_hardware', { creds: BLACK_CREDS });
     nodes.value[idx] = { name: def.name, host: def.host, role: def.role, ...snap };
   }
   catch (error) {
