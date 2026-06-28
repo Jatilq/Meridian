@@ -769,6 +769,12 @@ const confirmDescription = computed(() => confirmDialogData.value?.description |
       </div>
     </div>
 
+    <div v-if="!aiPanelStore.onboardingComplete && aiPanelStore.messages.length > 0 && aiPanelStore.messages[0].content.includes('first time')" class="ai-panel__onboarding-skip">
+      <Button variant="ghost" size="sm" @click="aiPanelStore.skipOnboarding()">
+        Skip
+      </Button>
+    </div>
+
     <Dialog :open="confirmDialogOpen" @update:open="confirmDialogOpen = $event">
       <DialogContent>
         <DialogHeader>
@@ -1092,5 +1098,9 @@ const confirmDescription = computed(() => confirmDialogData.value?.description |
 
 .animate-spin {
   animation: spin 1s linear infinite;
+}
+
+.ai-panel__onboarding-skip {
+  padding: 0 8px 8px;
 }
 </style>
