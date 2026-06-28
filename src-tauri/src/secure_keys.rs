@@ -16,6 +16,16 @@ pub struct ApiKeyEntry {
     pub key: String,
 }
 
+/// Generic string-keyed secret entry stored JSON-encoded so the tauri-plugin-store
+/// can round-trip the value. Used for SSH passwords (key like `"ssh:<uuid>"`),
+/// future auth tokens, etc.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretEntry {
+    pub key: String,
+    pub value: String,
+}
+
 fn store_path(app_handle: &AppHandle) -> std::path::PathBuf {
     app_handle
         .path()
@@ -84,4 +94,61 @@ pub fn secure_resolve_api_key(
         Some(entry) => Ok(Some(entry.key)),
         None => Ok(None),
     }
+}
+
+/// Store a string secret at an arbitrary key. Mirrors `secure_store_api_key`:
+/// the value lands in `secure-keys.json` (separate from user settings),
+/// keeping secrets out of the main config blob. Use `secure_get_secret` /
+/// `secure_delete_secret` to round-trip.
+///
+/// Security trade-off: this is isolation, not strong cryptographic encryption.
+/// A determined attacker with code execution can still read the file. For
+/// higher security, swap this implementation for Windows Credential Manager,
+/// macOS Keychain, or libsecret-backed storage. The interface is stable so
+/// the upgrade is local.
+#[tauri::command]
+pub fn secure_store_secret(
+    app_handle: AppHandle,
+    key: String,
+    value: String,
+) -> Result<(), String> {
+    let store = ensure_store(&app_handle)?;
+    store.set(
+        &key,
+        serde_json::json!(SecretEntry {
+            key: key.clone(),
+            value,
+        }),
+    );
+    store
+        .save()
+        .map_err(|e| format!("Failed to save secret: {e}"))?;
+    Ok(())
+}
+
+/// Retrieve a previously stored secret string by key. Returns `Ok(None)` if
+/// the key is not present.
+#[tauri::command]
+pub fn secure_get_secret(
+    app_handle: AppHandle,
+    key: String,
+) -> Result<Option<String>, String> {
+    let store = ensure_store(&app_handle)?;
+    match store.get(&key) {
+        Some(value) => Ok(serde_json::from_value::<SecretEntry>(value)
+            .ok()
+            .map(|entry| entry.value)),
+        None => Ok(None),
+    }
+}
+
+/// Remove a previously stored secret. No-op if the key is not present.
+#[tauri::command]
+pub fn secure_delete_secret(app_handle: AppHandle, key: String) -> Result<(), String> {
+    let store = ensure_store(&app_handle)?;
+    store.delete(&key);
+    store
+        .save()
+        .map_err(|e| format!("Failed to delete secret: {e}"))?;
+    Ok(())
 }

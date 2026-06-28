@@ -430,6 +430,9 @@ pub fn run() {
             secure_keys::secure_store_api_key,
             secure_keys::secure_get_api_key,
             secure_keys::secure_delete_api_key,
+            secure_keys::secure_store_secret,
+            secure_keys::secure_get_secret,
+            secure_keys::secure_delete_secret,
         ])
         .setup(setup_handler)
         .on_window_event(|window, event| {

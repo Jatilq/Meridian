@@ -4,13 +4,14 @@ Copyright © 2021 - present Aleksey Hoffman. All rights reserved.
 -->
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, reactive } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { ServerIcon, PlusIcon, Trash2Icon, KeyRoundIcon, LockIcon } from '@lucide/vue';
+import { ServerIcon, PlusIcon, Trash2Icon, KeyRoundIcon, LockIcon, ShieldCheckIcon } from '@lucide/vue';
 import { SettingsItem } from '@/modules/settings';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useUserSettingsStore } from '@/stores/storage/user-settings';
+import { storeSshPassword, clearSshPassword } from '@/utils/ssh-connections';
 import type { SshConnectionSetting, SshAuthMethod } from '@/types/user-settings';
 
 const { t } = useI18n();
@@ -29,7 +30,7 @@ function persist() {
 
 function updateField(
   index: number,
-  field: keyof SshConnectionSetting,
+  field: Exclude<keyof SshConnectionSetting, 'passwordSecureKey'>,
   value: string | number | undefined,
 ) {
   const conn = userSettingsStore.userSettings.meridian.sshConnections[index];
@@ -46,6 +47,43 @@ function updateField(
   persist();
 }
 
+// Per-row password drafts so typing does not hammer the secure-keys store;
+// the actual `secure_store_secret` call happens on blur (or "Save" click),
+// and the plaintext is held only in component-local reactive state.
+const passwordDrafts = reactive<Record<number, string>>({});
+
+function getPasswordDraft(index: number): string {
+  return passwordDrafts[index] ?? '';
+}
+
+function setPasswordDraft(index: number, value: string) {
+  passwordDrafts[index] = value;
+}
+
+async function commitPasswordField(index: number) {
+  const conn = userSettingsStore.userSettings.meridian.sshConnections[index];
+  if (!conn) return;
+  const draft = passwordDrafts[index];
+  const trimmed = (draft ?? '').trim();
+
+  // Empty input -> clear any existing secure key.
+  if (!trimmed) {
+    if (conn.passwordSecureKey) {
+      await clearSshPassword(conn.passwordSecureKey);
+      conn.passwordSecureKey = undefined;
+      persist();
+    }
+    passwordDrafts[index] = '';
+    return;
+  }
+
+  // Reuse existing key when present (in-place rotation); otherwise mint one.
+  const key = await storeSshPassword(trimmed, conn.passwordSecureKey);
+  conn.passwordSecureKey = key;
+  persist();
+  passwordDrafts[index] = '';
+}
+
 function addConnection() {
   userSettingsStore.userSettings.meridian.sshConnections.push({
     host: '',
@@ -54,18 +92,32 @@ function addConnection() {
     username: '',
     keyPath: '',
     authMethod: 'key',
-    password: '',
   });
   persist();
 }
 
-function removeConnection(index: number) {
+async function removeConnection(index: number) {
+  const conn = userSettingsStore.userSettings.meridian.sshConnections[index];
+  if (conn?.passwordSecureKey) {
+    await clearSshPassword(conn.passwordSecureKey);
+  }
+  delete passwordDrafts[index];
   userSettingsStore.userSettings.meridian.sshConnections.splice(index, 1);
   persist();
 }
 
-function setAuthMethod(index: number, method: SshAuthMethod) {
-  updateField(index, 'authMethod', method);
+async function setAuthMethod(index: number, method: SshAuthMethod) {
+  const conn = userSettingsStore.userSettings.meridian.sshConnections[index];
+  if (!conn) return;
+  const prevAuth = conn.authMethod;
+  conn.authMethod = method;
+  // Drop the secure-store entry when the user is no longer using password
+  // auth so it doesn't linger forever on disk for stale credentials.
+  if (prevAuth === 'password' && method === 'key' && conn.passwordSecureKey) {
+    await clearSshPassword(conn.passwordSecureKey);
+    conn.passwordSecureKey = undefined;
+  }
+  persist();
 }
 </script>
 
@@ -141,23 +193,6 @@ function setAuthMethod(index: number, method: SshAuthMethod) {
               </button>
             </div>
           </div>
-          <div class="ssh-settings__field ssh-settings__field--wide">
-            <label v-if="conn.authMethod === 'key'" class="ssh-settings__label">{{ t('settings.meridian.ssh.keyPath') }}</label>
-            <label v-else class="ssh-settings__label">Password</label>
-            <Input
-              v-if="conn.authMethod === 'key'"
-              :model-value="conn.keyPath"
-              placeholder="C:\Users\name\.ssh\id_ed25519"
-              @update:model-value="(v) => updateField(index, 'keyPath', v)"
-            />
-            <Input
-              v-else
-              :model-value="conn.password ?? ''"
-              type="password"
-              placeholder="••••••••"
-              @update:model-value="(v) => updateField(index, 'password', v)"
-            />
-          </div>
           <Button
             variant="ghost"
             size="icon"
@@ -167,6 +202,39 @@ function setAuthMethod(index: number, method: SshAuthMethod) {
           >
             <Trash2Icon :size="16" />
           </Button>
+        </div>
+        <div class="ssh-settings__row">
+          <div v-if="conn.authMethod === 'key'" class="ssh-settings__field ssh-settings__field--wide">
+            <label class="ssh-settings__label">{{ t('settings.meridian.ssh.keyPath') }}</label>
+            <Input
+              :model-value="conn.keyPath"
+              placeholder="C:\Users\name\.ssh\id_ed25519"
+              @update:model-value="(v) => updateField(index, 'keyPath', v)"
+            />
+          </div>
+          <div v-else class="ssh-settings__field ssh-settings__field--wide">
+            <label class="ssh-settings__label">Password</label>
+            <div class="ssh-settings__password-row">
+              <input
+                type="password"
+                class="ssh-settings__password-input"
+                :value="getPasswordDraft(index)"
+                :placeholder="conn.passwordSecureKey ? '•••••• Enter new password to replace' : '••••••'"
+                autocomplete="off"
+                @input="(e) => setPasswordDraft(index, (e.target as HTMLInputElement).value)"
+                @blur="commitPasswordField(index)"
+                @keydown.enter="(e) => { (e.target as HTMLInputElement).blur(); }"
+              />
+              <span
+                v-if="conn.passwordSecureKey"
+                class="ssh-settings__password-status"
+                title="A password is securely stored for this connection"
+              >
+                <ShieldCheckIcon :size="13" />
+                Encrypted
+              </span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -263,6 +331,39 @@ function setAuthMethod(index: number, method: SshAuthMethod) {
   background: hsl(var(--primary) / 15%);
   color: hsl(var(--foreground));
   font-weight: 600;
+}
+
+.ssh-settings__password-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ssh-settings__password-input {
+  flex: 1;
+  width: 100%;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.85rem;
+  background: hsl(var(--background));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-sm);
+  color: hsl(var(--foreground));
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ssh-settings__password-input:focus {
+  border-color: hsl(var(--primary));
+  box-shadow: 0 0 0 3px hsl(var(--primary) / 20%);
+}
+
+.ssh-settings__password-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.7rem;
+  color: #34d399;
+  flex-shrink: 0;
 }
 
 .ssh-settings__remove {

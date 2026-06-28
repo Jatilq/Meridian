@@ -168,6 +168,7 @@ export const useSettingsStore = defineStore('settings', () => {
       { default: AiPanelSettingsSection },
       { default: DownloaderSettingsSection },
       { default: SshConnectionsSettingsSection },
+      { default: FilesSection },
     ] = await Promise.all([
       import('@/modules/settings/ui/categories/general/language.vue'),
       import('@/modules/settings/ui/categories/general/date-time.vue'),
@@ -199,6 +200,7 @@ export const useSettingsStore = defineStore('settings', () => {
       import('@/modules/settings/ui/categories/meridian/ai-panel.vue'),
       import('@/modules/settings/ui/categories/meridian/downloader.vue'),
       import('@/modules/settings/ui/categories/meridian/ssh-connections.vue'),
+      import('@/modules/settings/ui/categories/meridian/files.vue'),
     ]);
 
     sections.value = [
@@ -416,6 +418,13 @@ export const useSettingsStore = defineStore('settings', () => {
         titleKey: 'settings.meridian.ssh.title',
         tags: 'settingsTags.ssh',
         component: markRaw(SshConnectionsSettingsSection),
+        category: 'meridian',
+      },
+      {
+        key: 'files',
+        titleKey: 'settings.meridian.files.title',
+        tags: 'settingsTags.files',
+        component: markRaw(FilesSection),
         category: 'meridian',
       },
     ];

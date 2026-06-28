@@ -9,6 +9,7 @@ import { useI18n } from 'vue-i18n';
 import { invoke } from '@tauri-apps/api/core';
 import { PlusIcon, XIcon, KeyRoundIcon, LockIcon, PlugZapIcon } from '@lucide/vue';
 import { useUserSettingsStore } from '@/stores/storage/user-settings';
+import { storeSshPassword, clearSshPassword } from '@/utils/ssh-connections';
 import type { SshConnectionSetting, SshAuthMethod } from '@/types/user-settings';
 
 const { t } = useI18n();
@@ -96,14 +97,16 @@ const rpcLaunching = ref(false);
 const rpcMessage = ref('');
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
-/** Build an SshCredentials-shaped object for one stored connection. */
+/** Build an SshCredentials-shaped object for one stored connection. References
+ *  the password by secure key only — the backend fetches plaintext from the
+ *  secure-keys store at auth time. Plaintext never rides IPC for stored creds. */
 function credsFromConn(conn: SshConnectionSetting | undefined) {
   return {
     host: conn?.host ?? '',
     port: conn?.port ?? 22,
     username: conn?.username ?? '',
     keyPath: conn?.keyPath ?? '',
-    password: conn?.password ?? '',
+    passwordSecureKey: conn?.passwordSecureKey ?? '',
     authMethod: conn?.authMethod ?? 'key',
   };
 }
@@ -240,6 +243,12 @@ async function saveWorker() {
   if (!canSave.value) return;
   saving.value = true;
   try {
+    // Encrypt plaintext password into the secure-keys store before pushing
+    // the connection to user-settings. Plaintext lives only in form state.
+    let passwordSecureKey: string | undefined;
+    if (newWorker.authMethod === 'password' && newWorker.password) {
+      passwordSecureKey = await storeSshPassword(newWorker.password);
+    }
     const conn: SshConnectionSetting = {
       label: newWorker.label.trim(),
       host: newWorker.host.trim(),
@@ -247,7 +256,7 @@ async function saveWorker() {
       username: newWorker.username.trim(),
       authMethod: newWorker.authMethod,
       keyPath: newWorker.authMethod === 'key' ? newWorker.keyPath.trim() : '',
-      password: newWorker.authMethod === 'password' ? newWorker.password : '',
+      passwordSecureKey,
     };
     userSettingsStore.userSettings.meridian.sshConnections.push(conn);
     await userSettingsStore.setUserSettingsStorage(
@@ -256,6 +265,8 @@ async function saveWorker() {
     );
     showAddWorker.value = false;
     await refreshAll();
+  } catch (error) {
+    console.error('Failed to save worker connection:', error);
   } finally {
     saving.value = false;
   }

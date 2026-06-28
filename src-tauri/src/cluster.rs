@@ -15,6 +15,9 @@ use async_trait::async_trait;
 use russh::client;
 use russh::keys::key;
 use serde::{Deserialize, Serialize};
+use tauri::AppHandle;
+
+use crate::secure_keys;
 
 /// GPU stats for one device, parsed from nvidia-smi / rocm-smi / WMI output.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,9 +79,16 @@ pub struct SshCredentials {
     /// Absolute path to a private key file (key-based auth). Takes precedence
     /// over `password` if both are provided.
     pub key_path: Option<String>,
-    /// Optional password for password-based SSH auth (used when `key_path`
-    /// is None or empty).
+    /// Optional plaintext password for password-based SSH auth (used when
+    /// `key_path` is None or empty). Used as a fallback for in-flight
+    /// operations (e.g. Test Connection modal) where no encrypted key has
+    /// been issued yet.
     pub password: Option<String>,
+    /// Optional reference to a secret stored in the secure-keys store via
+    /// `secure_store_secret`. When set and `password` is empty, the plaintext
+    /// is fetched on the Rust side and used at auth time. The frontend never
+    /// needs to send plaintext over IPC for stored credentials.
+    pub password_secure_key: Option<String>,
 }
 
 fn default_port() -> u16 {
@@ -102,20 +112,51 @@ impl client::Handler for ClientHandler {
 }
 
 /// Connect over SSH and run a single command, returning its stdout.
-/// Auth method: key-based if `key_path` is provided and non-empty,
-/// password-based if `password` is provided and non-empty, otherwise errors.
-/// Returns Err on connect/auth/exec failure.
-async fn ssh_exec(creds: &SshCredentials, command: &str) -> Result<String, String> {
+/// Auth method resolution:
+/// 1. `key_path` if non-empty -> key-based auth.
+/// 2. `password_secure_key` if set -> look up plaintext via
+///    `secure_keys::secure_get_secret` on the Rust side.
+/// 3. `password` (plaintext) as final fallback (Test Connection / in-flight).
+/// Returns Err if no auth method is usable.
+async fn ssh_exec(
+    app_handle: &AppHandle,
+    creds: &SshCredentials,
+    command: &str,
+) -> Result<String, String> {
     let key_path = creds
         .key_path
         .clone()
         .filter(|p| !p.trim().is_empty());
-    let password = creds
+
+    // Decrypt from secure store if a key was issued and no plaintext was sent.
+    let resolved_password: Option<String> = if let Some(plain) = creds
         .password
         .clone()
-        .filter(|p| !p.is_empty());
+        .filter(|p| !p.is_empty())
+    {
+        Some(plain)
+    } else if let Some(secure_key) = creds
+        .password_secure_key
+        .clone()
+        .filter(|k| !k.is_empty())
+    {
+        // The store I/O is sync and small; off-load to a blocking thread so
+        // the runtime isn't stalled if the disk is slow.
+        let key_for_lookup = secure_key.clone();
+        let app_for_lookup = app_handle.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            secure_keys::secure_get_secret(app_for_lookup, key_for_lookup)
+        })
+        .await
+        .map_err(|e| format!("Failed to join SSH password lookup: {e}"))?
+        .ok()
+        .flatten()
+        .filter(|p| !p.is_empty())
+    } else {
+        None
+    };
 
-    if key_path.is_none() && password.is_none() {
+    if key_path.is_none() && resolved_password.is_none() {
         return Err("No authentication method configured \u{2014} provide a key path or password".to_string());
     }
 
@@ -124,7 +165,7 @@ async fn ssh_exec(creds: &SshCredentials, command: &str) -> Result<String, Strin
         .await
         .map_err(|e| format!("SSH connect to {}:{} failed: {}", creds.host, creds.port, e))?;
 
-    let authed = match (key_path, password) {
+    let authed = match (key_path, resolved_password) {
         (Some(key_path), _) => {
             let key_pair = russh::keys::load_secret_key(&key_path, None)
                 .map_err(|e| format!("Failed to load SSH key {}: {}", key_path, e))?;
@@ -190,10 +231,13 @@ const NVIDIA_SMI_CMD: &str = "nvidia-smi --query-gpu=index,name,utilization.gpu,
 /// Check whether a node is reachable over SSH. Returns online=true if the SSH
 /// session connects + authenticates (runs `true` as a no-op probe).
 #[tauri::command]
-pub async fn check_node_status(creds: SshCredentials) -> Result<NodeStatusResult, String> {
+pub async fn check_node_status(
+    app_handle: AppHandle,
+    creds: SshCredentials,
+) -> Result<NodeStatusResult, String> {
     // Probe with a trivial command; success => online. GPU stats fetched
     // separately via get_gpu_stats so a slow smi doesn't block the dot.
-    match ssh_exec(&creds, "true").await {
+    match ssh_exec(&app_handle, &creds, "true").await {
         Ok(_) => Ok(NodeStatusResult { online: true, gpus: vec![] }),
         Err(e) => Err(e),
     }
@@ -202,15 +246,19 @@ pub async fn check_node_status(creds: SshCredentials) -> Result<NodeStatusResult
 /// Fetch GPU stats. `vendor` selects the tool: "nvidia" -> nvidia-smi,
 /// "amd" -> rocm-smi. Parsed into a uniform GpuStat list.
 #[tauri::command]
-pub async fn get_gpu_stats(creds: SshCredentials, vendor: String) -> Result<Vec<GpuStat>, String> {
+pub async fn get_gpu_stats(
+    app_handle: AppHandle,
+    creds: SshCredentials,
+    vendor: String,
+) -> Result<Vec<GpuStat>, String> {
     match vendor.as_str() {
         "amd" => {
             // rocm-smi JSON output; parsing kept minimal/best-effort.
-            let out = ssh_exec(&creds, "rocm-smi --showuse --showmemuse --showtemp --json").await?;
+            let out = ssh_exec(&app_handle, &creds, "rocm-smi --showuse --showmemuse --showtemp --json").await?;
             Ok(parse_rocm_smi(&out))
         }
         _ => {
-            let out = ssh_exec(&creds, NVIDIA_SMI_CMD).await?;
+            let out = ssh_exec(&app_handle, &creds, NVIDIA_SMI_CMD).await?;
             Ok(parse_nvidia_smi(&out))
         }
     }
@@ -219,11 +267,15 @@ pub async fn get_gpu_stats(creds: SshCredentials, vendor: String) -> Result<Vec<
 /// Launch the llama.cpp RPC slave on a node. `rpc_command` is configurable in
 /// settings (defaults supplied by the frontend). Returns combined stdout.
 #[tauri::command]
-pub async fn launch_rpc_slave(creds: SshCredentials, rpc_command: String) -> Result<String, String> {
+pub async fn launch_rpc_slave(
+    app_handle: AppHandle,
+    creds: SshCredentials,
+    rpc_command: String,
+) -> Result<String, String> {
     if rpc_command.trim().is_empty() {
         return Err("No RPC slave command configured".to_string());
     }
-    ssh_exec(&creds, &rpc_command).await
+    ssh_exec(&app_handle, &creds, &rpc_command).await
 }
 
 /// Run nvidia-smi locally (MAMBA runs Meridian) and parse GPU stats.
@@ -295,14 +347,18 @@ fn parse_kv(out: &str, key: &str) -> Option<String> {
 /// Remote hardware snapshot over SSH (used for BLACK). Gathers CPU/RAM via
 /// PowerShell CIM on Windows, GPUs via WMI. Auto-detects GPU vendor.
 #[tauri::command]
-pub async fn get_remote_hardware(creds: SshCredentials) -> Result<HardwareSnapshot, String> {
+pub async fn get_remote_hardware(
+    app_handle: AppHandle,
+    creds: SshCredentials,
+) -> Result<HardwareSnapshot, String> {
     // Probe connectivity first.
-    if let Err(e) = ssh_exec(&creds, "true").await {
+    if let Err(e) = ssh_exec(&app_handle, &creds, "true").await {
         return Ok(HardwareSnapshot { online: false, cpu: None, ram: None, gpus: vec![], error: Some(e) });
     }
 
     // CPU via CIM (BLACK is Windows; wmic is deprecated, use PowerShell CIM).
     let cpu_out = ssh_exec(
+        &app_handle,
         &creds,
         "powershell -Command \"$c=Get-CimInstance Win32_Processor; Write-Output ('NAME='+$c.Name); Write-Output ('CORES='+$c.NumberOfCores); Write-Output ('LOAD='+$c.LoadPercentage)\"",
     )
@@ -314,6 +370,7 @@ pub async fn get_remote_hardware(creds: SshCredentials) -> Result<HardwareSnapsh
 
     // RAM via CIM (values in KB).
     let ram_out = ssh_exec(
+        &app_handle,
         &creds,
         "powershell -Command \"$o=Get-CimInstance Win32_OperatingSystem; Write-Output ('TOTAL_KB='+$o.TotalVisibleMemorySize); Write-Output ('FREE_KB='+$o.FreePhysicalMemory)\"",
     )
@@ -326,6 +383,7 @@ pub async fn get_remote_hardware(creds: SshCredentials) -> Result<HardwareSnapsh
 
     // Auto-detect GPU vendor via WMI (get all non-virtual GPUs with VRAM)
     let gpu_vendor_out = ssh_exec(
+        &app_handle,
         &creds,
         "powershell -Command \"Get-CimInstance Win32_VideoController | Where-Object { $_.Name -notmatch 'Parsec|Virtual|Basic|Microsoft' -and $_.AdapterRAM -gt 0 } | Select-Object Name,AdapterRAM | ConvertTo-Json\"",
     )

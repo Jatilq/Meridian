@@ -6,6 +6,8 @@
 // Remote panes use ssh://<host>/<path> URLs; the navigation layer routes those
 // to the Rust sftp_read_dir command, which returns the same DirContents shape.
 
+import { invoke } from '@tauri-apps/api/core';
+
 export interface SshConnection {
   /** Stable id used in ssh://<id>/... URLs (the hostname/IP). */
   host: string;
@@ -75,4 +77,48 @@ export function parseSshPath(path: string): ParsedSshPath | null {
 
 export function findSshConnection(host: string): SshConnection | null {
   return activeConnections.find(c => c.host === host) ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Secure SSH password storage (Fix 5)
+//
+// SSH passwords MUST NEVER be stored as plaintext in the main user-settings
+// blob. They live in the secure-keys.json Tauri store by reference (a short
+// uuid key). plaintext briefly exists in form state during typing and is
+// dropped on save (or clear).
+//
+// API:
+//   generateSecureSshKey() -> string   (e.g. "ssh:<uuid>")
+//   storeSshPassword(plain, existingKey?) -> Promise<string>
+//     Returns the secure key actually used (existing key if provided, else
+//     a fresh uuid).
+//   clearSshPassword(key) -> Promise<void>
+//     Removes the secret from the secure-keys store. No-op if absent.
+// ---------------------------------------------------------------------------
+
+export function generateSecureSshKey(): string {
+  const uuid = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2) + Date.now().toString(36);
+  return `ssh:${uuid}`;
+}
+
+export async function storeSshPassword(plain: string, existingKey?: string): Promise<string> {
+  if (!plain) {
+    throw new Error('Cannot store an empty SSH password');
+  }
+  const key = existingKey ?? generateSecureSshKey();
+  await invoke('secure_store_secret', { key, value: plain });
+  return key;
+}
+
+export async function clearSshPassword(key: string | undefined | null): Promise<void> {
+  if (!key) return;
+  try {
+    await invoke('secure_delete_secret', { key });
+  }
+  catch (error) {
+    // Don't throw on cleanup — best-effort. Log so we notice orphan entries.
+    console.warn(`Failed to clear SSH secret "${key}":`, error);
+  }
 }

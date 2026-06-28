@@ -204,7 +204,11 @@ export type SshConnectionSetting = {
   username: string;
   keyPath: string;
   authMethod: SshAuthMethod;
-  password?: string;
+  /// Reference to a secret held in the secure-keys store (key like
+  /// `"ssh:<uuid>"`). The plaintext password is fetched on the Rust side at
+  /// auth time. Plaintext is never persisted to the main user-settings
+  /// store.
+  passwordSecureKey?: string;
 };
 
 export type MeridianSettings = {
