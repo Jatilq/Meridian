@@ -188,39 +188,56 @@ Pre-configured for MAMBA and BLACK. User can add more in settings.
 
 ---
 
-## Component 6: Agent Coding Extension
+## Component 6: Rain Agent (tools + memory)
 
-### Built on Sigma's Extension System
-- First-party extension, ships with Meridian
-- Appears in Extensions sidebar
+### Built on the existing AI Panel
+- Rain is the AI panel from Component 2 — UPGRADED from chat assistant to an agent
+  with tool calling and persistent memory. Not a separate extension.
+- Same right-side panel, same Ctrl+Space toggle, same 9Router/Omnix routing.
 
-### Panel Layout
+### Memory files (user app data dir, alongside meridian.db)
+- **SOUL.md** — fixed personality/identity. User-editable; Rain never auto-modifies it.
+- **MEMORY.md** — mutable. Rain appends autonomously when it learns something; never
+  deletes/rewrites without confirmation.
+- **FAVORITES.md** — paths/models/preferences Rain notices repeated; auto-updated.
+- All three injected into the system prompt at request time; seeded from bundled
+  defaults if missing.
+
+### Tools (OpenAI-style tool_calls via 9Router)
+- `list_directory`, `read_file`, `search_files` — read-only, immediate
+- `create_folder` — non-destructive, immediate
+- `move_files`, `rename_item`, `delete_item` — confirmation card in panel first
+  (delete defaults to recycle bin; warns on non-empty folders)
+- Tools work on local AND ssh:// remote paths (reuse Phase 7 SFTP commands)
+
+### Agent loop
+- User message → model may emit tool_calls → execute (or confirm) → feed results back
+  → loop until final answer. Hard cap 10 tool iterations/turn.
+- Requires a tool-call-capable model (Qwen3.6+); settings flags when the selected
+  model lacks tool support.
+
+### Panel additions
 ```
 ┌─────────────────────────────────────┐
-│ AGENT CODER                [model▼] │
+│ Rain                       [model▼] │
 ├─────────────────────────────────────┤
-│ Working on: [file path]             │
-│ [local] [remote: mamba] [remote: black] │
+│  [conversation + tool activity]     │
+│  ┌─ confirm: move 3 files ────────┐ │
+│  │ src → dest    [Cancel][Confirm]│ │
+│  └────────────────────────────────┘ │
 ├─────────────────────────────────────┤
-│                                     │
-│  [conversation / code output area]  │
-│                                     │
-├─────────────────────────────────────┤
+│ Search: [scope▼]                    │
 │ [input field]              [Send]   │
 └─────────────────────────────────────┘
 ```
 
-### Behavior
-- Works on file currently selected in active pane (local or remote)
-- Remote files: read/write via SSH/SFTP
-- Calls AI panel API (9Router mode for coding tasks — needs Qwen3.6 or equivalent)
-- Can read, edit, create files directly
-- Shows diff before applying changes
-- Confirmation required before writes
+### Safety
+- Destructive tools always confirm in-panel before executing.
+- All tool calls logged to SQLite (timestamp, tool, args, outcome, confirmed/cancelled).
 
 ### Model Recommendation
-- Coding tasks → 9Router → Qwen3.6 35B (or whatever is loaded on the full 52GB pool)
-- Quick questions → Omnix → Qwen 0.6B
+- Agent/tool tasks → 9Router → Qwen3.6+ (tool-capable, on the 52GB pool)
+- Quick chat/vision/TTS → Omnix → Qwen 0.6B
 
 ---
 

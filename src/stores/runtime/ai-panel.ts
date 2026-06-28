@@ -73,7 +73,45 @@ export const useAiPanelStore = defineStore('aiPanel', () => {
   // Search scope: where Rain looks when asked to search.
   // 'current' = active folder, 'all' = all drives, or a specific drive path.
   const searchScope = ref<string>('current');
+  // Rain agent memory files (Phase 8): loaded from disk, injected into prompt.
+  const soulText = ref('');
+  const memoryText = ref('');
+  const favoritesText = ref('');
+  let memoryLoaded = false;
   let hasGreetedThisSession = false;
+
+  async function loadMemory() {
+    if (memoryLoaded) return;
+    try {
+      const mem = await invoke<{ soul: string; memory: string; favorites: string }>('rain_load_memory');
+      soulText.value = mem.soul ?? '';
+      memoryText.value = mem.memory ?? '';
+      favoritesText.value = mem.favorites ?? '';
+      memoryLoaded = true;
+    }
+    catch (error) {
+      console.error('Failed to load Rain memory:', error);
+    }
+  }
+
+  async function appendMemory(entry: string) {
+    try {
+      await invoke('rain_append_memory', { entry });
+      memoryText.value += `\n- ${entry}`;
+    }
+    catch (error) {
+      console.error('Failed to append Rain memory:', error);
+    }
+  }
+
+  async function appendFavorite(entry: string) {
+    try {
+      await invoke('rain_append_favorite', { entry });
+    }
+    catch (error) {
+      console.error('Failed to append Rain favorite:', error);
+    }
+  }
 
   // Rain's opening lines — warm, short, never breaks character.
   const GREETINGS = [
@@ -95,7 +133,7 @@ export const useAiPanelStore = defineStore('aiPanel', () => {
     messages.value.push({ role: 'assistant', content: greeting });
   }
 
-  function open() { isOpen.value = true; maybeGreet(); }
+  function open() { isOpen.value = true; void loadMemory(); maybeGreet(); }
   function close() { isOpen.value = false; }
   function toggle() { isOpen.value ? close() : open(); }
   function setInput(value: string) { input.value = value; }
@@ -221,6 +259,7 @@ export const useAiPanelStore = defineStore('aiPanel', () => {
     isOpen, isLoading, messages, input, endpoint, selectedModel, models, modelsLoaded,
     useOmnix, omnixOnline, omnixPath, routerEndpoint, ttsEnabled, routerOnline, currentPath, selectedFiles, searchScope, canSend,
     systemPrompt, temperature, maxTokens, topP,
+    soulText, memoryText, favoritesText, loadMemory, appendMemory, appendFavorite,
     open, close, toggle, setInput, setEndpoint, setSelectedModel, setUseOmnix,
     setOmnixOnline, setOmnixPath, setRouterEndpoint, setTtsEnabled, setRouterOnline, setCurrentPath, setSelectedFiles, setSearchScope, addMessage, clearMessages,
     setSystemPrompt, setTemperature, setMaxTokens, setTopP,

@@ -12,6 +12,7 @@ mod copy_move_job;
 mod default_file_manager;
 mod delete_job;
 mod sftp;
+mod rain_memory;
 mod dir_reader;
 mod dir_size;
 mod dir_watcher;
@@ -408,6 +409,9 @@ pub fn run() {
             cluster::get_local_hardware,
             cluster::get_remote_hardware,
             sftp::sftp_read_dir,
+            rain_memory::rain_load_memory,
+            rain_memory::rain_append_memory,
+            rain_memory::rain_append_favorite,
         ])
         .setup(setup_handler)
         .on_window_event(|window, event| {

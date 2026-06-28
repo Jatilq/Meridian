@@ -108,20 +108,66 @@ Omnix runs INSIDE Meridian's Electron process. Not spawned separately.
 
 ---
 
-## Phase 8 — Agent Coding Extension
+## Phase 8 — Rain Agent Upgrade (tools + memory)
 
-### Steps
-1. Read Sigma's extension system — understand how extensions are structured and loaded
-2. Create `extensions/agent-coder/` following Sigma's extension format
-3. Build AgentCoder panel component (see DESIGN.md layout)
-4. Wire to active pane's selected file (local or remote)
-5. For remote files: read/write via Phase 7 SSH/SFTP
-6. AI calls: route to 9Router (not Omnix) for coding tasks — needs Qwen3.6+
-7. Show diff before applying any file changes
-8. Confirmation required before writes
-9. Register extension in Meridian's extension loader
+### Goal
+Upgrade the EXISTING Rain AI panel (Phase 5: `src/modules/ai-panel/ai-panel.vue` +
+`src/stores/runtime/ai-panel.ts`) from a chat assistant into an **agent with tool
+calling and persistent memory**. This is NOT a new extension — it extends the Rain
+that already exists. Build on the current handleSend pipeline, system prompt, and
+9Router/Omnix routing.
 
-**Completion check:** Select a local file, open Agent Coder, ask it to add a comment, see diff, confirm, file is updated.
+### Personality + memory files
+Three markdown files in the user's app data directory (same dir as `meridian.db`;
+resolve via Tauri `appDataDir()`):
+- **SOUL.md** — fixed personality/identity. User may edit; Rain NEVER auto-modifies it.
+- **MEMORY.md** — mutable long-term memory. Rain APPENDS autonomously (no confirmation)
+  when it learns something useful. Rain must NEVER delete/rewrite entries without
+  explicit user confirmation.
+- **FAVORITES.md** — paths/models/preferences Rain notices used repeatedly. Auto-updated.
+
+On startup: seed any missing file from a bundled default (SOUL.md = Rain's base
+personality; MEMORY.md / FAVORITES.md start with a header only). All three are injected
+into Rain's system prompt context at request time.
+
+### Tools (OpenAI-style function calling via 9Router)
+Transport: OpenAI `tools`/`tool_calls` in the 9Router chat-completion request. Agent
+mode REQUIRES a tool-call-capable model (e.g. Qwen3.6+). Settings must flag clearly
+when the selected model does not support tool calls. Each tool is a Tauri command
+(reuse dir_reader/sftp/selection commands); tools work on local AND ssh:// paths.
+1. `list_directory(path)` — read directory listing (read-only, immediate)
+2. `read_file(path)` — read file contents (read-only, immediate)
+3. `search_files(query, scope)` — search across scope (current/all/specific drive) (immediate)
+4. `create_folder(path)` — create directory (non-destructive, immediate, NO confirmation)
+5. `move_files(src, dest)` — move (CONFIRMATION REQUIRED)
+6. `rename_item(old, new)` — rename (CONFIRMATION REQUIRED)
+7. `delete_item(path)` — delete (CONFIRMATION REQUIRED; default to RECYCLE BIN not
+   permanent; show exactly what will be deleted, warn if folder has contents)
+
+### Confirmation flow
+- Read-only + create_folder execute immediately.
+- move/rename/delete render a confirmation card in the Rain panel showing the exact
+  operation (src→dest, old→new, or delete target + contents warning) with Confirm/Cancel.
+- Every tool call is logged to SQLite (timestamp, tool, args, outcome, confirmed/cancelled).
+
+### Agent loop (in handleSend)
+1. User message → Rain (system prompt includes SOUL.md + MEMORY.md + FAVORITES.md +
+   current_path/selected_files/scope).
+2. Model may return tool_calls → execute read-only immediately, or show confirmation
+   for destructive ones.
+3. Tool results feed back into the model; loop until a final text answer.
+4. Hard cap: MAX 10 tool iterations per turn (prevent runaway loops).
+5. After the turn, Rain may append to MEMORY.md / FAVORITES.md if it learned something.
+
+### Model routing
+Agent/tool tasks → 9Router (tool-capable model). Omnix stays for lightweight chat/
+vision/TTS. Default `openrouter/openrouter/free` may not support function calling —
+surface a tool-capable model requirement in settings.
+
+**Completion check:** Ask Rain "what's in my Downloads folder?" → it calls
+`list_directory` and answers from real data. Ask "rename report.txt to final.txt" →
+confirmation card → confirm → file renamed. Rain appends a note to MEMORY.md when it
+learns a preference.
 
 ---
 
