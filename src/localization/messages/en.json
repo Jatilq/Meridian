@@ -992,8 +992,29 @@
       "multiSelectionArchiveFileName": "Archive.zip",
       "unknownError": "Unknown error",
       "operationErrorTitle": "Archive operation failed",
+      "optionsDialog": {
+        "title": "Archive extraction options",
+        "description": "Configure extraction settings for password-protected or non-UTF-8 encoded archives",
+        "passwordTitle": "Archive password required",
+        "passwordDescription": "This archive is encrypted. Enter the password to extract its contents.",
+        "encodingTitle": "File name encoding",
+        "encodingDescription": "Some file names in this archive use a non-UTF-8 encoding. Select the correct encoding to display them properly.",
+        "passwordLabel": "Password",
+        "passwordPlaceholder": "Enter archive password",
+        "encodingLabel": "File name encoding",
+        "encodingSystemDefault": "System Default",
+        "encodingGroup": {
+          "eastAsian": "East Asian",
+          "southeastAsian": "Southeast Asian",
+          "middleEast": "Middle East",
+          "european": "European"
+        },
+        "extract": "Extract"
+      },
       "errors": {
-        "destinationInsideSelectedFolder": "Destination archive is inside a selected folder"
+        "destinationInsideSelectedFolder": "Destination archive is inside a selected folder",
+        "wrongPassword": "Incorrect password. The archive could not be decrypted.",
+        "encodingError": "Failed to decode file names with the selected encoding."
       }
     },
     "kind": "Kind",
@@ -1097,10 +1118,17 @@
     "previouslyKnownAs": "Previously known as \"{name}\"",
     "featured": "Featured",
     "allExtensions": "All Extensions",
+    "otherExtensions": "Other Extensions",
     "searchResults": "Search Results",
     "noResults": "No extensions found",
     "noResultsDescription": "No extensions match \"{query}\". Try a different search term.",
     "noExtensionsAvailable": "No extensions available in the registry",
+    "marketplaceUnavailable": "Marketplace unavailable",
+    "marketplaceUnavailableDescription": "Could not connect to the extension registry. Check your internet connection and try again.",
+    "githubConnectivityIssue": "Unable to reach GitHub",
+    "githubConnectivityIssueDescription": "Some extension version checks failed because the app could not connect to GitHub. Check your internet connection, VPN, or firewall settings and try again later.",
+    "offlineIssue": "You are offline",
+    "offlineIssueDescription": "Extension installs, updates, and version checks require an internet connection. Reconnect to the network to use marketplace features.",
     "noInstalledExtensions": "No extensions installed",
     "noInstalledExtensionsDescription": "Browse the marketplace to discover extensions that enhance your file manager experience.",
     "noPermissions": "This extension does not require any special permissions.",
@@ -1142,7 +1170,9 @@
       "local": "Local",
       "localTooltip": "This extension was installed from a local folder",
       "broken": "Broken",
-      "brokenTooltip": "Extension files are missing. Uninstall to remove from the list."
+      "brokenTooltip": "Extension files are missing. Uninstall to remove from the list.",
+      "disabled": "Disabled",
+      "disabledTooltip": "This extension is disabled"
     },
     "stats": {
       "total": "Total",

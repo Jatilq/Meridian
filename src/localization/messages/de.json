@@ -906,7 +906,28 @@
       "unknownError": "Unbekannter Fehler",
       "operationErrorTitle": "Archivvorgang fehlgeschlagen",
       "errors": {
-        "destinationInsideSelectedFolder": "Das Ziel-Archiv liegt in einem ausgewählten Ordner"
+        "destinationInsideSelectedFolder": "Das Ziel-Archiv liegt in einem ausgewählten Ordner",
+        "wrongPassword": "Falsches Passwort. Das Archiv konnte nicht entschlüsselt werden.",
+        "encodingError": "Dateinamen konnten mit der gewählten Kodierung nicht dekodiert werden."
+      },
+      "optionsDialog": {
+        "title": "Archiv-Entpackoptionen",
+        "description": "Entpack-Einstellungen für passwortgeschützte oder nicht-UTF-8-kodierte Archive konfigurieren",
+        "passwordTitle": "Archivpasswort erforderlich",
+        "passwordDescription": "Dieses Archiv ist verschlüsselt. Geben Sie das Passwort ein, um den Inhalt zu entpacken.",
+        "encodingTitle": "Dateinamen-Kodierung",
+        "encodingDescription": "Einige Dateinamen in diesem Archiv verwenden eine Nicht-UTF-8-Kodierung. Wählen Sie die richtige Kodierung aus.",
+        "passwordLabel": "Passwort",
+        "passwordPlaceholder": "Archivpasswort eingeben",
+        "encodingLabel": "Dateinamen-Kodierung",
+        "encodingSystemDefault": "Systemstandard",
+        "encodingGroup": {
+          "eastAsian": "Ostasien",
+          "southeastAsian": "Südostasien",
+          "middleEast": "Naher Osten",
+          "european": "Europa"
+        },
+        "extract": "Entpacken"
       }
     },
     "kind": "Art",
@@ -999,6 +1020,7 @@
     "previouslyKnownAs": "Früher bekannt als \"{name}\"",
     "featured": "Empfohlen",
     "allExtensions": "Alle Erweiterungen",
+    "otherExtensions": "Weitere Erweiterungen",
     "searchResults": "Suchergebnisse",
     "noResults": "Keine Erweiterungen gefunden",
     "noResultsDescription": "Keine Erweiterungen entsprechen \"{query}\". Versuchen Sie einen anderen Suchbegriff.",
@@ -1033,7 +1055,9 @@
       "local": "Lokal",
       "localTooltip": "Diese Erweiterung wurde aus einem lokalen Ordner installiert",
       "broken": "Defekt",
-      "brokenTooltip": "Erweiterungsdateien fehlen. Deinstallieren Sie die Erweiterung, um sie aus der Liste zu entfernen."
+      "brokenTooltip": "Erweiterungsdateien fehlen. Deinstallieren Sie die Erweiterung, um sie aus der Liste zu entfernen.",
+      "disabled": "Deaktiviert",
+      "disabledTooltip": "Diese Erweiterung ist deaktiviert"
     },
     "stats": {
       "total": "Gesamt",
@@ -1061,15 +1085,15 @@
     },
     "unknownPublisher": "Unknown publisher",
     "contextMenuLabel": "Erweiterungen",
-    "autoUpdate": "Auto-update",
+    "autoUpdate": "Automatische Aktualisierung",
     "showExtensionsFolder": "Erweiterungsordner anzeigen",
     "reinstalledSuccessfully": "Erneut erfolgreich installiert",
     "reusedDependencies": "{count} vorhandene Abhängigkeiten wiederverwendet",
     "themesInstalled": "Designs wurden installiert",
     "noLongerAvailable": "Nicht mehr verfügbar",
     "removedBecauseUnapproved": "Diese Erweiterung wurde entfernt, weil sie nicht mehr in der genehmigten Registry enthalten ist.",
-    "enabled": "Enabled",
-    "disabled": "Disabled",
+    "enabled": "Aktiviert",
+    "disabled": "Deaktiviert",
     "dependencies": {
       "noDependencies": "No shared dependencies",
       "noDependenciesDescription": "Shared binaries will appear here when extensions install dependencies like FFmpeg or Deno.",
@@ -1086,7 +1110,13 @@
     "engineApiWarning": "Erfordert Extension-API {range} (installiert: {current})",
     "engineRequirements": "Anforderungen",
     "requiresSigmaFileManager": "Sigma File Manager",
-    "requiresExtensionApi": "Extension-API"
+    "requiresExtensionApi": "Extension-API",
+    "marketplaceUnavailable": "Marketplace unavailable",
+    "marketplaceUnavailableDescription": "Could not connect to the extension registry. Check your internet connection and try again.",
+    "githubConnectivityIssue": "GitHub nicht erreichbar",
+    "githubConnectivityIssueDescription": "Einige Versionsprüfungen für Erweiterungen sind fehlgeschlagen, weil keine Verbindung zu GitHub hergestellt werden konnte. Überprüfen Sie Ihre Internetverbindung, VPN oder Firewall-Einstellungen und versuchen Sie es später erneut.",
+    "offlineIssue": "You are offline",
+    "offlineIssueDescription": "Extension installs, updates, and version checks require an internet connection. Reconnect to the network to use marketplace features."
   },
   "commandPalette": {
     "accessibleDialogTitle": "Befehlspalette",

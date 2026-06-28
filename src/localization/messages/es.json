@@ -906,7 +906,28 @@
       "unknownError": "Error desconocido",
       "operationErrorTitle": "Error en la operación de archivo",
       "errors": {
-        "destinationInsideSelectedFolder": "El archivo de destino está dentro de una carpeta seleccionada"
+        "destinationInsideSelectedFolder": "El archivo de destino está dentro de una carpeta seleccionada",
+        "wrongPassword": "Contraseña incorrecta. No se pudo descifrar el archivo.",
+        "encodingError": "No se pudieron decodificar los nombres de archivo con la codificación seleccionada."
+      },
+      "optionsDialog": {
+        "title": "Opciones de extracción del archivo",
+        "description": "Configura la extracción para archivos protegidos con contraseña o codificados sin UTF-8",
+        "passwordTitle": "Se requiere contraseña del archivo",
+        "passwordDescription": "Este archivo está cifrado. Introduce la contraseña para extraer su contenido.",
+        "encodingTitle": "Codificación de nombres de archivo",
+        "encodingDescription": "Algunos nombres de archivo de este archivo usan una codificación distinta de UTF-8. Selecciona la codificación correcta.",
+        "passwordLabel": "Contraseña",
+        "passwordPlaceholder": "Introducir contraseña del archivo",
+        "encodingLabel": "Codificación de nombres de archivo",
+        "encodingSystemDefault": "Predeterminado del sistema",
+        "encodingGroup": {
+          "eastAsian": "Asia oriental",
+          "southeastAsian": "Sudeste asiático",
+          "middleEast": "Oriente Medio",
+          "european": "Europa"
+        },
+        "extract": "Extraer"
       }
     },
     "kind": "Tipo",
@@ -999,6 +1020,7 @@
     "previouslyKnownAs": "Anteriormente conocido como \"{name}\"",
     "featured": "Destacados",
     "allExtensions": "Todas las extensiones",
+    "otherExtensions": "Otras extensiones",
     "searchResults": "Resultados de búsqueda",
     "noResults": "No se encontraron extensiones",
     "noResultsDescription": "Ninguna extensión coincide con \"{query}\". Intenta con otro término de búsqueda.",
@@ -1033,7 +1055,9 @@
       "local": "Local",
       "localTooltip": "Esta extensión fue instalada desde una carpeta local",
       "broken": "Dañada",
-      "brokenTooltip": "Faltan los archivos de la extensión. Desinstale para eliminarla de la lista."
+      "brokenTooltip": "Faltan los archivos de la extensión. Desinstale para eliminarla de la lista.",
+      "disabled": "Desactivada",
+      "disabledTooltip": "Esta extensión está desactivada"
     },
     "stats": {
       "total": "Total",
@@ -1061,15 +1085,15 @@
     },
     "unknownPublisher": "Unknown publisher",
     "contextMenuLabel": "Extensiones",
-    "autoUpdate": "Auto-update",
+    "autoUpdate": "Actualización automática",
     "showExtensionsFolder": "Mostrar carpeta de extensiones",
     "reinstalledSuccessfully": "Reinstalado correctamente",
     "reusedDependencies": "Reutilizadas {count} dependencias existentes",
     "themesInstalled": "Los temas se instalaron",
     "noLongerAvailable": "Ya no está disponible",
     "removedBecauseUnapproved": "Esta extensión se eliminó porque ya no está en el registro aprobado.",
-    "enabled": "Enabled",
-    "disabled": "Disabled",
+    "enabled": "Activado",
+    "disabled": "Desactivado",
     "dependencies": {
       "noDependencies": "No shared dependencies",
       "noDependenciesDescription": "Shared binaries will appear here when extensions install dependencies like FFmpeg or Deno.",
@@ -1086,7 +1110,13 @@
     "engineApiWarning": "Requiere API de extensiones {range} (tienes {current})",
     "engineRequirements": "Requisitos",
     "requiresSigmaFileManager": "Sigma File Manager",
-    "requiresExtensionApi": "API de extensiones"
+    "requiresExtensionApi": "API de extensiones",
+    "marketplaceUnavailable": "Marketplace unavailable",
+    "marketplaceUnavailableDescription": "Could not connect to the extension registry. Check your internet connection and try again.",
+    "githubConnectivityIssue": "No se puede conectar con GitHub",
+    "githubConnectivityIssueDescription": "Algunas comprobaciones de versión de extensiones fallaron porque la aplicación no pudo conectarse a GitHub. Comprueba tu conexión a Internet, VPN o firewall e inténtalo de nuevo más tarde.",
+    "offlineIssue": "You are offline",
+    "offlineIssueDescription": "Extension installs, updates, and version checks require an internet connection. Reconnect to the network to use marketplace features."
   },
   "commandPalette": {
     "accessibleDialogTitle": "Paleta de comandos",

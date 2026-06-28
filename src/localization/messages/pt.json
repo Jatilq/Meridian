@@ -903,7 +903,28 @@
       "unknownError": "Erro desconhecido",
       "operationErrorTitle": "Falha na operação de arquivo",
       "errors": {
-        "destinationInsideSelectedFolder": "O arquivo de destino está dentro de uma pasta selecionada"
+        "destinationInsideSelectedFolder": "O arquivo de destino está dentro de uma pasta selecionada",
+        "wrongPassword": "Senha incorreta. O arquivo não pôde ser descriptografado.",
+        "encodingError": "Falha ao decodificar nomes de arquivo com a codificação selecionada."
+      },
+      "optionsDialog": {
+        "title": "Opções de extração do arquivo",
+        "description": "Configure a extração para arquivos protegidos por senha ou codificados sem UTF-8",
+        "passwordTitle": "Senha do arquivo necessária",
+        "passwordDescription": "Este arquivo está criptografado. Digite a senha para extrair o conteúdo.",
+        "encodingTitle": "Codificação dos nomes de arquivo",
+        "encodingDescription": "Alguns nomes de arquivo neste arquivo usam codificação diferente de UTF-8. Selecione a codificação correta.",
+        "passwordLabel": "Senha",
+        "passwordPlaceholder": "Digite a senha do arquivo",
+        "encodingLabel": "Codificação dos nomes de arquivo",
+        "encodingSystemDefault": "Padrão do sistema",
+        "encodingGroup": {
+          "eastAsian": "Leste asiático",
+          "southeastAsian": "Sudeste asiático",
+          "middleEast": "Oriente Médio",
+          "european": "Europa"
+        },
+        "extract": "Extrair"
       }
     },
     "kind": "Tipo",
@@ -998,6 +1019,7 @@
     "previouslyKnownAs": "Anteriormente conhecido como \"{name}\"",
     "featured": "Em destaque",
     "allExtensions": "Todas as extensões",
+    "otherExtensions": "Outras extensões",
     "searchResults": "Resultados da pesquisa",
     "noResults": "Nenhuma extensão encontrada",
     "noResultsDescription": "Nenhuma extensão corresponde a \"{query}\". Tente outro termo de pesquisa.",
@@ -1031,7 +1053,9 @@
       "local": "Local",
       "localTooltip": "Esta extensão foi instalada de uma pasta local",
       "broken": "Quebrada",
-      "brokenTooltip": "Arquivos da extensão ausentes. Desinstale para remover da lista."
+      "brokenTooltip": "Arquivos da extensão ausentes. Desinstale para remover da lista.",
+      "disabled": "Desativada",
+      "disabledTooltip": "Esta extensão está desativada"
     },
     "stats": {
       "total": "Total",
@@ -1059,15 +1083,15 @@
     },
     "unknownPublisher": "Unknown publisher",
     "contextMenuLabel": "Extensões",
-    "autoUpdate": "Auto-update",
+    "autoUpdate": "Atualização automática",
     "showExtensionsFolder": "Mostrar pasta de extensões",
     "reinstalledSuccessfully": "Reinstalado com sucesso",
     "reusedDependencies": "Reutilizadas {count} dependências existentes",
     "themesInstalled": "Os temas foram instalados",
     "noLongerAvailable": "Não está mais disponível",
     "removedBecauseUnapproved": "Esta extensão foi removida porque não está mais no registro aprovado.",
-    "enabled": "Enabled",
-    "disabled": "Disabled",
+    "enabled": "Ativado",
+    "disabled": "Desativado",
     "noExtensionCommands": "This extension does not provide any commands.",
     "dependencies": {
       "noDependencies": "No shared dependencies",
@@ -1085,7 +1109,13 @@
     "engineApiWarning": "Requer API de extensões {range} (você tem {current})",
     "engineRequirements": "Requisitos",
     "requiresSigmaFileManager": "Sigma File Manager",
-    "requiresExtensionApi": "API de extensões"
+    "requiresExtensionApi": "API de extensões",
+    "marketplaceUnavailable": "Marketplace unavailable",
+    "marketplaceUnavailableDescription": "Could not connect to the extension registry. Check your internet connection and try again.",
+    "githubConnectivityIssue": "Não foi possível acessar o GitHub",
+    "githubConnectivityIssueDescription": "Algumas verificações de versão de extensões falharam porque o aplicativo não conseguiu se conectar ao GitHub. Verifique sua conexão com a Internet, VPN ou firewall e tente novamente mais tarde.",
+    "offlineIssue": "You are offline",
+    "offlineIssueDescription": "Extension installs, updates, and version checks require an internet connection. Reconnect to the network to use marketplace features."
   },
   "commandPalette": {
     "accessibleDialogTitle": "Paleta de comandos",

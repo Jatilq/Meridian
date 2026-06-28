@@ -6,6 +6,7 @@ Copyright © 2021 - present Aleksey Hoffman. All rights reserved.
 <script setup lang="ts">
 import { computed, inject, markRaw } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { invoke } from '@tauri-apps/api/core';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { toast, ToastStatic } from '@/components/ui/toaster';
 import type { DirEntry } from '@/types/dir-entry';
@@ -187,6 +188,51 @@ async function startArchiveJob(
   }
 }
 
+async function resolveArchiveOptions(archivePath: string): Promise<{
+  password?: string;
+  encoding?: string;
+} | null> {
+  try {
+    const info = await invoke<{
+      encrypted: boolean;
+      encodingUndetermined: boolean;
+      detectedEncoding?: string | null;
+    }>('check_archive', { archivePath });
+
+    if (!info.encrypted && !info.encodingUndetermined) {
+      return {};
+    }
+
+    const options = await fileBrowserContext?.requestArchiveOptions(
+      info.encrypted,
+      info.encodingUndetermined,
+      info.detectedEncoding ?? undefined,
+    );
+
+    if (!options) {
+      return null;
+    }
+
+    return {
+      password: options.password || undefined,
+      encoding: options.encoding,
+    };
+  }
+  catch (error) {
+    const rawMessage = error instanceof Error ? error.message : String(error);
+    toast.custom(markRaw(ToastStatic), {
+      componentProps: {
+        data: {
+          title: t('fileBrowser.archive.operationErrorTitle'),
+          description: translateArchiveErrorMessage(rawMessage),
+        },
+      },
+      duration: 5000,
+    });
+    return null;
+  }
+}
+
 async function handleExtractHere() {
   const archiveEntry = zipArchiveEntry.value;
   const destination = extractHereDestination.value;
@@ -195,11 +241,19 @@ async function handleExtractHere() {
     return;
   }
 
+  const opts = await resolveArchiveOptions(archiveEntry.path);
+
+  if (opts === null) {
+    return;
+  }
+
   await startArchiveJob(
     {
       kind: 'extractHere',
       archivePath: archiveEntry.path,
       destinationDir: destination,
+      password: opts.password,
+      encoding: opts.encoding,
     },
     t('fileBrowser.archive.extractHere'),
     archiveEntry.name,
@@ -213,10 +267,18 @@ async function handleExtractToNamedFolder() {
     return;
   }
 
+  const opts = await resolveArchiveOptions(archiveEntry.path);
+
+  if (opts === null) {
+    return;
+  }
+
   await startArchiveJob(
     {
       kind: 'extractToNamedFolder',
       archivePath: archiveEntry.path,
+      password: opts.password,
+      encoding: opts.encoding,
     },
     t('fileBrowser.archive.extractToNamedFolder', {
       folderName: `${archiveStemForExtractLabel.value}/`,
@@ -229,6 +291,12 @@ async function handleExtractToPicker() {
   const archiveEntry = zipArchiveEntry.value;
 
   if (!archiveEntry) {
+    return;
+  }
+
+  const opts = await resolveArchiveOptions(archiveEntry.path);
+
+  if (opts === null) {
     return;
   }
 
@@ -253,6 +321,8 @@ async function handleExtractToPicker() {
       kind: 'extractHere',
       archivePath: archiveEntry.path,
       destinationDir,
+      password: opts.password,
+      encoding: opts.encoding,
     },
     t('fileBrowser.archive.extractToPicker'),
     archiveEntry.name,

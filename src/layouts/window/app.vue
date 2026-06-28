@@ -67,10 +67,7 @@ onMounted(() => {
               :is-active="activeEmbedPageId === embedPage.pageId"
             />
           </PageIframeLayout>
-          <RouterView
-            v-show="!activeEmbedPageId"
-            v-slot="{ Component }"
-          >
+          <RouterView v-slot="{ Component }">
             <div
               data-vaul-drawer-wrapper
               class="app-layout__router-view-wrapper"
@@ -134,6 +131,7 @@ onMounted(() => {
 .app-layout__content {
   position: relative;
   overflow: hidden;
+  min-width: 0;
   min-height: 0;
   flex: 1;
 }
@@ -150,8 +148,12 @@ onMounted(() => {
 }
 
 .app-layout__router-view-wrapper {
+  display: flex;
   overflow: hidden;
-  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
 }
 
 .app-layout__extension-embed {

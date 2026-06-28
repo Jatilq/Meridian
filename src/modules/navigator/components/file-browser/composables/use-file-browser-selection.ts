@@ -997,8 +997,8 @@ export function useFileBrowserSelection(
     return false;
   }
 
-  function handleContextMenuAction(action: ContextMenuAction) {
-    const entries = contextMenu.value.selectedEntries;
+  function handleContextMenuAction(action: ContextMenuAction, entriesOverride?: DirEntry[]) {
+    const entries = entriesOverride ?? contextMenu.value.selectedEntries;
 
     switch (action) {
       case 'rename':
@@ -1197,6 +1197,20 @@ export function useFileBrowserSelection(
     }
   }
 
+  function performSelectionAction(action: ContextMenuAction) {
+    const entries = selectedEntries.value;
+
+    if (entries.length === 0) {
+      return;
+    }
+
+    if (!canPerformAction(action, entries)) {
+      return;
+    }
+
+    handleContextMenuAction(action, entries);
+  }
+
   return {
     selectedEntries,
     lastSelectedEntry,
@@ -1213,6 +1227,7 @@ export function useFileBrowserSelection(
     handleBackgroundContextMenu,
     closeContextMenu,
     handleContextMenuAction,
+    performSelectionAction,
     resetMouseState,
     selectAll,
     selectEntryByPath,

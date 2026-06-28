@@ -23,11 +23,13 @@ import { useDismissalLayerStore } from '@/stores/runtime/dismissal-layer';
 import { useGlobalSearchStore } from '@/stores/runtime/global-search';
 import { useShortcutsStore, getSelectedTextForCopy } from '@/stores/runtime/shortcuts';
 import { toast, ToastStatic } from '@/components/ui/toaster';
+import { getVirtualLocationActionContext } from '@/utils/virtual-location-action-target';
 import { useTerminalsStore } from '@/stores/runtime/terminals';
 import { useDirSizesStore } from '@/stores/runtime/dir-sizes';
 import { useNavigatorSelectionStore } from '@/stores/runtime/navigator-selection';
 import { FileBrowser } from '@/modules/navigator/components/file-browser';
 import type { AddressBarEditorMode } from '@/modules/navigator/components/file-browser/address-bar-editor-utils';
+import type { ContextMenuAction } from '@/modules/navigator/components/file-browser/types';
 import FileBrowserConflictDialog from '@/modules/navigator/components/file-browser/file-browser-conflict-dialog.vue';
 import FileBrowserTopLevelConflictDialog from '@/modules/navigator/components/file-browser/file-browser-top-level-conflict-dialog.vue';
 import FileBrowserDragOverlay from '@/modules/navigator/components/file-browser/file-browser-drag-overlay.vue';
@@ -35,7 +37,10 @@ import { useActiveFileBrowserDragState } from '@/modules/navigator/components/fi
 import { provideFileBrowserInternalDropHandler } from '@/modules/navigator/components/file-browser/composables/use-file-browser-internal-drop';
 import { InfoPanel } from '@/modules/navigator/components/info-panel';
 import { AiPanel } from '@/modules/ai-panel';
-import { useInfoPanelLayout } from '@/modules/navigator/components/info-panel/composables/use-info-panel-layout';
+import {
+  consumeNavigatorLayoutResetPending,
+  useInfoPanelLayout,
+} from '@/modules/navigator/components/info-panel/composables/use-info-panel-layout';
 import { NavigatorToolbarActions } from '@/modules/navigator/components/navigator-toolbar-actions';
 import { ClipboardToolbar } from '@/modules/navigator/components/clipboard-toolbar';
 import { GlobalSearchView } from '@/modules/global-search';
@@ -81,6 +86,7 @@ type FileBrowserInstance = InstanceType<typeof FileBrowser> & {
   openNewItemDialog?: (type: 'file' | 'directory') => void;
   printEntry?: (entry?: DirEntry) => Promise<void>;
   openProperties?: (entries: DirEntry[]) => Promise<void>;
+  performSelectionAction?: (action: ContextMenuAction) => void;
 };
 
 type GlobalSearchViewInstance = InstanceType<typeof GlobalSearchView> & {
@@ -178,6 +184,8 @@ const {
   isInfoPanelVisibilityAnimating,
   infoPanelWidthDefault,
   infoPanelLayout,
+  clearPanelRefs,
+  requestLayoutReset,
 } = useInfoPanelLayout();
 
 const showInfoPanel = ref(true);
@@ -567,7 +575,18 @@ function getActivePaneRef(): FileBrowserInstance | undefined {
   return getNavigatorPaneRef();
 }
 
+function getNavigatorActionContext(currentDirectoryPath: string | undefined) {
+  return getVirtualLocationActionContext(selectedEntries.value, currentDirectoryPath);
+}
+
 function getPasteTargetPath(): string | undefined {
+  const currentPath = getActiveCurrentPath();
+  const actionContext = getNavigatorActionContext(currentPath);
+
+  if (actionContext.isBrowsingVirtualLocations) {
+    return actionContext.actionDirectoryPath ?? undefined;
+  }
+
   if (isSplitView.value && activeTabId.value) {
     const activeTab = workspacesStore.currentTabGroup?.find(
       tab => tab.id === activeTabId.value,
@@ -662,6 +681,31 @@ function handleCopyShortcut() {
 
 async function handleCopyCurrentDirectoryPathShortcut() {
   const currentPath = getActiveCurrentPath();
+  const actionContext = getNavigatorActionContext(currentPath);
+
+  if (actionContext.isBrowsingVirtualLocations) {
+    if (actionContext.actionTargetEntries.length === 0) {
+      return false;
+    }
+
+    try {
+      await navigator.clipboard.writeText(actionContext.actionTargetPathsText);
+      toast.custom(markRaw(ToastStatic), {
+        componentProps: {
+          data: {
+            title: t('dialogs.localShareManagerDialog.addressCopiedToClipboard'),
+            description: actionContext.actionTargetPathsText,
+          },
+        },
+        duration: 2000,
+      });
+      return true;
+    }
+    catch (error) {
+      console.error('Failed to copy selected path:', error);
+      return false;
+    }
+  }
 
   if (!currentPath) {
     return false;
@@ -831,16 +875,36 @@ async function handlePropertiesShortcut() {
 }
 
 async function openTerminalWithOptions(asAdmin: boolean) {
-  if (!currentActivePath.value) return;
+  const actionContext = getNavigatorActionContext(currentActivePath.value);
+
+  if (!actionContext.actionDirectoryPath) {
+    return;
+  }
 
   const defaultTerminal = terminalsStore.terminals[0];
   if (!defaultTerminal) return;
 
-  await terminalsStore.openTerminal(currentActivePath.value, defaultTerminal.id, asAdmin);
+  await terminalsStore.openTerminal(actionContext.actionDirectoryPath, defaultTerminal.id, asAdmin);
 }
 
 async function handleOpenNewTabShortcut() {
-  await workspacesStore.openNewTabGroup(currentActivePath.value);
+  const actionContext = getNavigatorActionContext(currentActivePath.value);
+
+  if (actionContext.isBrowsingVirtualLocations) {
+    if (actionContext.actionTargetEntries.length > 0) {
+      getActivePaneRef()?.performSelectionAction?.('open-in-new-tab');
+    }
+
+    return;
+  }
+
+  const currentPath = currentActivePath.value;
+
+  if (!currentPath) {
+    return;
+  }
+
+  await workspacesStore.openNewTabGroup(currentPath);
 }
 
 async function handleCloseCurrentTabShortcut() {
@@ -1032,13 +1096,23 @@ watch(isInfoPanelVisibilityAnimating, (isAnimating, wasAnimating) => {
   }
 });
 
-onMounted(() => {
+onMounted(async () => {
   registerShortcutHandlers();
   dirSizesStore.recoverActiveCalculations();
+
+  if (!consumeNavigatorLayoutResetPending()) {
+    return;
+  }
+
+  await nextTick();
+  requestAnimationFrame(() => {
+    requestLayoutReset();
+  });
 });
 
 onUnmounted(() => {
   navigatorSelectionStore.setSelectedDirEntries([]);
+  clearPanelRefs();
 });
 </script>
 

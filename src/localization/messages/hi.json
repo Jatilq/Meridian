@@ -934,7 +934,28 @@
       "unknownError": "अज्ञात त्रुटि",
       "operationErrorTitle": "पुरालेख कार्रवाई विफल रही",
       "errors": {
-        "destinationInsideSelectedFolder": "गंतव्य संग्रह एक चयनित फ़ोल्डर के अंदर है"
+        "destinationInsideSelectedFolder": "गंतव्य संग्रह एक चयनित फ़ोल्डर के अंदर है",
+        "wrongPassword": "गलत पासवर्ड। आर्काइव डिक्रिप्ट नहीं हो सका।",
+        "encodingError": "चयनित एन्कोडिंग से फ़ाइल नाम डिकोड नहीं हो सके।"
+      },
+      "optionsDialog": {
+        "title": "आर्काइव निष्कर्षण विकल्प",
+        "description": "पासवर्ड-सुरक्षित या गैर-UTF-8 एन्कोडेड आर्काइव के लिए निष्कर्षण सेटिंग कॉन्फ़िगर करें",
+        "passwordTitle": "आर्काइव पासवर्ड आवश्यक",
+        "passwordDescription": "यह आर्काइव एन्क्रिप्टेड है। सामग्री निकालने के लिए पासवर्ड दर्ज करें।",
+        "encodingTitle": "फ़ाइल नाम एन्कोडिंग",
+        "encodingDescription": "इस आर्काइव में कुछ फ़ाइल नाम गैर-UTF-8 एन्कोडिंग का उपयोग करते हैं। सही एन्कोडिंग चुनें।",
+        "passwordLabel": "पासवर्ड",
+        "passwordPlaceholder": "आर्काइव पासवर्ड दर्ज करें",
+        "encodingLabel": "फ़ाइल नाम एन्कोडिंग",
+        "encodingSystemDefault": "सिस्टम डिफ़ॉल्ट",
+        "encodingGroup": {
+          "eastAsian": "पूर्वी एशिया",
+          "southeastAsian": "दक्षिण पूर्व एशिया",
+          "middleEast": "मध्य पूर्व",
+          "european": "यूरोप"
+        },
+        "extract": "निकालें"
       }
     },
     "kind": "प्रकार",
@@ -1040,6 +1061,7 @@
     "previouslyKnownAs": "पहले \"{name}\" के नाम से जाना जाता था",
     "featured": "प्रदर्शित",
     "allExtensions": "सभी एक्सटेंशन",
+    "otherExtensions": "अन्य एक्सटेंशन",
     "searchResults": "खोज के परिणाम",
     "noResults": "कोई एक्सटेंशन नहीं मिला",
     "noResultsDescription": "कोई भी एक्सटेंशन \"{query}\" से मेल नहीं खाता। कोई भिन्न खोज शब्द आज़माएँ.",
@@ -1085,7 +1107,9 @@
       "local": "स्थानीय",
       "localTooltip": "यह एक्सटेंशन एक स्थानीय फ़ोल्डर से इंस्टॉल किया गया था",
       "broken": "टूटा हुआ",
-      "brokenTooltip": "एक्सटेंशन फ़ाइलें अनुपलब्ध हैं. सूची से हटाने के लिए अनइंस्टॉल करें."
+      "brokenTooltip": "एक्सटेंशन फ़ाइलें अनुपलब्ध हैं. सूची से हटाने के लिए अनइंस्टॉल करें.",
+      "disabled": "अक्षम",
+      "disabledTooltip": "यह एक्सटेंशन अक्षम है"
     },
     "stats": {
       "total": "कुल",
@@ -1116,7 +1140,13 @@
     "engineApiWarning": "एक्सटेंशन API {range} आवश्यक है (आपके पास {current})",
     "engineRequirements": "आवश्यकताएँ",
     "requiresSigmaFileManager": "Sigma File Manager",
-    "requiresExtensionApi": "एक्सटेंशन API"
+    "requiresExtensionApi": "एक्सटेंशन API",
+    "marketplaceUnavailable": "Marketplace unavailable",
+    "marketplaceUnavailableDescription": "Could not connect to the extension registry. Check your internet connection and try again.",
+    "githubConnectivityIssue": "GitHub तक पहुँच नहीं हो सकी",
+    "githubConnectivityIssueDescription": "ऐप GitHub से कनेक्ट नहीं हो सका, इसलिए कुछ एक्सटेंशन संस्करण जांच विफल रही। अपना इंटरनेट कनेक्शन, VPN या फ़ायरवॉल सेटिंग जांचें और बाद में फिर कोशिश करें।",
+    "offlineIssue": "You are offline",
+    "offlineIssueDescription": "Extension installs, updates, and version checks require an internet connection. Reconnect to the network to use marketplace features."
   },
   "commandPalette": {
     "accessibleDialogTitle": "कमांड पैलेट",

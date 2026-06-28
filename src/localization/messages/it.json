@@ -904,7 +904,28 @@
       "unknownError": "Errore sconosciuto",
       "operationErrorTitle": "Operazione di archivio non riuscita",
       "errors": {
-        "destinationInsideSelectedFolder": "L'archivio di destinazione si trova all'interno di una cartella selezionata"
+        "destinationInsideSelectedFolder": "L'archivio di destinazione si trova all'interno di una cartella selezionata",
+        "wrongPassword": "Password errata. Impossibile decrittografare l'archivio.",
+        "encodingError": "Impossibile decodificare i nomi file con la codifica selezionata."
+      },
+      "optionsDialog": {
+        "title": "Opzioni di estrazione archivio",
+        "description": "Configura l'estrazione per archivi protetti da password o non codificati in UTF-8",
+        "passwordTitle": "Password archivio richiesta",
+        "passwordDescription": "Questo archivio è crittografato. Inserisci la password per estrarne il contenuto.",
+        "encodingTitle": "Codifica nomi file",
+        "encodingDescription": "Alcuni nomi file in questo archivio usano una codifica diversa da UTF-8. Seleziona la codifica corretta.",
+        "passwordLabel": "Password",
+        "passwordPlaceholder": "Inserisci password archivio",
+        "encodingLabel": "Codifica nomi file",
+        "encodingSystemDefault": "Predefinito di sistema",
+        "encodingGroup": {
+          "eastAsian": "Asia orientale",
+          "southeastAsian": "Asia sud-orientale",
+          "middleEast": "Medio Oriente",
+          "european": "Europa"
+        },
+        "extract": "Estrai"
       }
     },
     "kind": "Tipo",
@@ -999,6 +1020,7 @@
     "previouslyKnownAs": "Precedentemente noto come \"{name}\"",
     "featured": "In evidenza",
     "allExtensions": "Tutte le estensioni",
+    "otherExtensions": "Altre estensioni",
     "searchResults": "Risultati della ricerca",
     "noResults": "Nessuna estensione trovata",
     "noResultsDescription": "Nessuna estensione corrisponde a \"{query}\". Prova un altro termine di ricerca.",
@@ -1033,7 +1055,9 @@
       "local": "Locale",
       "localTooltip": "Questa estensione è stata installata da una cartella locale",
       "broken": "Rotta",
-      "brokenTooltip": "I file dell'estensione sono mancanti. Disinstalla per rimuovere dall'elenco."
+      "brokenTooltip": "I file dell'estensione sono mancanti. Disinstalla per rimuovere dall'elenco.",
+      "disabled": "Disabilitata",
+      "disabledTooltip": "Questa estensione è disabilitata"
     },
     "stats": {
       "total": "Totale",
@@ -1061,15 +1085,15 @@
     },
     "unknownPublisher": "Unknown publisher",
     "contextMenuLabel": "Estensioni",
-    "autoUpdate": "Auto-update",
+    "autoUpdate": "Aggiornamento automatico",
     "showExtensionsFolder": "Mostra cartella estensioni",
     "reinstalledSuccessfully": "Reinstallato con successo",
     "reusedDependencies": "Riusate {count} dipendenze esistenti",
     "themesInstalled": "I temi sono stati installati",
     "noLongerAvailable": "Non è più disponibile",
     "removedBecauseUnapproved": "Questa estensione è stata rimossa perché non è più presente nel registro approvato.",
-    "enabled": "Enabled",
-    "disabled": "Disabled",
+    "enabled": "Abilitato",
+    "disabled": "Disabilitato",
     "dependencies": {
       "noDependencies": "No shared dependencies",
       "noDependenciesDescription": "Shared binaries will appear here when extensions install dependencies like FFmpeg or Deno.",
@@ -1086,7 +1110,13 @@
     "engineApiWarning": "Richiede API estensioni {range} (versione attuale: {current})",
     "engineRequirements": "Requisiti",
     "requiresSigmaFileManager": "Sigma File Manager",
-    "requiresExtensionApi": "API estensioni"
+    "requiresExtensionApi": "API estensioni",
+    "marketplaceUnavailable": "Marketplace unavailable",
+    "marketplaceUnavailableDescription": "Could not connect to the extension registry. Check your internet connection and try again.",
+    "githubConnectivityIssue": "Impossibile raggiungere GitHub",
+    "githubConnectivityIssueDescription": "Alcuni controlli di versione delle estensioni non sono riusciti perché l'app non ha potuto connettersi a GitHub. Controlla la connessione Internet, la VPN o il firewall e riprova più tardi.",
+    "offlineIssue": "You are offline",
+    "offlineIssueDescription": "Extension installs, updates, and version checks require an internet connection. Reconnect to the network to use marketplace features."
   },
   "commandPalette": {
     "accessibleDialogTitle": "Tavolozza comandi",
