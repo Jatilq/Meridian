@@ -295,8 +295,45 @@ async function logToolCall(name: string, args: Record<string, unknown>, resultJs
   console.debug('[rain tool]', name, args, resultJson?.slice(0, 200));
 }
 
-async function maybeRememberFromTurn(_prompt: string, _finalText: string): Promise<void> {
-  // Placeholder — Step 5 implements MEMORY.md auto-append heuristics.
+async function maybeRememberFromTurn(prompt: string, finalText: string): Promise<void> {
+  // After the turn, ask the model to extract any durable fact worth saving to
+  // long-term memory (preferences, recurring paths, conventions). Cheap, bounded,
+  // and best-effort — never blocks or surfaces errors to the user.
+  try {
+    const routerBase = (aiPanelStore.routerEndpoint || '').replace(/\/+$/, '');
+    if (!routerBase) return;
+    const model = aiPanelStore.selectedModel || undefined;
+
+    const extractionPrompt = `You are Rain's memory extractor. Given the latest exchange, decide if there is ONE durable fact worth remembering long-term about the user or their files (a preference, a frequently used path, a naming convention, a recurring workflow). If yes, reply with a single short line starting with "MEMORY:" (for a fact about the user/their habits) or "FAVORITE:" (for a path/model/preference used repeatedly). If nothing is worth saving, reply exactly "NONE". Do not explain.\n\nUser: ${prompt}\nRain: ${finalText}`;
+
+    const res = await fetch(`${routerBase}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(model ? { 'X-Model-Id': model } : {}) },
+      body: JSON.stringify({
+        model: model || 'default',
+        messages: [{ role: 'user', content: extractionPrompt }],
+        temperature: 0,
+        max_tokens: 80,
+      }),
+    });
+    if (!res.ok) return;
+
+    const data = JSON.parse((await res.text()).replace(/\s*data:\s*\[DONE\]\s*$/i, '').trim());
+    const out = (data?.choices?.[0]?.message?.content ?? '').trim();
+    if (!out || /^NONE$/i.test(out)) return;
+
+    const memMatch = out.match(/^MEMORY:\s*(.+)$/i);
+    const favMatch = out.match(/^FAVORITE:\s*(.+)$/i);
+    if (memMatch) {
+      await aiPanelStore.appendMemory(memMatch[1].trim());
+    }
+    else if (favMatch) {
+      await aiPanelStore.appendFavorite(favMatch[1].trim());
+    }
+  }
+  catch {
+    // Best-effort; memory extraction failures are silent.
+  }
 }
 
 async function handleSend() {
