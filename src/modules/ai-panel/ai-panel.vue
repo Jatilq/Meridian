@@ -56,6 +56,13 @@ const confirmDialogOpen = ref(false);
 const confirmDialogData = ref<{ title: string; description: string; onConfirm: () => void | Promise<void> } | null>(null);
 // Pending resolver for an in-flight tool confirmation (Rain agent loop).
 let toolConfirmResolve: ((confirmed: boolean) => void) | null = null;
+// Structured details for the in-panel confirmation card (Step 4).
+const toolConfirmDetails = ref<{
+  tool: string;
+  title: string;
+  lines: string[];
+  warning?: string;
+} | null>(null);
 
 watch(
   () => aiPanelStore.isOpen,
@@ -198,20 +205,67 @@ async function runAgentLoop(
 // logToolCall / maybeRememberFromTurn are fleshed out in Step 5.
 
 async function requestToolConfirmation(name: string, args: Record<string, unknown>): Promise<boolean> {
-  // Step 4 replaces this with an in-panel confirmation card. For now, resolve
-  // via the existing confirm dialog (Confirm => true, Cancel => false).
+  // Build a structured confirmation card and resolve on Confirm/Cancel.
+  let details: { tool: string; title: string; lines: string[]; warning?: string };
+  if (name === 'move_files') {
+    const srcs = Array.isArray(args.src) ? (args.src as string[]) : [String(args.src)];
+    details = {
+      tool: name,
+      title: t('aiPanel.confirmMoveTitle'),
+      lines: srcs.map(s => `${s}  →  ${String(args.dest)}`),
+    };
+  }
+  else if (name === 'rename_item') {
+    details = {
+      tool: name,
+      title: t('aiPanel.confirmRenameTitle'),
+      lines: [`${String(args.old)}  →  ${String(args.new)}`],
+    };
+  }
+  else {
+    // delete_item
+    const permanent = args.permanent === true;
+    let warning: string | undefined;
+    // Warn if the delete target is a non-empty folder.
+    try {
+      const listRaw = await invoke<string>('rain_run_tool', { name: 'list_directory', args: { path: String(args.path) } });
+      const parsed = JSON.parse(listRaw);
+      const count = parsed?.contents?.entries?.length ?? 0;
+      if (parsed?.ok && count > 0) {
+        warning = t('aiPanel.confirmDeleteFolderWarning', { count });
+      }
+    }
+    catch {
+      // Not a directory or unreadable — no warning.
+    }
+    details = {
+      tool: name,
+      title: permanent ? t('aiPanel.confirmDeletePermanentTitle') : t('aiPanel.confirmDeleteTitle'),
+      lines: [String(args.path)],
+      warning,
+    };
+  }
+
   return new Promise<boolean>((resolve) => {
-    const summary = name === 'move_files'
-      ? `Move ${Array.isArray(args.src) ? (args.src as string[]).length : 1} item(s) to ${String(args.dest)}`
-      : name === 'rename_item'
-        ? `Rename ${String(args.old)} → ${String(args.new)}`
-        : `Delete ${String(args.path)}${args.permanent === true ? ' permanently' : ' (to recycle bin)'}`;
     toolConfirmResolve = resolve;
-    showConfirm(name, summary, () => {
-      const r = toolConfirmResolve; toolConfirmResolve = null;
-      if (r) r(true);
-    });
+    toolConfirmDetails.value = details;
   });
+}
+
+function confirmToolAction() {
+  toolConfirmDetails.value = null;
+  if (toolConfirmResolve) {
+    const r = toolConfirmResolve; toolConfirmResolve = null;
+    r(true);
+  }
+}
+
+function cancelToolAction() {
+  toolConfirmDetails.value = null;
+  if (toolConfirmResolve) {
+    const r = toolConfirmResolve; toolConfirmResolve = null;
+    r(false);
+  }
 }
 
 async function executeDestructiveTool(name: string, args: Record<string, unknown>): Promise<string> {
@@ -590,6 +644,38 @@ const confirmDescription = computed(() => confirmDialogData.value?.description |
       </Button>
     </div>
 
+    <div
+      v-if="toolConfirmDetails"
+      class="ai-panel__confirm-card"
+    >
+      <div class="ai-panel__confirm-title">{{ toolConfirmDetails.title }}</div>
+      <div class="ai-panel__confirm-lines">
+        <div
+          v-for="(line, i) in toolConfirmDetails.lines"
+          :key="i"
+          class="ai-panel__confirm-line"
+        >
+          {{ line }}
+        </div>
+      </div>
+      <div
+        v-if="toolConfirmDetails.warning"
+        class="ai-panel__confirm-warning"
+      >
+        {{ toolConfirmDetails.warning }}
+      </div>
+      <div class="ai-panel__confirm-actions">
+        <Button variant="ghost" size="sm" @click="cancelToolAction">
+          <XIcon :size="14" />
+          {{ t('common.cancel') }}
+        </Button>
+        <Button size="sm" @click="confirmToolAction">
+          <CheckIcon :size="14" />
+          {{ t('common.confirm') }}
+        </Button>
+      </div>
+    </div>
+
     <Dialog :open="confirmDialogOpen" @update:open="confirmDialogOpen = $event">
       <DialogContent>
         <DialogHeader>
@@ -749,6 +835,46 @@ const confirmDescription = computed(() => confirmDialogData.value?.description |
 .ai-panel__message--assistant .ai-panel__message-content {
   background-color: hsl(var(--secondary));
   color: hsl(var(--foreground));
+}
+
+.ai-panel__confirm-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0 8px 8px;
+  padding: 10px;
+  background-color: hsl(var(--background-2));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-sm);
+}
+
+.ai-panel__confirm-title {
+  color: hsl(var(--foreground));
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.ai-panel__confirm-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.ai-panel__confirm-line {
+  color: hsl(var(--muted-foreground));
+  font-size: 0.75rem;
+  word-break: break-all;
+}
+
+.ai-panel__confirm-warning {
+  color: hsl(var(--destructive, 0 70% 60%));
+  font-size: 0.72rem;
+}
+
+.ai-panel__confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.375rem;
 }
 
 .ai-panel__scope-row {
