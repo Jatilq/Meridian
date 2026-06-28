@@ -3,4 +3,5 @@
 // Copyright © 2021 - present Aleksey Hoffman. All rights reserved.
 
 export { default as ChangelogDialog } from './components/changelog-dialog.vue';
+export { default as WhatsNewDialog } from './components/whats-new-dialog.vue';
 export { useChangelog } from './composables/use-changelog';

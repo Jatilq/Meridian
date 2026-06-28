@@ -18,7 +18,7 @@ const userSettingsStore = useUserSettingsStore();
 const aiPanelStore = useAiPanelStore();
 
 onMounted(() => {
-  // Populate the model dropdown from 9Router when the settings page opens,
+  // Populate the model dropdown from the local AI server when the settings page opens,
   // independent of whether the AI panel has been opened yet.
   void aiPanelStore.fetchModels();
 });
@@ -105,7 +105,7 @@ const topP = computed({
 });
 
 // Read-only: context window of the selected model, if the endpoint reports it.
-// 9Router's /v1/models currently returns only id/object/owned_by, so this is
+// Local AI server's /v1/models currently returns only id/object/owned_by, so this is
 // informational and falls back to "Not reported by endpoint".
 const contextWindow = computed(() => {
   const selected = aiPanelStore.models.find(m => m.id === model.value) as
@@ -143,8 +143,8 @@ const modelSupportsTools = computed(() => {
     :icon="BotIcon"
   >
     <div class="ai-panel-settings">
-      <!-- Primary AI: 9Router (handles all text inference) -->
-      <div class="ai-panel-settings__section-title">Primary AI (9Router)</div>
+      <!-- Primary AI: local AI server (handles all text inference) -->
+      <div class="ai-panel-settings__section-title">Primary AI (local AI server)</div>
       <div class="ai-panel-settings__field">
         <label class="ai-panel-settings__label" for="ai-panel-router">
           Endpoint URL
@@ -183,7 +183,7 @@ const modelSupportsTools = computed(() => {
           v-if="!modelSupportsTools"
           class="ai-panel-settings__tool-warning"
         >
-          Rain agent mode requires a tool-capable model. Try Qwen3.6 via 9Router.
+          Rain agent mode requires a tool-capable model. Try a Qwen, Llama 3.1+, or GPT-4 class model.
         </div>
       </div>
       <div class="ai-panel-settings__field">
@@ -250,22 +250,22 @@ const modelSupportsTools = computed(() => {
         />
       </div>
 
-      <!-- Local AI Enhancement: Omnix (optional, off by default) -->
-      <div class="ai-panel-settings__section-title">Local AI Enhancement (Omnix) — optional</div>
+      <!-- Local AI Enhancement: Omnix (optional, on by default) -->
+      <div class="ai-panel-settings__section-title">Local AI Enhancement (Omnix) — on by default</div>
       <div class="ai-panel-settings__toggle">
-        <div>
-          <label class="ai-panel-settings__label" for="ai-panel-omnix">
-            Enable Omnix
-          </label>
-          <span class="ai-panel-settings__hint">
-            Adds Vision, TTS, and Director. App works fully without it via 9Router.
-          </span>
-        </div>
-        <Switch
-          id="ai-panel-omnix"
-          :model-value="omnixEnabled"
-          @update:model-value="omnixEnabled = $event"
-        />
+      <div>
+        <label class="ai-panel-settings__label" for="ai-panel-omnix">
+          Enable Omnix
+        </label>
+        <span class="ai-panel-settings__hint">
+          Adds Vision, TTS, and Director. Works immediately with no configuration.
+        </span>
+      </div>
+      <Switch
+        id="ai-panel-omnix"
+        :model-value="omnixEnabled"
+        @update:model-value="omnixEnabled = $event"
+      />
       </div>
       <div v-if="omnixEnabled" class="ai-panel-settings__toggle">
         <label class="ai-panel-settings__label" for="ai-panel-tts">

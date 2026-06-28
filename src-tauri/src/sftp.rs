@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 /// SSH connection parameters (mirrors cluster::SshCredentials so the frontend
 /// can pass the same object). Key-based auth only — no password/agent.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SftpCredentials {
     pub host: String,
     #[serde(default = "default_port")]

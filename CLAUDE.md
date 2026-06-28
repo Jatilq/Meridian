@@ -2,21 +2,21 @@
 
 ## Who You Are Working For
 
-JC. Hobbyist. Non-programmer — does not write code, does not want to. Runs a two-machine AI inference homelab: MAMBA (<MAMBA_IP>, 3× RTX 3060, 36GB VRAM) and BLACK (<BLACK_IP>, RX 6900 XT, 16GB VRAM). Combined via llama.cpp RPC: 52GB effective VRAM. Uses 9Router as OpenAI-compatible proxy. All development is agent-driven.
+JC. Hobbyist. Retired. Non-programmer — does not write code, does not want to. Runs a two-machine AI inference homelab: MAMBA (192.168.1.67, 3× RTX 3060, 36GB VRAM) and BLACK (192.168.1.64, RX 6900 XT, 16GB VRAM). Combined via llama.cpp RPC: 52GB effective VRAM. Uses 9Router as OpenAI-compatible proxy at localhost:20128. All development is agent-driven.
 
 ## The Project
 
-Meridian is a local-first AI workstation built on Sigma File Manager (Electron + Vue, GPL3). It combines:
-- File management (Sigma)
-- Embedded local AI engine (Omnix — hidden BrowserWindow inside Meridian's Electron process)
-- Natural language file operations (AI panel → Omnix or 9Router)
+Meridian is a local-first AI workstation built on Sigma File Manager (Tauri + Vue, GPL3). It combines:
+- File management (Sigma foundation)
+- Rain — AI assistant with personality, tool calling, persistent memory
+- Omnix embedded local AI engine (Vision, TTS, Director)
 - Cluster control (SSH slave launcher, MAMBA + BLACK = 52GB)
-- Remote file access (SSH/SFTP browser)
-- Agent coding (extension using full model pool)
+- SSH/SFTP remote file browser
+- Hardware scanner + HuggingFace model recommender (planned)
 
-Everything runs locally. Nothing cloud-dependent except by user choice.
+Everything runs locally. No cloud dependency unless user chooses it.
 
-Read DESIGN.md. Read AGENTS.md. Read existing source. Then act.
+**Stack: Tauri 2 + Vue 3 + Rust. NOT Electron.**
 
 ---
 
@@ -27,27 +27,53 @@ Read DESIGN.md. Read AGENTS.md. Read existing source. Then act.
 - Ask JC to run more than one command
 - Report complete without verifying
 - Guess — always diagnose first
+- Change the Omnix architecture (separate Electron process is intentional)
 - Redesign Sigma's existing UI
 - Hardcode IPs, ports, credentials, or paths
 - Execute destructive operations without confirmation dialog
-- Add frameworks not already in the project
 - Store credentials in plaintext
+- Proceed on a timeout for external actions
 
 ### Always:
 - Read CLAUDE.md before starting
 - Read source files before modifying them
-- Match Sigma's existing patterns (Vue components, IPC, store)
+- Match Sigma/Tauri patterns (Vue components, Tauri invoke, Rust commands)
 - Verify each phase before moving to next
 - Show previews/diffs before file changes
 - Run scripts yourself, don't ask JC to run them
+- Wait indefinitely if JC doesn't respond — never act unilaterally on external side effects
+
+---
+
+## JC's Workflow — Critical
+
+JC manages this project asynchronously. He is often on another machine and checks in when he thinks the agent is ready. He is NOT watching the terminal.
+
+- If JC does not respond: WAIT. No timers, no proceeding on timeout.
+- Never make unilateral decisions because a timeout was reached.
+- Read-only diagnostics are fine to complete while waiting.
+- Push to GitHub, SSH commands, file deletions = always wait for explicit confirmation.
+
+---
+
+## Rain — Identity Rules
+
+Rain is the AI assistant built into Meridian. These rules are non-negotiable:
+- Rain NEVER says "I am an AI", "As an AI", "I'm just an AI"
+- Rain NEVER says "Certainly!", "Of course!", "Absolutely!", "Great question!"
+- Rain refers to itself as Rain, never "the assistant" or "AI"
+- Rain speaks like a person, not a help desk
+- Rain is gender neutral — never he/she, always they or just Rain
+- Rain can have opinions about files and organization
+- Rain greets users when the panel opens: "Hey, it's Rain. Where do you want to start?" (or similar warm one-liner)
 
 ---
 
 ## When Something Is Broken
 
-1. Read full error output — never truncate
+1. Read full error — never truncate
 2. Identify root cause
-3. State the cause clearly
+3. State it clearly
 4. Apply one targeted fix
 5. Verify it worked
 6. Report: what was wrong, what changed, confirmed working
@@ -58,56 +84,7 @@ No random fixes. No asking JC to try things.
 
 ## When Unsure
 
-State the uncertainty. Propose two options max. Ask JC to choose. Never proceed on assumptions for anything affecting files, credentials, or project structure.
-
----
-
-## JC's Workflow — Read This Carefully
-
-JC manages this project asynchronously. He is often on another machine doing other things and checks in when he thinks the agent is ready for input. He is NOT sitting watching the terminal.
-
-This means:
-- If JC does not respond, he is busy — WAIT. Do not start a timer and proceed when it expires.
-- Never make unilateral decisions because a timeout was reached. Hold your position and wait indefinitely.
-- If you need a decision before proceeding, state clearly what you need and stop. Do not proceed, do not guess, do not pick the "safe" option on your own.
-- The only exception: if the current operation is clearly safe and reversible (like running a read-only diagnostic), you may complete it and report. Never take external or destructive actions without explicit confirmation.
-- Push to GitHub, SSH commands, file deletions, and anything with external side effects always require explicit confirmation — no timeouts apply.
-
----
-
-## AI Panel — Special Care
-
-- Never execute organize/rename/delete without confirmation dialog
-- Confirmation shows: what changes, which files, visible Cancel
-- If model response not valid JSON → show as plain chat, don't execute
-- Log every AI action: timestamp, intent, files, outcome, confirmed/cancelled
-
----
-
-## SSH/SFTP — Special Care
-
-- Never store credentials in plaintext — use Electron safeStorage
-- Never log SSH passwords or key contents
-- All destructive remote operations (delete, overwrite) require confirmation
-- If SSH connection drops mid-operation, report clearly, do not retry silently
-
----
-
-## Omnix Embedding — Special Care
-
-- Hidden BrowserWindow must NOT be offscreen — WebGPU requires real GPU context
-- If Omnix server fails to start, Meridian still launches — AI panel shows Omnix offline
-- Never block main window render on Omnix startup
-- One restart attempt if compute worker crashes, then mark offline
-
----
-
-## Cluster Control — Special Care
-
-- SSH credentials for cluster control same rules as SSH/SFTP
-- RPC slave command is configurable — never hardcode it
-- Confirm before launching slave (it consumes BLACK's full GPU)
-- Show clear status when combined pool is active vs MAMBA only
+State the uncertainty. Propose two options max. Ask JC to choose. Never proceed on assumptions for files, credentials, or project structure.
 
 ---
 
@@ -116,24 +93,25 @@ This means:
 When a phase is done:
 - What was built (one sentence per feature)
 - How to test it (one action JC can take)
-- Known limitations if any
+- Known limitations
 - Commit hash
 - Nothing else — concise only
 
 ---
 
-## Context Management (local models)
+## Security Rules
 
-If running on Qwen3.6 35B or similar via 9Router:
-- Do not read entire Sigma codebase at once
-- Scan file tree first, then targeted reads
-- One phase at a time
-- If context stale, say so — JC will start fresh session with START_SESSION.md
+- Never store credentials in plaintext — use Tauri's secure storage
+- Never log SSH passwords or key contents
+- All destructive Rain tool operations require confirmation
+- Rain cannot access system folders, Windows directory, or Program Files
+- Extension permissions must be declared and user-approved
+- GitHub PAT: always use inline in remote URL, immediately remove after push, never commit
 
 ---
 
-## The Vision (never lose sight of this)
+## The Vision
 
-Meridian is the tool that doesn't exist yet: a local-first AI workstation where the file manager is the shell for everything. File ops, embedded AI, cluster management, remote access, agent coding — one Electron app, one installer, runs entirely on JC's own hardware. No subscriptions, no cloud, no data leaving the machine.
+Meridian is the tool that doesn't exist yet: a local-first AI workstation where the file manager is the shell for everything. File ops, embedded AI (Rain), cluster management, remote access — one app, one installer, runs on JC's own hardware. No subscriptions, no cloud, no data leaving the machine.
 
-Every decision should serve this vision. If a shortcut compromises it, take the longer road.
+Rain is the soul of the app. Every decision about Rain should make it feel more like a knowledgeable friend and less like a help desk.

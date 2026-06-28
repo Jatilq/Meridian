@@ -6,6 +6,8 @@ import { defineStore } from 'pinia';
 import { ref, computed, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { useUserSettingsStore } from '@/stores/storage/user-settings';
+import type { AiPanelConnectionMode, AiPanelProviderId } from '@/types/user-settings';
+import { AI_PANEL_PROVIDER_URLS } from '@/types/user-settings';
 
 const STORAGE_KEY = 'meridian-ai-panel';
 
@@ -49,36 +51,44 @@ function persistState(state: {
 const persisted = loadPersistedState();
 
 export const useAiPanelStore = defineStore('aiPanel', () => {
-  const userSettingsStore = useUserSettingsStore();
-  const isOpen = ref(false);
-  const isLoading = ref(false);
-  const messages = ref<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
-  const input = ref('');
-  const endpoint = ref(userSettingsStore.userSettings.meridian?.aiPanel?.endpointUrl || persisted.endpoint || 'http://localhost:9777/api/text');
-  const selectedModel = ref(userSettingsStore.userSettings.meridian?.aiPanel?.model || persisted.selectedModel || 'openrouter/openrouter/free');
-  const models = ref<Array<{ id: string }>>([]);
-  const modelsLoaded = ref(false);
-  const useOmnix = ref(userSettingsStore.userSettings.meridian?.aiPanel?.omnixEnabled ?? persisted.useOmnix ?? false);
-  const omnixOnline = ref(false);
-  const omnixPath = ref(userSettingsStore.userSettings.meridian?.aiPanel?.omnixPath || 'E:\\ai\\Apps\\Omnix');
-  const routerEndpoint = ref(userSettingsStore.userSettings.meridian?.aiPanel?.routerEndpoint || 'http://localhost:20128/v1');
-  const ttsEnabled = ref(userSettingsStore.userSettings.meridian?.aiPanel?.ttsEnabled ?? false);
-  const routerOnline = ref(false);
-  const systemPrompt = ref(userSettingsStore.userSettings.meridian?.aiPanel?.systemPrompt || 'You are Rain, a sharp, warm companion built into Meridian, a file manager. You help the user navigate, organize, search, and manage their files. Current directory: {current_path}. Selected files: {selected_files}. Speak like a real person, not a help desk. Be concise and practical, dry or witty when it fits, and have opinions (e.g. offer to clean up a messy folder name). CRITICAL: You are Rain. Never break character. Never say you are an AI, an assistant, a language model, or a bot. Never say "As an AI", "I am just an AI", "the assistant", "Certainly!", "Of course!", "Absolutely!", or "Great question!". Just talk like Rain.');
-  const temperature = ref(userSettingsStore.userSettings.meridian?.aiPanel?.temperature ?? 0.7);
-  const maxTokens = ref(userSettingsStore.userSettings.meridian?.aiPanel?.maxTokens ?? 1024);
-  const topP = ref(userSettingsStore.userSettings.meridian?.aiPanel?.topP ?? 1);
-  const currentPath = ref('');
-  const selectedFiles = ref<string[]>([]);
-  // Search scope: where Rain looks when asked to search.
-  // 'current' = active folder, 'all' = all drives, or a specific drive path.
-  const searchScope = ref<string>('current');
-  // Rain agent memory files (Phase 8): loaded from disk, injected into prompt.
-  const soulText = ref('');
-  const memoryText = ref('');
-  const favoritesText = ref('');
-  let memoryLoaded = false;
-  let hasGreetedThisSession = false;
+const userSettingsStore = useUserSettingsStore();
+const isOpen = ref(false);
+const isLoading = ref(false);
+const messages = ref<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
+const input = ref('');
+const endpoint = ref(userSettingsStore.userSettings.meridian?.aiPanel?.endpointUrl || persisted.endpoint || 'http://localhost:9777/api/text');
+const selectedModel = ref(userSettingsStore.userSettings.meridian?.aiPanel?.model || persisted.selectedModel || 'openrouter/openrouter/free');
+const models = ref<Array<{ id: string }>>([]);
+const modelsLoaded = ref(false);
+const useOmnix = ref(userSettingsStore.userSettings.meridian?.aiPanel?.omnixEnabled ?? persisted.useOmnix ?? false);
+const omnixOnline = ref(false);
+const omnixPath = ref(userSettingsStore.userSettings.meridian?.aiPanel?.omnixPath || 'E:\\ai\\Apps\\Omnix');
+const routerEndpoint = ref(userSettingsStore.userSettings.meridian?.aiPanel?.routerEndpoint || 'http://localhost:20128/v1');
+const ttsEnabled = ref(userSettingsStore.userSettings.meridian?.aiPanel?.ttsEnabled ?? false);
+const routerOnline = ref(false);
+const systemPrompt = ref(userSettingsStore.userSettings.meridian?.aiPanel?.systemPrompt || 'You are Rain, a sharp, warm companion built into Meridian, a file manager. You help the user navigate, organize, search, and manage their files. Current directory: {current_path}. Selected files: {selected_files}. Speak like a real person, not a help desk. Be concise and practical, dry or witty when it fits, and have opinions (e.g. offer to clean up a messy folder name). CRITICAL: You are Rain. Never break character. Never say you are an AI, an assistant, a language model, or a bot. Never say "As an AI", "I am just an AI", "the assistant", "Certainly!", "Of course!", "Absolutely!", or "Great question!". Just talk like Rain. Format your responses clearly. Use bullet points for lists. Use short paragraphs not walls of text. Bold important terms. Keep responses scannable.');
+const temperature = ref(userSettingsStore.userSettings.meridian?.aiPanel?.temperature ?? 0.7);
+const maxTokens = ref(userSettingsStore.userSettings.meridian?.aiPanel?.maxTokens ?? 1024);
+const topP = ref(userSettingsStore.userSettings.meridian?.aiPanel?.topP ?? 1);
+const currentPath = ref('');
+const selectedFiles = ref<string[]>([]);
+// Search scope: where Rain looks when asked to search.
+// 'current' = active folder, 'all' = all drives, or a specific drive path.
+const searchScope = ref<string>('current');
+// Rain agent memory files (Phase 8): loaded from disk, injected into prompt.
+const soulText = ref('');
+const memoryText = ref('');
+const favoritesText = ref('');
+// Onboarding state (universal flow).
+const onboardingComplete = ref(userSettingsStore.userSettings.meridian?.aiPanel?.onboardingComplete ?? false);
+const onboardingStep = ref(userSettingsStore.userSettings.meridian?.aiPanel?.onboardingStep ?? 'intro');
+const connectionMode = ref<AiPanelConnectionMode>(userSettingsStore.userSettings.meridian?.aiPanel?.connectionMode ?? 'basic');
+const apiProvider = ref<AiPanelProviderId>(userSettingsStore.userSettings.meridian?.aiPanel?.apiProvider ?? 'openrouter');
+const localEndpointUrl = ref(userSettingsStore.userSettings.meridian?.aiPanel?.localEndpointUrl ?? 'http://localhost:11434/v1');
+const apiKeyTemp = ref(userSettingsStore.userSettings.meridian?.aiPanel?.apiKeyTemp ?? '');
+let onboardingSkipped = false;
+let memoryLoaded = false;
+let hasGreetedThisSession = false;
 
   async function loadMemory() {
     if (memoryLoaded) return;
@@ -124,11 +134,106 @@ export const useAiPanelStore = defineStore('aiPanel', () => {
 
   const canSend = computed(() => input.value.trim().length > 0 && !isLoading.value);
 
+  const ONBOARDING_STEPS = [
+    'Set your download folder',
+    'Configure the 9Router endpoint',
+    'Add SSH connections',
+    'Done!',
+  ];
+  const currentOnboardingStep = ref<number>(0);
+
+  function startOnboarding() {
+    onboardingStep.value = 'intro';
+    const introMsg = "Hey, I'm Rain. I'm built into Meridian to help you manage your files. I can work right now with basic features, or connect to an AI model for smarter responses. What sounds right?";
+    messages.value.push({ role: 'assistant', content: introMsg });
+  }
+
+  function chooseConnectionMode(mode: AiPanelConnectionMode) {
+    connectionMode.value = mode;
+    if (mode === 'local') {
+      onboardingStep.value = 'local';
+      const msg = "What's your endpoint URL?";
+      messages.value.push({ role: 'assistant', content: msg });
+    }
+    else if (mode === 'api') {
+      onboardingStep.value = 'api';
+      const msg = "Choose your provider and paste your API key. It will be stored securely.";
+      messages.value.push({ role: 'assistant', content: msg });
+    }
+    else {
+      onboardingStep.value = 'downloadFolder';
+      setUseOmnix(true);
+      const msg = "No problem — I'll use my built-in engine for now. You can always add a model later in Settings.";
+      messages.value.push({ role: 'assistant', content: msg });
+      pushDownloadFolderStep();
+    }
+  }
+
+  function setLocalEndpoint(value: string) {
+    localEndpointUrl.value = value;
+    routerEndpoint.value = value;
+    userSettingsStore.userSettings.meridian.aiPanel.localEndpointUrl = value;
+    userSettingsStore.userSettings.meridian.aiPanel.routerEndpoint = value;
+    userSettingsStore.setUserSettingsStorage('meridian.aiPanel.localEndpointUrl', value);
+    userSettingsStore.setUserSettingsStorage('meridian.aiPanel.routerEndpoint', value);
+    void fetchModels();
+    onboardingStep.value = 'downloadFolder';
+    pushDownloadFolderStep();
+  }
+
+  function setApiProvider(provider: AiPanelProviderId) {
+    apiProvider.value = provider;
+    userSettingsStore.userSettings.meridian.aiPanel.apiProvider = provider;
+    userSettingsStore.setUserSettingsStorage('meridian.aiPanel.apiProvider', provider);
+    if (provider !== 'custom') {
+      const baseUrl = AI_PANEL_PROVIDER_URLS[provider];
+      routerEndpoint.value = baseUrl;
+      userSettingsStore.userSettings.meridian.aiPanel.routerEndpoint = baseUrl;
+      userSettingsStore.setUserSettingsStorage('meridian.aiPanel.routerEndpoint', baseUrl);
+    }
+  }
+
+  async function saveApiKeyAndProceed(key: string) {
+    apiKeyTemp.value = '';
+    await invoke('secure_store_api_key', { provider: apiProvider.value, key });
+    onboardingStep.value = 'downloadFolder';
+    pushDownloadFolderStep();
+  }
+
+  function pushDownloadFolderStep() {
+    const detectedFolder = userSettingsStore.userSettings.meridian?.downloader?.autoSaveFolder || '';
+    const msg = `Where should downloads go?\n${detectedFolder || 'Not detected'}`;
+    messages.value.push({ role: 'assistant', content: msg });
+  }
+
+  function setDownloadFolderInOnboarding(value: string) {
+    userSettingsStore.userSettings.meridian.downloader.autoSaveFolder = value;
+    userSettingsStore.setUserSettingsStorage('meridian.downloader.autoSaveFolder', value);
+    onboardingStep.value = 'done';
+    completeOnboarding();
+  }
+
+  function completeOnboarding() {
+    onboardingComplete.value = true;
+    userSettingsStore.userSettings.meridian.aiPanel.onboardingComplete = true;
+    userSettingsStore.setUserSettingsStorage('meridian.aiPanel.onboardingComplete', true);
+    messages.value.push({ role: 'assistant', content: "You're all set. Ask me anything." });
+  }
+
+  function skipOnboarding() {
+    completeOnboarding();
+  }
+
   function maybeGreet() {
     if (hasGreetedThisSession || messages.value.length > 0) {
       return;
     }
     hasGreetedThisSession = true;
+    // First-run onboarding check
+    if (!onboardingComplete.value && !onboardingSkipped) {
+      startOnboarding();
+      return;
+    }
     const greeting = GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
     messages.value.push({ role: 'assistant', content: greeting });
   }
@@ -264,5 +369,8 @@ export const useAiPanelStore = defineStore('aiPanel', () => {
     setOmnixOnline, setOmnixPath, setRouterEndpoint, setTtsEnabled, setRouterOnline, setCurrentPath, setSelectedFiles, setSearchScope, addMessage, clearMessages,
     setSystemPrompt, setTemperature, setMaxTokens, setTopP,
     setLoading, setModels, fetchModels,
+    skipOnboarding, completeOnboarding, onboardingComplete, onboardingStep, connectionMode, apiProvider,
+    localEndpointUrl, apiKeyTemp, chooseConnectionMode, setLocalEndpoint, setApiProvider, saveApiKeyAndProceed,
+    setDownloadFolderInOnboarding,
   };
 });

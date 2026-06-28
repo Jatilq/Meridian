@@ -12,7 +12,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/toaster';
 import { InfusionWrapper } from '@/components/ui/infusion';
-import { ChangelogDialog } from '@/modules/changelog';
+import { ChangelogDialog, WhatsNewDialog } from '@/modules/changelog';
 import { PageIframeLayout } from '@/layouts';
 import { useUserSettingsStore } from '@/stores/storage/user-settings';
 import { useEmbedPages } from '@/modules/extensions/composables/use-embed-pages';
@@ -42,6 +42,7 @@ onMounted(() => {
     <InfusionWrapper />
     <Toaster />
     <ChangelogDialog />
+    <WhatsNewDialog />
     <ExtensionDialog />
     <CommandPalette />
     <ExtensionModalsContainer />

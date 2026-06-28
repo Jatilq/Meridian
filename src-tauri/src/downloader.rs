@@ -70,6 +70,7 @@ pub struct DownloadItem {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
 pub enum DownloadStatus {
     Pending,
     Downloading,

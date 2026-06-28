@@ -15,6 +15,7 @@ mod sftp;
 mod rain_memory;
 mod rain_tools;
 mod rain_log;
+mod secure_keys;
 mod dir_reader;
 mod dir_size;
 mod dir_watcher;
@@ -419,6 +420,9 @@ pub fn run() {
             rain_tools::rain_tool_schemas,
             rain_tools::rain_run_tool,
             rain_log::rain_log_tool_call,
+            secure_keys::secure_store_api_key,
+            secure_keys::secure_get_api_key,
+            secure_keys::secure_delete_api_key,
         ])
         .setup(setup_handler)
         .on_window_event(|window, event| {

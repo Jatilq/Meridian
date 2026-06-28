@@ -16,17 +16,17 @@ use russh::client;
 use russh::keys::key;
 use serde::{Deserialize, Serialize};
 
-/// GPU stats for one device, parsed from nvidia-smi / rocm-smi output.
+/// GPU stats for one device, parsed from nvidia-smi / rocm-smi / WMI output.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GpuStat {
     pub index: u32,
     pub name: String,
-    pub utilization: u32,    // percent
+    pub utilization: u32,    // percent (0 if unavailable)
     #[serde(rename = "memoryUsed")]
     pub memory_used: u64,    // MB
     #[serde(rename = "memoryTotal")]
     pub memory_total: u64,   // MB
-    pub temperature: u32,    // celsius
+    pub temperature: u32,    // celsius (0 if unavailable)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,6 +67,7 @@ pub struct HardwareSnapshot {
 
 /// SSH connection parameters supplied by the frontend (from encrypted store).
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SshCredentials {
     pub host: String,
     #[serde(default = "default_port")]

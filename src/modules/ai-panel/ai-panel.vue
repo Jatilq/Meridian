@@ -8,6 +8,7 @@ import { computed, watch, nextTick, ref, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useAiPanelStore } from '@/stores/runtime/ai-panel';
 import { useUserSettingsStore } from '@/stores/storage/user-settings';
+import type { AiPanelProviderId } from '@/types/user-settings';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -28,11 +29,40 @@ import {
   XIcon,
 } from '@lucide/vue';
 import { invoke } from '@tauri-apps/api/core';
+import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { toast } from '@/components/ui/toaster';
+import { marked } from 'marked';
 
 const { t } = useI18n();
 const aiPanelStore = useAiPanelStore();
 const userSettingsStore = useUserSettingsStore();
+
+const onboardingInputValue = ref('');
+const onboardingApiKey = ref('');
+
+const showOnboardingControls = computed(() => {
+  if (aiPanelStore.onboardingComplete) return false;
+  const step = aiPanelStore.onboardingStep;
+  return step === 'intro' || step === 'local' || step === 'api' || step === 'downloadFolder';
+});
+
+const showIntroButtons = computed(() => aiPanelStore.onboardingStep === 'intro' && !aiPanelStore.onboardingComplete);
+const showLocalInput = computed(() => aiPanelStore.onboardingStep === 'local' && !aiPanelStore.onboardingComplete);
+const showApiInput = computed(() => aiPanelStore.onboardingStep === 'api' && !aiPanelStore.onboardingComplete);
+const showDownloadFolderInput = computed(() => aiPanelStore.onboardingStep === 'downloadFolder' && !aiPanelStore.onboardingComplete);
+
+const detectedDownloadFolder = computed(() => userSettingsStore.userSettings.meridian?.downloader?.autoSaveFolder || '');
+
+// Render assistant markdown to HTML (bold, lists, line breaks, etc.).
+marked.setOptions({ breaks: true, gfm: true });
+function renderMarkdown(text: string): string {
+  try {
+    return marked.parse(text ?? '') as string;
+  }
+  catch {
+    return text ?? '';
+  }
+}
 
 // Drives available as explicit search-scope targets (loaded on demand).
 const scopeDrives = ref<string[]>([]);
@@ -379,6 +409,31 @@ async function handleSend() {
   const prompt = aiPanelStore.input.trim();
   if (!prompt || aiPanelStore.isLoading) return;
 
+  // During onboarding, typed input answers the current step.
+  if (!aiPanelStore.onboardingComplete) {
+    const step = aiPanelStore.onboardingStep;
+    if (step === 'intro') {
+      aiPanelStore.addMessage('assistant', "Pick one of the options above to continue, or type skip to start with basic features.");
+      aiPanelStore.setInput('');
+      return;
+    }
+    if (step === 'local') {
+      aiPanelStore.setLocalEndpoint(prompt || 'http://localhost:11434/v1');
+      aiPanelStore.setInput('');
+      return;
+    }
+    if (step === 'api') {
+      await aiPanelStore.saveApiKeyAndProceed(prompt);
+      aiPanelStore.setInput('');
+      return;
+    }
+    if (step === 'downloadFolder') {
+      aiPanelStore.setDownloadFolderInOnboarding(prompt || detectedDownloadFolder.value);
+      aiPanelStore.setInput('');
+      return;
+    }
+  }
+
   aiPanelStore.addMessage('user', prompt);
   aiPanelStore.setInput('');
   aiPanelStore.setLoading(true);
@@ -442,7 +497,7 @@ async function handleSend() {
     else {
       // Text inference -> 9Router via the Rain agent loop (tool calling).
       if (!routerBase) {
-        throw new Error('9Router endpoint not configured. Set it in Settings.');
+        throw new Error('Local AI server endpoint not configured. Set it in Settings.');
       }
       const finalText = await runAgentLoop(routerBase, model, systemPrompt, prompt);
       aiPanelStore.addMessage('assistant', finalText);
@@ -544,6 +599,18 @@ function handleKeyDown(event: KeyboardEvent) {
   }
 }
 
+async function pickDownloadFolder() {
+  try {
+    const selected = await openDialog({ directory: true, multiple: false });
+    if (selected && typeof selected === 'string') {
+      onboardingInputValue.value = selected;
+    }
+  }
+  catch {
+    // ignore dialog errors
+  }
+}
+
 async function checkOmnixStatus() {
   if (aiPanelStore.useOmnix) {
     try {
@@ -554,7 +621,7 @@ async function checkOmnixStatus() {
       aiPanelStore.setOmnixOnline(false);
     }
   }
-  // 9Router health (text inference backend) — probe /v1/models.
+  // local AI server health (text inference backend) — probe /v1/models.
   const routerBase = (aiPanelStore.routerEndpoint || '').replace(/\/+$/, '');
   if (routerBase) {
     try {
@@ -675,7 +742,12 @@ const confirmDescription = computed(() => confirmDialogData.value?.description |
           <div class="ai-panel__message-role">
             {{ msg.role === 'user' ? t('aiPanel.you') : t('aiPanel.assistant') }}
           </div>
-          <div class="ai-panel__message-content">{{ msg.content }}</div>
+          <div
+            v-if="msg.role === 'assistant'"
+            class="ai-panel__message-content ai-panel__message-content--markdown"
+            v-html="renderMarkdown(msg.content)"
+          />
+          <div v-else class="ai-panel__message-content">{{ msg.content }}</div>
         </div>
         <div v-if="aiPanelStore.messages.length === 0" class="ai-panel__placeholder">
           {{ t('aiPanel.placeholder') }}
@@ -749,10 +821,126 @@ const confirmDescription = computed(() => confirmDialogData.value?.description |
           <CheckIcon :size="14" />
           {{ t('common.confirm') }}
         </Button>
+      <div
+        v-if="!aiPanelStore.onboardingComplete && aiPanelStore.messages.length > 0 && aiPanelStore.messages[0].content.includes('built into Meridian')"
+        class="ai-panel__onboarding-skip"
+      >
+        <Button variant="ghost" size="sm" @click="aiPanelStore.skipOnboarding()">
+          Skip
+        </Button>
       </div>
-    </div>
 
-    <Dialog :open="confirmDialogOpen" @update:open="confirmDialogOpen = $event">
+      <!-- Universal onboarding controls -->
+      <div v-if="showOnboardingControls" class="ai-panel__onboarding">
+        <!-- Step 1: choose path -->
+        <div v-if="showIntroButtons" class="ai-panel__onboarding-row">
+          <Button
+            variant="secondary"
+            size="sm"
+            class="ai-panel__onboarding-button"
+            @click="aiPanelStore.chooseConnectionMode('local')"
+          >
+            I have a local AI server
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            class="ai-panel__onboarding-button"
+            @click="aiPanelStore.chooseConnectionMode('api')"
+          >
+            I have an API key
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            class="ai-panel__onboarding-button"
+            @click="aiPanelStore.chooseConnectionMode('basic')"
+          >
+            Start with basic features
+          </Button>
+        </div>
+
+        <!-- Step 2a: local endpoint -->
+        <div v-if="showLocalInput" class="ai-panel__onboarding-column">
+          <Input
+            v-model="onboardingInputValue"
+            placeholder="http://localhost:11434/v1"
+            class="ai-panel__onboarding-input"
+            @keydown="(e: KeyboardEvent) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); aiPanelStore.setLocalEndpoint(onboardingInputValue || 'http://localhost:11434/v1'); onboardingInputValue = ''; } }"
+          />
+          <Button
+            size="sm"
+            class="ai-panel__onboarding-confirm"
+            @click="aiPanelStore.setLocalEndpoint(onboardingInputValue || 'http://localhost:11434/v1'); onboardingInputValue = ''"
+          >
+            Connect
+          </Button>
+        </div>
+
+        <!-- Step 2b: API provider + key -->
+        <div v-if="showApiInput" class="ai-panel__onboarding-column">
+          <select
+            :value="aiPanelStore.apiProvider"
+            class="ai-panel__onboarding-select"
+            @change="aiPanelStore.setApiProvider(($event.target as HTMLSelectElement).value as AiPanelProviderId)"
+          >
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="openrouter">OpenRouter</option>
+            <option value="groq">Groq</option>
+            <option value="custom">Custom</option>
+          </select>
+          <Input
+            v-if="aiPanelStore.apiProvider === 'custom'"
+            v-model="onboardingInputValue"
+            placeholder="https://api.example.com/v1"
+            class="ai-panel__onboarding-input"
+          />
+          <Input
+            v-model="onboardingApiKey"
+            type="password"
+            placeholder="Paste API key"
+            class="ai-panel__onboarding-input"
+            @keydown="(e: KeyboardEvent) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); aiPanelStore.saveApiKeyAndProceed(onboardingApiKey); onboardingApiKey = ''; } }"
+          />
+          <Button
+            size="sm"
+            class="ai-panel__onboarding-confirm"
+            @click="aiPanelStore.saveApiKeyAndProceed(onboardingApiKey); onboardingApiKey = ''"
+          >
+            Save securely and continue
+          </Button>
+        </div>
+
+        <!-- Step 3: download folder -->
+        <div v-if="showDownloadFolderInput" class="ai-panel__onboarding-column">
+          <div class="ai-panel__onboarding-folder-row">
+            <Input
+              v-model="onboardingInputValue"
+              :placeholder="detectedDownloadFolder || 'Select download folder'"
+              class="ai-panel__onboarding-input"
+              @keydown="(e: KeyboardEvent) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); aiPanelStore.setDownloadFolderInOnboarding(onboardingInputValue || detectedDownloadFolder); onboardingInputValue = ''; } }"
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              class="ai-panel__onboarding-folder-button"
+              @click="pickDownloadFolder"
+            >
+              ...
+            </Button>
+          </div>
+          <Button
+            size="sm"
+            class="ai-panel__onboarding-confirm"
+            @click="aiPanelStore.setDownloadFolderInOnboarding(onboardingInputValue || detectedDownloadFolder); onboardingInputValue = ''"
+          >
+            Save
+          </Button>
+        </div>
+      </div>
+
+      <Dialog :open="confirmDialogOpen" @update:open="confirmDialogOpen = $event">
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{{ confirmTitle }}</DialogTitle>
@@ -913,6 +1101,79 @@ const confirmDescription = computed(() => confirmDialogData.value?.description |
   color: hsl(var(--foreground));
 }
 
+/* Rendered markdown in Rain's responses — scannable, dark-theme styled. */
+.ai-panel__message-content--markdown :deep(p) {
+  margin: 0 0 0.5em;
+}
+
+.ai-panel__message-content--markdown :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.ai-panel__message-content--markdown :deep(ul),
+.ai-panel__message-content--markdown :deep(ol) {
+  margin: 0.4em 0;
+  padding-left: 1.25em;
+}
+
+.ai-panel__message-content--markdown :deep(li) {
+  margin: 0.2em 0;
+}
+
+.ai-panel__message-content--markdown :deep(li > ul),
+.ai-panel__message-content--markdown :deep(li > ol) {
+  margin: 0.2em 0;
+}
+
+.ai-panel__message-content--markdown :deep(strong),
+.ai-panel__message-content--markdown :deep(b) {
+  color: #c9a84c;
+  font-weight: 600;
+}
+
+.ai-panel__message-content--markdown :deep(a) {
+  color: #c9a84c;
+  text-decoration: underline;
+}
+
+.ai-panel__message-content--markdown :deep(h1),
+.ai-panel__message-content--markdown :deep(h2),
+.ai-panel__message-content--markdown :deep(h3),
+.ai-panel__message-content--markdown :deep(h4) {
+  margin: 0.6em 0 0.3em;
+  font-size: 1em;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+
+.ai-panel__message-content--markdown :deep(code) {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background-color: hsl(var(--background) / 60%);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.9em;
+}
+
+.ai-panel__message-content--markdown :deep(pre) {
+  margin: 0.5em 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background-color: hsl(var(--background) / 60%);
+  overflow-x: auto;
+}
+
+.ai-panel__message-content--markdown :deep(pre code) {
+  padding: 0;
+  background: none;
+}
+
+.ai-panel__message-content--markdown :deep(blockquote) {
+  margin: 0.5em 0;
+  padding-left: 0.75em;
+  border-left: 2px solid hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+}
+
 .ai-panel__confirm-card {
   display: flex;
   flex-direction: column;
@@ -1002,5 +1263,70 @@ const confirmDescription = computed(() => confirmDialogData.value?.description |
 
 .animate-spin {
   animation: spin 1s linear infinite;
+}
+
+.ai-panel__onboarding-skip {
+  padding: 0 8px 8px;
+}
+
+.ai-panel__onboarding {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 10px 10px;
+  border-top: 1px solid hsl(var(--border) / 50%);
+  padding-top: 10px;
+}
+
+.ai-panel__onboarding-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ai-panel__onboarding-column {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ai-panel__onboarding-button {
+  flex: 1 1 auto;
+  min-width: 120px;
+}
+
+.ai-panel__onboarding-input {
+  width: 100%;
+}
+
+.ai-panel__onboarding-select {
+  width: 100%;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-size: 12px;
+  outline: none;
+}
+
+.ai-panel__onboarding-select:focus {
+  border-color: hsl(var(--ring));
+}
+
+.ai-panel__onboarding-confirm {
+  align-self: flex-start;
+}
+
+.ai-panel__onboarding-folder-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.ai-panel__onboarding-folder-button {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
 }
 </style>

@@ -1,12 +1,13 @@
 {
   "app": {
-    "name": "Sigma File Manager",
-    "description": "is a free, open source, advanced, modern file manager app, licensed under GNU GPLv3 or later.",
-    "copyright": "Copyright © 2021 - present Aleksey Hoffman. All rights reserved."
+    "name": "Meridian",
+    "description": "is a local-first AI workstation built on Sigma File Manager, licensed under GNU GPLv3 or later.",
+    "copyright": "Copyright © 2021 - present Aleksey Hoffman. All rights reserved.",
+    "builtOn": "Built on Sigma File Manager by Aleksey Hoffman — github.com/aleksey-hoffman/sigma-file-manager"
   },
   "aiPanel": {
     "title": "Rain",
-    "endpointPlaceholder": "Endpoint URL (e.g. http://localhost:9777)",
+    "endpointPlaceholder": "Endpoint URL (e.g. http://localhost:11434/v1)",
     "endpointUrl": "Endpoint URL",
     "model": "Model",
     "omnixEnabled": "Use Omnix",
@@ -31,12 +32,29 @@
     "renamed": "Files renamed",
     "confirmDeleteTitle": "Delete files?",
     "confirmDeleteDescription": "Delete {count} item(s)?",
-    "deleted": "Files deleted"
+    "deleted": "Files deleted",
+    "onboarding": {
+      "intro": "Hey, I'm Rain. I'm built into Meridian to help you manage your files. I can work right now with basic features, or connect to an AI model for smarter responses. What sounds right?",
+      "localServer": "I have a local AI server",
+      "apiKey": "I have an API key",
+      "basicFeatures": "Start with basic features",
+      "localEndpoint": "What's your endpoint URL?",
+      "apiIntro": "Choose your provider and paste your API key. It will be stored securely.",
+      "apiKeyPlaceholder": "Paste API key",
+      "saveApiKey": "Save securely and continue",
+      "basicIntro": "No problem — I'll use my built-in engine for now. You can always add a model later in Settings.",
+      "downloadFolder": "Where should downloads go?",
+      "done": "You're all set. Ask me anything.",
+      "skip": "Skip",
+      "connect": "Connect"
+    }
   },
   "downloader": {
     "title": "Downloader",
     "urlPlaceholder": "Paste a URL to download…",
     "add": "Add",
+    "test": "Test",
+    "testTooltip": "Enqueue a known small public MP4 to verify downloads work",
     "queue": "Queue",
     "history": "History",
     "emptyQueue": "No active downloads",
@@ -479,7 +497,7 @@
     },
     "experimental": {
       "defaultFileManager": {
-        "title": "Set Sigma File Manager as the default file manager",
+        "title": "Set Meridian as the default file manager",
         "description": "This option modifies the system registry and can have unexpected side effects on your device. Continue at your own risk."
       }
     },
@@ -1074,7 +1092,40 @@
     "showOnUpdate": "Show changelog on app update",
     "viewChangelog": "View changelog",
     "current": "Current",
-    "selectVersion": "Select version"
+    "selectVersion": "Select version",
+    "whatsNew": {
+      "badge": "Meridian v{version}",
+      "title": "Welcome to Meridian",
+      "description": "Your local-first AI workstation is ready. Here's what's new in this release.",
+      "viewFullChangelog": "View full changelog",
+      "gotIt": "Got it"
+    },
+    "feature": {
+      "rain": {
+        "title": "Rain — AI assistant built in",
+        "description": "A warm, capable companion that helps you search, organize, and manage your files."
+      },
+      "cluster": {
+        "title": "Cluster Control — multi-node GPU pooling",
+        "description": "Pool VRAM across MAMBA, BLACK, and any worker you add over SSH."
+      },
+      "sftp": {
+        "title": "SSH/SFTP Browser — remote machines as local drives",
+        "description": "Browse, transfer, and manage remote filesystems right next to local panes."
+      },
+      "downloader": {
+        "title": "Smart Downloader — yt-dlp powered",
+        "description": "Queue downloads with pause, resume, cancel, and browser-extension capture."
+      },
+      "vision": {
+        "title": "Vision & TTS — Omnix powered",
+        "description": "Analyze selected images and speak responses with local Omnix inference."
+      },
+      "agent": {
+        "title": "Agent Mode — Rain can act",
+        "description": "Move, rename, and delete files through natural-language commands with confirmation cards."
+      }
+    }
   },
   "extensions": {
     "subtitle": "Browse and manage extensions from the community",

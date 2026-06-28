@@ -2,7 +2,7 @@
 
 ## Project Owner
 
-JC. Hobbyist. Non-programmer. All development is agent-driven. Does not write code, edit files manually, or run multi-step command sequences. Agents do everything.
+JC. Hobbyist. Retired. Non-programmer. All development is agent-driven. Does not write code, edit files manually, or run multi-step command sequences.
 
 ## Golden Rules
 
@@ -13,17 +13,18 @@ JC. Hobbyist. Non-programmer. All development is agent-driven. Does not write co
 5. No destructive file operations without preview and confirmation
 6. Do not modify Sigma's existing code unless required for integration
 7. Read before writing — always read relevant source files first
+8. Never proceed on timeout — wait indefinitely for JC on external actions
 
 ---
 
 ## Stack
 
-- **Base:** Sigma File Manager (Electron + Vue 3)
-- **AI Engine:** Omnix (embedded as hidden BrowserWindow in Meridian's Electron process)
+- **Base:** Sigma File Manager (Tauri 2 + Vue 3 + Rust) — NOT Electron
+- **AI Engine:** Omnix (separate hidden Electron process — DO NOT CHANGE)
 - **Heavy AI:** 9Router OpenAI-compatible proxy → MAMBA/BLACK
-- **SSH/SFTP:** Node `ssh2` library
-- **Cluster:** llama.cpp RPC slave via SSH
-- **Database:** SQLite (meridian.db — AI logs, download queue, SSH connections)
+- **SSH/SFTP:** russh crate in Rust backend
+- **Cluster:** llama.cpp RPC via SSH
+- **Database:** SQLite (meridian.db — AI logs, download queue, SSH connections, tool call log)
 - **Extensions:** Sigma's existing extension system
 
 ---
@@ -31,159 +32,155 @@ JC. Hobbyist. Non-programmer. All development is agent-driven. Does not write co
 ## Phase 0 — Always Do This First
 
 1. Read CLAUDE.md
-2. Read DESIGN.md
-3. Scan project tree (exclude node_modules, .git, dist, target):
-   `dir E:\ai\Projects\Meridian\ /s /b | findstr /v "node_modules" | findstr /v ".git" | findstr /v "\dist\" | findstr /v "\target\"`
-4. Identify current phase
-5. Read only files relevant to current task
+2. Read SESSION_HANDOFF.md
+3. Read DESIGN.md
+4. Scan project tree (exclude node_modules, .git, dist, target)
+5. Check `git log origin/main..HEAD` for unpushed commits
+6. Identify current task
+7. Read only files relevant to current task
 
 ---
 
-## Phase 5 — Omnix Embedded (PRIORITY — replaces previous spawn approach)
+## COMPLETED PHASES (do not re-implement)
 
-### Architecture
-Omnix runs INSIDE Meridian's Electron process. Not spawned separately.
-
-### Steps
-1. Read Meridian's Electron main process entry point (check package.json main field)
-2. Read `E:\ai\Apps\Omnix\electron\main.js` completely
-3. Read `E:\ai\Apps\Omnix\server.ts` completely
-4. Read `E:\ai\Apps\Omnix\src\` or equivalent compute worker entry point
-5. In Meridian's main process:
-   - Import and start Omnix's Express server (port 9777)
-   - Create hidden BrowserWindow that loads Omnix's compute worker HTML
-   - BrowserWindow: `show: false`, `webPreferences: { offscreen: false }` (must be non-offscreen for WebGPU)
-6. Remove or disable old omnix.rs spawn/kill commands (keep get_omnix_status — still useful)
-7. Add startup health check: poll `/api/health` until green before marking Omnix ready
-8. Test: launch Meridian, confirm `/api/health` → 200, send test prompt to `/api/text`, confirm inference response
-9. Test vision: select an image file in Meridian, send query, confirm `/api/vision` response
-
-**Completion check:** Meridian launches, Omnix health shows green, text and vision queries return real responses.
+### ✅ Phase 1 — Sigma Foundation
+### ✅ Phase 2 — Rain AI Panel (with personality, greeting, scope selector)
+### ✅ Phase 3 — Enhanced Downloader (yt-dlp, parallel chunks, browser extension)
+### ✅ Phase 4 — Settings Panel
+### ✅ Phase 5 — Omnix Integration (Vision, TTS, Director)
+### ✅ Phase 6 — Cluster Control Panel (live hardware, SSH, Launch RPC Slave)
+### ✅ Phase 7 — SSH/SFTP File Browser (remote panes, drag transfer)
+### ✅ Phase 8 — Rain Agent Upgrade (tool calling, memory files, confirmation cards)
 
 ---
 
-## Phase 6 — Cluster Control Panel
+## CURRENT TASKS (pre-Phase 9)
 
-### Steps
-1. Add cluster control icon to Sigma's left sidebar (below extensions icon)
-2. Build ClusterControl Vue component (see DESIGN.md layout)
-3. Add SSH client in Electron main process using `ssh2` npm package
-4. Tauri → Electron IPC: commands for `check_node_status`, `launch_rpc_slave`, `get_gpu_stats`
-5. `check_node_status`: SSH to MAMBA/BLACK, run `nvidia-smi` or `rocm-smi`, parse output
-6. `launch_rpc_slave`: SSH to BLACK, run llama.cpp RPC slave command (configurable in settings)
-7. `get_gpu_stats`: parse GPU utilization and VRAM usage from smi output
-8. Poll node status every 30 seconds, update Vue store
-9. 9Router endpoint status: GET configured endpoint `/v1/models`, show model list
-10. Add Cluster section to Meridian settings (IPs, SSH credentials, RPC command)
-11. Model launch configuration (Option 2 from AI panel work): the Cluster Control
-    panel is where llama.cpp model-LOAD parameters belong, because they take
-    effect when the model is launched/reloaded — NOT per-request (Meridian is an
-    OpenAI API client and cannot set these per-query). When launching/reloading a
-    model from Cluster Control, pass these to llama.cpp via the RPC/launch command:
-    - **GPU split** across MAMBA's 3 GPUs → `--tensor-split` / `--n-gpu-layers`
-    - **Context size** → `--ctx-size`
-    - **KV cache type** → `--cache-type-k` / `--cache-type-v`
-    Expose them as fields in the Cluster model-launch config, substituted into the
-    configurable launch command string. (Per-request params — system prompt,
-    temperature, max tokens, top-p — already live in AI panel settings.)
+### Task 1 — Serde Audit
+Check all frontend→Rust IPC structs for camelCase/snake_case mismatch.
+Pattern: frontend Vue sends camelCase, Rust expects snake_case unless `#[serde(rename_all = "camelCase")]` is present.
+Known fixed: SshCredentials in cluster.rs. Check: SftpCredentials, any other structs receiving Vue data.
+Fix: add `#[serde(rename_all = "camelCase")]` where missing.
+Verify: cargo check clean.
+Commit: `fix: serde camelCase audit`
 
-**Completion check:** Panel shows MAMBA and BLACK status, Launch Slave button SSHs to BLACK and starts RPC, combined VRAM shows 52GB.
+### Task 2 — Default Download Folder
+Auto-detect on first run only (don't override saved settings).
+Check order: E:\Downloads → C:\Users\jatilq\Downloads → create E:\Downloads if neither exists.
+Set as default in downloader settings.
+Commit: `feat: auto-detect default download folder`
 
----
-
-## Phase 7 — SSH / SFTP File Browser
-
-### Steps
-1. Read how Sigma's file pane loads directory listings (the list_directory Rust command or equivalent)
-2. Add SSH connection manager in Electron main (ssh2 SFTP subsystem)
-3. Add SSH bookmarks to bookmarks sidebar: MAMBA and BLACK pre-configured
-4. When SSH bookmark clicked: open SFTP session, list remote directory, populate pane
-5. Remote pane: same Vue component as local pane, different data source
-6. File operations over SFTP: copy, move, rename, delete, new folder
-7. Drag between local and remote panes: upload/download via SFTP
-8. Breadcrumb shows `ssh://hostname/path` for remote panes
-9. Add SSH connections section to Meridian settings
-
-**Completion check:** Click MAMBA bookmark, remote filesystem loads in pane, can copy file from MAMBA to local.
-
----
-
-## Phase 8 — Rain Agent Upgrade (tools + memory)
-
-### Goal
-Upgrade the EXISTING Rain AI panel (Phase 5: `src/modules/ai-panel/ai-panel.vue` +
-`src/stores/runtime/ai-panel.ts`) from a chat assistant into an **agent with tool
-calling and persistent memory**. This is NOT a new extension — it extends the Rain
-that already exists. Build on the current handleSend pipeline, system prompt, and
-9Router/Omnix routing.
-
-### Personality + memory files
-Three markdown files in the user's app data directory (same dir as `meridian.db`;
-resolve via Tauri `appDataDir()`):
-- **SOUL.md** — fixed personality/identity. User may edit; Rain NEVER auto-modifies it.
-- **MEMORY.md** — mutable long-term memory. Rain APPENDS autonomously (no confirmation)
-  when it learns something useful. Rain must NEVER delete/rewrite entries without
-  explicit user confirmation.
-- **FAVORITES.md** — paths/models/preferences Rain notices used repeatedly. Auto-updated.
-
-On startup: seed any missing file from a bundled default (SOUL.md = Rain's base
-personality; MEMORY.md / FAVORITES.md start with a header only). All three are injected
-into Rain's system prompt context at request time.
-
-### Tools (OpenAI-style function calling via 9Router)
-Transport: OpenAI `tools`/`tool_calls` in the 9Router chat-completion request. Agent
-mode REQUIRES a tool-call-capable model (e.g. Qwen3.6+). Settings must flag clearly
-when the selected model does not support tool calls. Each tool is a Tauri command
-(reuse dir_reader/sftp/selection commands); tools work on local AND ssh:// paths.
-1. `list_directory(path)` — read directory listing (read-only, immediate)
-2. `read_file(path)` — read file contents (read-only, immediate)
-3. `search_files(query, scope)` — search across scope (current/all/specific drive) (immediate)
-4. `create_folder(path)` — create directory (non-destructive, immediate, NO confirmation)
-5. `move_files(src, dest)` — move (CONFIRMATION REQUIRED)
-6. `rename_item(old, new)` — rename (CONFIRMATION REQUIRED)
-7. `delete_item(path)` — delete (CONFIRMATION REQUIRED; default to RECYCLE BIN not
-   permanent; show exactly what will be deleted, warn if folder has contents)
-
-### Confirmation flow
-- Read-only + create_folder execute immediately.
-- move/rename/delete render a confirmation card in the Rain panel showing the exact
-  operation (src→dest, old→new, or delete target + contents warning) with Confirm/Cancel.
-- Every tool call is logged to SQLite (timestamp, tool, args, outcome, confirmed/cancelled).
-
-### Agent loop (in handleSend)
-1. User message → Rain (system prompt includes SOUL.md + MEMORY.md + FAVORITES.md +
-   current_path/selected_files/scope).
-2. Model may return tool_calls → execute read-only immediately, or show confirmation
-   for destructive ones.
-3. Tool results feed back into the model; loop until a final text answer.
-4. Hard cap: MAX 10 tool iterations per turn (prevent runaway loops).
-5. After the turn, Rain may append to MEMORY.md / FAVORITES.md if it learned something.
-
-### Model routing
-Agent/tool tasks → 9Router (tool-capable model). Omnix stays for lightweight chat/
-vision/TTS. Default `openrouter/openrouter/free` may not support function calling —
-surface a tool-capable model requirement in settings.
-
-**Completion check:** Ask Rain "what's in my Downloads folder?" → it calls
-`list_directory` and answers from real data. Ask "rename report.txt to final.txt" →
-confirmation card → confirm → file renamed. Rain appends a note to MEMORY.md when it
-learns a preference.
+### Task 3 — Rain First-Run Onboarding
+Trigger: no settings saved yet (first launch detection).
+Rain message: "Hey, I'm Rain. Looks like this is your first time here — want me to walk you through a few basics?"
+4 steps (all skippable):
+1. Set download folder (pre-filled with auto-detected)
+2. Configure 9Router endpoint (pre-filled: http://localhost:20128/v1)
+3. Add SSH connections (MAMBA/BLACK pre-filled with standard values)
+4. Done message from Rain
+Always visible Skip button. Never blocks the app.
+Commit: `feat: Rain first-run onboarding`
 
 ---
 
 ## Phase 9 — Package & Installer
 
-### Steps
-1. Verify all phases complete and working
-2. Bundle Omnix files into Electron's `resources/` directory
-3. Bundle yt-dlp binary into resources
-4. Configure electron-builder (check existing build config)
-5. Build Windows installer: `npm run build` or `npm run electron:build` (check package.json)
-6. Test installer on clean path
-7. Create Start Menu shortcut (included in installer)
-8. Write final README with any user setup steps
+1. Read Tauri's bundler documentation (check tauri.conf.json existing bundle config)
+2. Add Omnix to bundle resources (the full E:\ai\Apps\Omnix directory or built output)
+3. Verify yt-dlp is in bundle (src-tauri/binaries/ — already there)
+4. Configure Windows installer in tauri.conf.json (productName, identifier, version)
+5. Build: `npm run tauri build`
+6. Test installer on a clean path
+7. Verify Start Menu shortcut created
+8. Update README with user setup instructions
 
-**Completion check:** Installer runs, Meridian installs to Program Files, launches with all features working, Omnix embedded and functional.
+**Completion check:** Double-click installer, Meridian installs, launches, Rain greets, 9Router panel shows.
+
+---
+
+## Phase 10 — Hardware Scanner + HuggingFace Model Recommender
+
+1. Build hardware scan command in Rust using sysinfo + nvidia-smi/rocm-smi (reuse Cluster Control code)
+2. Add BLACK's hardware via SSH (already wired in cluster.rs)
+3. Build HuggingFace API client — search models by:
+   - Max VRAM available (local + RPC slave if active)
+   - Max RAM available
+   - Trusted quantizers: Bartowski, Unsloth, MaziyarPanahi, LoneStriker
+   - Min quant: Q4_K_M — filter out IQ1/IQ2/IQ3 and non-standard quants
+4. Build Hardware Scanner Vue panel (new sidebar icon or in Cluster Control)
+5. Show: detected hardware → recommended models → download button (via yt-dlp or HF API)
+6. Download goes through Meridian's existing downloader queue
+
+**Completion check:** Open Hardware Scanner → sees 3× RTX 3060 + RX 6900 XT → recommends models that fit 52GB → click download → appears in downloader queue.
+
+---
+
+## Phase 11 — Backend Manager (NEW — IMPORTANT)
+
+### Vision
+Meridian manages the entire local AI inference stack. No command line needed. Install Meridian → download backend → load model → inference ready.
+
+### New Panel: Backend Manager
+New sidebar icon. Shows available backends:
+
+| Backend | Variants | Notes |
+|---|---|---|
+| llama.cpp | CPU, CUDA, ROCm/Vulkan | Primary target |
+| llamafile | Universal | Simplest, single exe |
+| koboldcpp | CUDA, ROCm | Popular alternative |
+
+### Per-backend UI
+- Status: Not installed / Installed / Running / Stopped
+- Download button (auto-selects correct variant for detected GPU)
+- Version info + Update button
+- Start/Stop controls
+- Port configuration
+- Active model display
+
+### Download logic
+1. Read GPU vendor from Cluster Control hardware data (already available)
+2. NVIDIA → download CUDA build
+3. AMD → download ROCm/Vulkan build  
+4. No GPU detected → download CPU build
+5. Save to `E:\ai\Apps\backends\<backend-name>\`
+6. Verify binary after download (checksum if available)
+
+### RPC Slave Auto-Setup (killer feature)
+When user clicks "Setup BLACK as RPC Slave":
+1. Check if llama.cpp RPC server binary exists locally
+2. If not, download it first
+3. SFTP copy the rpc-server binary to BLACK (use existing SFTP infrastructure)
+4. SSH to BLACK: start rpc-server: `./rpc-server --host 0.0.0.0 --port 50052`
+5. Update Cluster Control to show RPC slave active
+6. Combined VRAM updates to 52GB
+7. 9Router gains access to expanded pool
+
+### Update/Upgrade Slave
+- Download new binary locally
+- SFTP to BLACK (replaces old binary)
+- SSH restart: kill old rpc-server, start new one
+- Show version before/after
+
+### rpc_manager integration
+- https://github.com/arseniy0924/rpc_manager is the orchestration tool
+- Meridian should be able to launch rpc_manager as a managed process
+- rpc_manager handles backend selection for the slave automatically
+- Clone rpc_manager to `E:\ai\Apps\rpc_manager\` if not present
+- Launch/monitor/stop rpc_manager from Backend Manager panel
+
+### Model Management (basic)
+- Scan `E:\ai\Models\` for GGUF files
+- List models with size and estimated quant type
+- Load model into active backend with one click
+- Show currently loaded model per backend
+- Unload / swap model
+
+### Integration Points
+- Cluster Control: "Launch RPC Slave" button calls Backend Manager's RPC setup
+- Hardware Scanner: recommended models link to Backend Manager download
+- 9Router: Backend Manager informs which local backends are running + their ports
+
+**Completion check:** Open Backend Manager → Download llama.cpp CUDA → Start it → Load Qwen3.6 35B → Cluster Control shows model loaded → 9Router can route to it.
 
 ---
 
@@ -293,42 +290,43 @@ Make Meridian self-contained: a single panel where users can **download, install
 
 ## Technical Rules
 
-### Electron Patterns
-- Match Sigma's existing IPC patterns exactly
-- Use existing Vuex/Pinia store — add modules, don't replace
-- New npm packages: check if `ssh2` already present; if not, install it
-- Hidden BrowserWindow for Omnix: must NOT be offscreen (WebGPU requires real GPU context)
+### Tauri/Vue Patterns
+- All Tauri commands: `#[tauri::command]` in Rust, `invoke()` in Vue
+- ALL frontend→Rust structs must have `#[serde(rename_all = "camelCase")]`
+- Use existing Vuex/Pinia store patterns
+- Match Sigma's existing Vue component structure
 
 ### SSH/SFTP
-- Use `ssh2` npm package in main process only — not renderer
-- All SFTP operations via IPC
-- Store SSH credentials encrypted (use Electron's safeStorage API)
-- Never log credentials
+- Use russh crate (already in Cargo.toml)
+- Key: `C:\Users\jatilq\.ssh\meridian_black`
+- Never store credentials in plaintext
+- All destructive remote operations need confirmation
 
-### Omnix Integration
-- Omnix Express server must start before main window is shown OR start concurrently and handle "not ready" state gracefully
-- Hidden BrowserWindow must stay alive as long as Meridian is open
-- If Omnix compute worker crashes, attempt restart once before marking offline
+### Rain Agent
+- Tool calls via OpenAI function calling spec
+- Max 10 iterations per turn
+- Read-only tools: immediate execution
+- Destructive tools: confirmation card first
+- All tool calls logged to rain_tool_log in meridian.db
 
-### Agent Coding Extension
-- Coding tasks always use 9Router, never Omnix
-- Always show diff before writing files
-- Never write to files without confirmation
+### Security
+- No hardcoded IPs, ports, credentials
+- No plaintext credential storage
+- GitHub PAT: inline in remote URL only, scrub immediately after push, never echo
+- Rain cannot access system folders or Windows directory
 
 ---
 
 ## Hardware Reference
 
-| Machine | IP | GPU | VRAM | Role |
-|---|---|---|---|---|
-| MAMBA | <MAMBA_IP> | 3× RTX 3060 | 36GB | Primary inference, headless |
-| BLACK | <BLACK_IP> | RX 6900 XT | 16GB | Daily driver, RPC slave |
-| Combined | — | — | 52GB | Large model inference |
-| 9Router | MAMBA:PORT | — | — | OpenAI proxy |
-| Omnix | embedded | WebGPU | — | Lightweight local AI |
+| Machine | IP | CPU | GPU | VRAM | RAM |
+|---|---|---|---|---|---|
+| MAMBA | 192.168.1.67 | Xeon E5-2697v4 36c | 3× RTX 3060 | 36GB | 256GB |
+| BLACK | 192.168.1.64 | Ryzen 9 5950X 16c | RX 6900 XT | 16GB | 64GB |
+| Combined | — | — | — | 52GB | 320GB |
 
-## SSH Access
-
-- MAMBA username: `jatilq`
-- BLACK username: `jatilq`
-- Credentials stored in Meridian settings (encrypted)
+9Router: `http://localhost:20128/v1`
+Omnix: `http://localhost:9777`
+Models: `E:\ai\Models\`
+Apps: `E:\ai\Apps\`
+Backends: `E:\ai\Apps\backends\` (Phase 11)

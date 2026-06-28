@@ -100,6 +100,7 @@ function parseFeature(title: string, content: string): ReleaseFeature {
 const releasesEn = parseChangelog(changelogContentEn);
 const releases = ref<Release[]>(releasesEn);
 const isOpen = ref(false);
+const isWhatsNewOpen = ref(false);
 const appVersion = ref<string>('');
 const isInitialized = ref(false);
 const loadedLocale = ref<string>('en');
@@ -204,6 +205,14 @@ export function useChangelog() {
     isOpen.value = false;
   }
 
+  function openWhatsNew() {
+    isWhatsNewOpen.value = true;
+  }
+
+  function closeWhatsNew() {
+    isWhatsNewOpen.value = false;
+  }
+
   async function markAsSeen() {
     if (appVersion.value) {
       await userSettingsStore.set('changelog.lastSeenVersion', appVersion.value);
@@ -214,13 +223,14 @@ export function useChangelog() {
     await init();
 
     if (shouldAutoShow.value && hasUnseenUpdate.value) {
-      open();
+      openWhatsNew();
       await markAsSeen();
     }
   }
 
   return {
     isOpen,
+    isWhatsNewOpen,
     appVersion,
     releases,
     currentRelease,
@@ -229,6 +239,8 @@ export function useChangelog() {
     init,
     open,
     close,
+    openWhatsNew,
+    closeWhatsNew,
     markAsSeen,
     checkAndShowChangelog,
   };

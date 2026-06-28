@@ -16,7 +16,7 @@ import {
 import { BUILTIN_NAVIGATOR_ICON_THEME_IDS } from '@/types/icon-theme';
 
 export const USER_SETTINGS_SCHEMA_VERSION_KEY = '__schemaVersion';
-export const USER_SETTINGS_SCHEMA_VERSION = 21;
+export const USER_SETTINGS_SCHEMA_VERSION = 23;
 
 export const DEFAULT_GLOBAL_SEARCH_IGNORED_PATHS = [
   '/node_modules',
@@ -435,7 +435,7 @@ async function migrateUserSettingsStep(storage: StorageAdapter, fromVersion: num
     await setDefaultStringIfMissing(storage, 'meridian.aiPanel.routerEndpoint', 'http://localhost:20128/v1');
     await setDefaultStringIfMissing(storage, 'meridian.aiPanel.model', 'openrouter/openrouter/free');
     await setDefaultBooleanIfMissing(storage, 'meridian.aiPanel.ttsEnabled', false);
-    await setDefaultStringIfMissing(storage, 'meridian.aiPanel.systemPrompt', 'You are Rain, a sharp, warm companion built into Meridian, a file manager. You help the user navigate, organize, search, and manage their files. Current directory: {current_path}. Selected files: {selected_files}. Speak like a real person, not a help desk. Be concise and practical, dry or witty when it fits, and have opinions (e.g. offer to clean up a messy folder name). CRITICAL: You are Rain. Never break character. Never say you are an AI, an assistant, a language model, or a bot. Never say "As an AI", "I am just an AI", "the assistant", "Certainly!", "Of course!", "Absolutely!", or "Great question!". Just talk like Rain.');
+    await setDefaultStringIfMissing(storage, 'meridian.aiPanel.systemPrompt', 'You are Rain, a sharp, warm companion built into Meridian, a file manager. You help the user navigate, organize, search, and manage their files. Current directory: {current_path}. Selected files: {selected_files}. Speak like a real person, not a help desk. Be concise and practical, dry or witty when it fits, and have opinions (e.g. offer to clean up a messy folder name). CRITICAL: You are Rain. Never break character. Never say you are an AI, an assistant, a language model, or a bot. Never say "As an AI", "I am just an AI", "the assistant", "Certainly!", "Of course!", "Absolutely!", or "Great question!". Just talk like Rain. Format your responses clearly. Use bullet points for lists. Use short paragraphs not walls of text. Bold important terms. Keep responses scannable.');
     await setDefaultNumberIfMissing(storage, 'meridian.aiPanel.temperature', 0.7);
     await setDefaultNumberIfMissing(storage, 'meridian.aiPanel.maxTokens', 1024);
     await setDefaultNumberIfMissing(storage, 'meridian.aiPanel.topP', 1);
@@ -448,6 +448,42 @@ async function migrateUserSettingsStep(storage: StorageAdapter, fromVersion: num
       { host: '192.168.1.67', label: 'MAMBA', port: 22, username: 'jatilq', keyPath: 'C:\\Users\\jatilq\\.ssh\\meridian_black' },
       { host: '192.168.1.64', label: 'BLACK', port: 22, username: 'jatilq', keyPath: 'C:\\Users\\jatilq\\.ssh\\meridian_black' },
     ] as unknown as Record<string, unknown>);
+  }
+
+  if (fromVersion === 21 && toVersion === 22) {
+    // Auto-detect default download folder on first run.
+    // Priority: E:\Downloads > C:\Users\jatilq\Downloads > create E:\Downloads
+    const existingFolder = await storage.get<string>('meridian.downloader.autoSaveFolder');
+    const isMissing = typeof existingFolder !== 'string' || existingFolder.trim() === '';
+
+    if (isMissing) {
+      const candidatePaths = ['E:\\Downloads', 'C:\\Users\\jatilq\\Downloads'];
+      let detectedFolder = '';
+
+      for (const candidate of candidatePaths) {
+        try {
+          const exists = await invoke<boolean>('path_exists', { path: candidate });
+          if (exists) {
+            detectedFolder = candidate;
+            break;
+          }
+        } catch {
+          // ignore errors during detection
+        }
+      }
+
+      // If neither exists, create E:\Downloads
+      if (!detectedFolder) {
+        try {
+          await invoke('ensure_directory', { directoryPath: 'E:\\Downloads' });
+          detectedFolder = 'E:\\Downloads';
+        } catch {
+          // creation failed, leave as empty string
+        }
+      }
+
+      await storage.set('meridian.downloader.autoSaveFolder', detectedFolder);
+    }
   }
 
   if (fromVersion === 6 && toVersion === 7) {
@@ -471,7 +507,16 @@ async function migrateUserSettingsStep(storage: StorageAdapter, fromVersion: num
     }
   }
 
-  void storage;
+  if (fromVersion === 22 && toVersion === 23) {
+    // Universal onboarding v2: enable Omnix by default, add onboarding flow keys,
+    // and migrate existing installs to connection-mode-aware defaults.
+    await setDefaultStringIfMissing(storage, 'meridian.aiPanel.localEndpointUrl', 'http://localhost:11434/v1');
+    await setDefaultStringIfMissing(storage, 'meridian.aiPanel.apiProvider', 'openrouter');
+    await setDefaultStringIfMissing(storage, 'meridian.aiPanel.connectionMode', 'basic');
+    await setDefaultStringIfMissing(storage, 'meridian.aiPanel.onboardingStep', 'intro');
+    await setDefaultStringIfMissing(storage, 'meridian.aiPanel.apiKeyTemp', '');
+    await setDefaultBooleanIfMissing(storage, 'meridian.aiPanel.omnixEnabled', true);
+  }
 }
 
 async function addDefaultGlobalSearchIgnoredPaths(
