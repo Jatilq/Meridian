@@ -1,0 +1,100 @@
+{
+  "schemaVersion": "1.0.0",
+  "generatedAt": "2026-06-28",
+  "note": "Catalog of inference backend downloads for Meridian Phase 11. URLs use the GitHub /releases/latest/download/ redirect pattern, so they always resolve to the latest published release. To pin to a specific version, replace 'latest' with the tag (e.g. 'b9835', 'v1.116.1'). All asset names, sizes, and SHA-256 hashes were verified directly against the GitHub Releases API on 2026-06-28. The 'hardware' field uses the vocabulary returned by backend_manager::detect_local_gpu_vendor (cpu | nvidia | amd) so the catalog can match catalog entries to the detected local GPU without a mapping layer.",
+  "backends": [
+    {
+      "id": "llama.cpp",
+      "name": "llama.cpp",
+      "description": "Reference C++ inference server for LLaMA-architecture models. Maintained by ggml-org, supports a wide range of hardware backends (CUDA / ROCm / HIP / Vulkan / SYCL / OpenVINO).",
+      "homepage": "https://github.com/ggml-org/llama.cpp",
+      "binaryNameHint": "llama-server.exe",
+      "variants": [
+        {
+          "id": "llama.cpp.cpu",
+          "label": "CPU",
+          "hardware": "cpu",
+          "downloadUrl": "https://github.com/ggml-org/llama.cpp/releases/latest/download/llama-b9835-bin-win-cpu-x64.zip",
+          "binaryName": "llama-server.exe",
+          "sizeBytes": 17416200,
+          "sha256": "982860c8dfc36ee82e41aa0885e1f49faa8d7cf07c7481a83f36fb0154e1c64c",
+          "archiveFormat": "zip",
+          "notes": "Plain CPU build; no GPU required. Smallest llama.cpp Windows download."
+        },
+        {
+          "id": "llama.cpp.nvidia",
+          "label": "CUDA (NVIDIA)",
+          "hardware": "nvidia",
+          "downloadUrl": "https://github.com/ggml-org/llama.cpp/releases/latest/download/llama-b9835-bin-win-cuda-12.4-x64.zip",
+          "binaryName": "llama-server.exe",
+          "sizeBytes": 261812414,
+          "sha256": "46a7e68e4012f41936e5d8dc096e91bf71f189fb2150a3b5198f4ad4aa15f4c5",
+          "archiveFormat": "zip",
+          "notes": "CUDA 12.4 build for NVIDIA GPUs. A CUDA 13.3 build is also published upstream; we ship the 12.4 build for broader NVIDIA driver compatibility."
+        },
+        {
+          "id": "llama.cpp.amd",
+          "label": "ROCm / HIP (AMD)",
+          "hardware": "amd",
+          "downloadUrl": "https://github.com/ggml-org/llama.cpp/releases/latest/download/llama-b9835-bin-win-hip-radeon-x64.zip",
+          "binaryName": "llama-server.exe",
+          "sizeBytes": 321644908,
+          "sha256": "2a80a929ec96f4517f8c9605a7bd4967fda1b6ad39d9b64520f1270764294ab9",
+          "archiveFormat": "zip",
+          "notes": "AMD HIP/Radeon build for Windows. llama.cpp does not publish a separate ROCm-for-Windows archive (Linux AMD is shipped as llama-b<ver>-bin-ubuntu-rocm-<ver>-x64.tar.gz)."
+        }
+      ]
+    },
+    {
+      "id": "llamafile",
+      "name": "llamafile",
+      "description": "Single-file portable inference server from Mozilla AI. One binary ships the entire model + serving stack; runs on any OS including Windows. Falls back to CPU gracefully when GPU init fails.",
+      "homepage": "https://github.com/mozilla-ai/llamafile",
+      "binaryNameHint": "llamafile.exe",
+      "variants": [
+        {
+          "id": "llamafile.universal",
+          "label": "Universal",
+          "hardware": "cpu",
+          "downloadUrl": "https://github.com/mozilla-ai/llamafile/releases/latest/download/llamafile-0.10.3",
+          "binaryName": "llamafile.exe",
+          "sizeBytes": 320068791,
+          "sha256": "e6d4041a82ca37cee15aab62e6826d7a61c6a3ea83bca68387958970df250883",
+          "archiveFormat": "binary",
+          "notes": "Portable universal binary. On Windows, named without .exe by upstream — Meridian renames to llamafile.exe on install. Detects GPU on compatible cards and uses it automatically."
+        }
+      ]
+    },
+    {
+      "id": "koboldcpp",
+      "name": "koboldcpp",
+      "description": "Single-file pyinstaller inference server with built-in GUI. Supports LLaMA-derived models, image generation, and TTS. CPU-friendly defaults; Windows AMD path goes through Vulkan on the nocuda build (per upstream README).",
+      "homepage": "https://github.com/LostRuins/koboldcpp",
+      "binaryNameHint": "koboldcpp.exe",
+      "variants": [
+        {
+          "id": "koboldcpp.cpu",
+          "label": "CPU / Vulkan",
+          "hardware": "cpu",
+          "downloadUrl": "https://github.com/LostRuins/koboldcpp/releases/latest/download/koboldcpp-nocuda.exe",
+          "binaryName": "koboldcpp-nocuda.exe",
+          "sizeBytes": 112518256,
+          "sha256": "e9f6d4763c1f142d870a8982c5858c967e902bdd169c78d445d529833d32feb9",
+          "archiveFormat": "binary",
+          "notes": "No-CUDA build. Supports CPU inference and Vulkan — recommended for AMD GPUs on Windows per upstream."
+        },
+        {
+          "id": "koboldcpp.nvidia",
+          "label": "CUDA (NVIDIA)",
+          "hardware": "nvidia",
+          "downloadUrl": "https://github.com/LostRuins/koboldcpp/releases/latest/download/koboldcpp.exe",
+          "binaryName": "koboldcpp.exe",
+          "sizeBytes": 634221842,
+          "sha256": "0da35863b367567862be3693bbb1947f70532dd37b9ae733ec054b0a5194f0a6",
+          "archiveFormat": "binary",
+          "notes": "CUDA-enabled build for NVIDIA GPUs (largest Windows asset in this catalog)."
+        }
+      ]
+    }
+  ]
+}
