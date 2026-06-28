@@ -48,13 +48,21 @@ Completed:
 
 ---
 
-## Phase 10 — Hardware Scanner + HuggingFace Recommender
+## Phase 10 — Hardware Scanner + HuggingFace Recommender ✅ DONE
 
-Scan all nodes' hardware (data available from Cluster Control) → query HuggingFace for models fitting combined VRAM pool.
+- Hardware Scanner in sidebar (`/hardware` route)
+- Combined VRAM display from local machine
+- HuggingFace API search for GGUF models
+- Download integration via Meridian downloader queue
 
 ---
 
-## Phase 11 — Backend Manager
+## Phase 11 — Backend Manager (ready to implement)
+
+New sidebar panel showing:
+- llama.cpp, llamafile, koboldcpp variants
+- Status, Download, Start/Stop, Port, Active Model per backend
+- RPC Slave Auto-Setup (copies binary to worker via SFTP)
 
 New sidebar panel:
 - llama.cpp, llamafile, koboldcpp variants

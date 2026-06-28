@@ -5,6 +5,7 @@
 import HomePage from '@/modules/home/pages/home.vue';
 import {
   BlocksIcon, FolderClosedIcon, HomeIcon, BookmarkIcon, ServerIcon, SettingsIcon, XIcon,
+  ZapIcon,
 } from '@lucide/vue';
 import type { RouteRecordRaw } from 'vue-router';
 
@@ -53,6 +54,12 @@ export const routes: Array<RouteRecordRaw & { icon: typeof XIcon }> = [
     name: 'cluster',
     icon: ServerIcon,
     component: () => import('@/modules/cluster/pages/cluster.vue'),
+  },
+  {
+    path: '/hardware',
+    name: 'hardware',
+    icon: ZapIcon,
+    component: () => import('@/modules/hardware/pages/hardware.vue'),
   },
   {
     path: '/settings',
