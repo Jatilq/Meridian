@@ -1,5 +1,7 @@
 # Meridian — Design Document
 
+> **PHASES 1-10 COMPLETE. Current work is Phase 11 Backend Manager. Do not re-implement completed phases.**
+
 ## Core Philosophy
 
 Meridian is a local-first AI workstation built on Sigma File Manager. Do not redesign Sigma. Add to it. Every new component must match Sigma's existing dark aesthetic exactly — same colors, fonts, spacing, border radius.
@@ -22,27 +24,19 @@ All new Meridian UI matches this aesthetic exactly.
 
 ---
 
-## Component 1: Omnix Embedded Engine
+## Component 1: Omnix Engine
 
-### Architecture Change (critical)
-Omnix does NOT run as a separate spawned process. It runs INSIDE Meridian's Electron main process:
-- Omnix's `server.ts` Express API starts when Meridian starts
-- A hidden `BrowserWindow` loads Omnix's compute worker renderer (provides WebGPU for model inference)
-- All models including large ones have full WebGPU access through Meridian's own renderer
-- No separate Omnix install, no spawn/kill complexity, no process management
+### Architecture
+Omnix runs as a **separate Electron process** spawned by Meridian. This is the final, intentional architecture:
+- `omnix.rs` spawns Omnix's own Electron runtime from `resources/omnix/`
+- Omnix's Express server listens on port 9777
+- The AI panel polls `/api/health` for status; vision/TTS/director calls go over HTTP
+- No hidden BrowserWindow, no embedded webview — process isolation is required for Omnix's WebGPU compute worker
 
-### Startup Sequence
-1. Meridian Electron main process starts
-2. Main window loads (Sigma UI)
-3. Hidden BrowserWindow created → loads Omnix compute worker
-4. Omnix Express server starts on port 9777
-5. AI panel polls `/api/health` → status dot updates
-6. Ready
-
-### Settings (simplified from previous design)
+### Settings
 - Enable/disable Omnix toggle (default: on)
 - Model selector (populated from Omnix's available models)
-- No path config needed — Omnix is bundled
+- Path config optional — Omnix is bundled in `resources/omnix/`
 
 ---
 
@@ -52,7 +46,7 @@ Omnix does NOT run as a separate spawned process. It runs INSIDE Meridian's Elec
 Collapsible right-side panel. Toggle with `Ctrl+Space`. Independent of info panel.
 
 ### Modes
-- **Omnix mode** — calls `localhost:9777` — lightweight, always available, embedded
+- **Omnix mode** — calls `localhost:9777` (separate Electron process) — lightweight, always available
 - **9Router mode** — calls configured endpoint — full model pool, requires MAMBA
 
 ### Components
@@ -268,11 +262,18 @@ Pre-configured for MAMBA and BLACK. User can add more in settings.
 - ✅ Phase 2 — AI Panel
 - ✅ Phase 3 — Enhanced Downloader
 - ✅ Phase 4 — Settings
-- 🔄 Phase 5 — Omnix embedded (architectural change: hidden BrowserWindow, not spawn)
-- ⬜ Phase 6 — Cluster Control Panel
-- ⬜ Phase 7 — SSH/SFTP File Browser
-- ⬜ Phase 8 — Agent Coding Extension
-- ⬜ Phase 9 — Package & installer (bundle Omnix, sign, Start Menu)
+- ✅ Phase 5 — Omnix engine (separate Electron process, bundled)
+- ✅ Phase 6 — Cluster Control Panel (live hardware, SSH, topology map)
+- ✅ Phase 7 — SSH/SFTP File Browser
+- ✅ Phase 8 — Rain Agent (tools + memory + onboarding)
+- ✅ Phase 9 — Package & installer (Omnix bundled, Windows installer built)
+- ✅ Phase 10 — Hardware Scanner + HuggingFace Recommender
+- 🔄 Phase 11 — Backend Manager
+
+---
+
+## Phase 11 — Backend Manager
+(Ready to implement — details to be determined during planning)
 
 ---
 
