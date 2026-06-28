@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "Sigma File Manager",
+  "productName": "Meridian",
   "version": "../package.json",
-  "identifier": "com.sigma-file-manager.app",
+  "identifier": "com.meridian.app",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Sigma File Manager",
+        "title": "Meridian",
         "width": 1280,
         "height": 720,
         "minWidth": 500,
@@ -28,7 +28,7 @@
       },
       {
         "label": "quick-view",
-        "title": "Sigma File Manager | Quick View",
+        "title": "Meridian | Quick View",
         "width": 1280,
         "height": 720,
         "minWidth": 300,
@@ -42,7 +42,7 @@
       },
       {
         "label": "print-view",
-        "title": "Sigma File Manager | Print",
+        "title": "Meridian | Print",
         "width": 1280,
         "height": 720,
         "minWidth": 300,

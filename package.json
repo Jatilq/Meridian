@@ -1,5 +1,6 @@
 {
-  "name": "sigma-file-manager",
+  "name": "meridian",
+  "description": "Local-first AI workstation built on Sigma File Manager",
   "version": "2.1.1",
   "private": true,
   "type": "module",

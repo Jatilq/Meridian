@@ -18,6 +18,7 @@ const { t } = useI18n();
         <strong>"{{ t('app.name') }}"</strong>
         {{ t('app.description') }}
         <br>{{ t('app.copyright') }}
+        <br><span class="settings-header__credit">{{ t('app.builtOn') }}</span>
       </p>
     </div>
   </div>
@@ -46,6 +47,13 @@ const { t } = useI18n();
   margin: 0;
   color: hsl(var(--muted-foreground));
   font-size: 0.875rem;
+}
+
+.settings-header__credit {
+  display: inline-block;
+  margin-top: 0.25rem;
+  font-size: 0.8125rem;
+  opacity: 0.85;
 }
 
 @media (width <= 768px) {
