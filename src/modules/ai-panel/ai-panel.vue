@@ -29,9 +29,21 @@ import {
 } from '@lucide/vue';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from '@/components/ui/toaster';
+import { marked } from 'marked';
 
 const { t } = useI18n();
 const aiPanelStore = useAiPanelStore();
+
+// Render assistant markdown to HTML (bold, lists, line breaks, etc.).
+marked.setOptions({ breaks: true, gfm: true });
+function renderMarkdown(text: string): string {
+  try {
+    return marked.parse(text ?? '', { async: false }) as string;
+  }
+  catch {
+    return text ?? '';
+  }
+}
 const userSettingsStore = useUserSettingsStore();
 
 // Drives available as explicit search-scope targets (loaded on demand).
@@ -675,7 +687,12 @@ const confirmDescription = computed(() => confirmDialogData.value?.description |
           <div class="ai-panel__message-role">
             {{ msg.role === 'user' ? t('aiPanel.you') : t('aiPanel.assistant') }}
           </div>
-          <div class="ai-panel__message-content">{{ msg.content }}</div>
+          <div
+            v-if="msg.role === 'assistant'"
+            class="ai-panel__message-content ai-panel__message-content--markdown"
+            v-html="renderMarkdown(msg.content)"
+          />
+          <div v-else class="ai-panel__message-content">{{ msg.content }}</div>
         </div>
         <div v-if="aiPanelStore.messages.length === 0" class="ai-panel__placeholder">
           {{ t('aiPanel.placeholder') }}
@@ -911,6 +928,79 @@ const confirmDescription = computed(() => confirmDialogData.value?.description |
 .ai-panel__message--assistant .ai-panel__message-content {
   background-color: hsl(var(--secondary));
   color: hsl(var(--foreground));
+}
+
+/* Rendered markdown in Rain's responses — scannable, dark-theme styled. */
+.ai-panel__message-content--markdown :deep(p) {
+  margin: 0 0 0.5em;
+}
+
+.ai-panel__message-content--markdown :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.ai-panel__message-content--markdown :deep(ul),
+.ai-panel__message-content--markdown :deep(ol) {
+  margin: 0.4em 0;
+  padding-left: 1.25em;
+}
+
+.ai-panel__message-content--markdown :deep(li) {
+  margin: 0.2em 0;
+}
+
+.ai-panel__message-content--markdown :deep(li > ul),
+.ai-panel__message-content--markdown :deep(li > ol) {
+  margin: 0.2em 0;
+}
+
+.ai-panel__message-content--markdown :deep(strong),
+.ai-panel__message-content--markdown :deep(b) {
+  color: #c9a84c;
+  font-weight: 600;
+}
+
+.ai-panel__message-content--markdown :deep(a) {
+  color: #c9a84c;
+  text-decoration: underline;
+}
+
+.ai-panel__message-content--markdown :deep(h1),
+.ai-panel__message-content--markdown :deep(h2),
+.ai-panel__message-content--markdown :deep(h3),
+.ai-panel__message-content--markdown :deep(h4) {
+  margin: 0.6em 0 0.3em;
+  font-size: 1em;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+
+.ai-panel__message-content--markdown :deep(code) {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background-color: hsl(var(--background) / 60%);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.9em;
+}
+
+.ai-panel__message-content--markdown :deep(pre) {
+  margin: 0.5em 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background-color: hsl(var(--background) / 60%);
+  overflow-x: auto;
+}
+
+.ai-panel__message-content--markdown :deep(pre code) {
+  padding: 0;
+  background: none;
+}
+
+.ai-panel__message-content--markdown :deep(blockquote) {
+  margin: 0.5em 0;
+  padding-left: 0.75em;
+  border-left: 2px solid hsl(var(--border));
+  color: hsl(var(--muted-foreground));
 }
 
 .ai-panel__confirm-card {
