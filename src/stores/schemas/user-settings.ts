@@ -16,7 +16,7 @@ import {
 import { BUILTIN_NAVIGATOR_ICON_THEME_IDS } from '@/types/icon-theme';
 
 export const USER_SETTINGS_SCHEMA_VERSION_KEY = '__schemaVersion';
-export const USER_SETTINGS_SCHEMA_VERSION = 22;
+export const USER_SETTINGS_SCHEMA_VERSION = 23;
 
 export const DEFAULT_GLOBAL_SEARCH_IGNORED_PATHS = [
   '/node_modules',
@@ -507,7 +507,16 @@ async function migrateUserSettingsStep(storage: StorageAdapter, fromVersion: num
     }
   }
 
-  void storage;
+  if (fromVersion === 22 && toVersion === 23) {
+    // Universal onboarding v2: enable Omnix by default, add onboarding flow keys,
+    // and migrate existing installs to connection-mode-aware defaults.
+    await setDefaultStringIfMissing(storage, 'meridian.aiPanel.localEndpointUrl', 'http://localhost:11434/v1');
+    await setDefaultStringIfMissing(storage, 'meridian.aiPanel.apiProvider', 'openrouter');
+    await setDefaultStringIfMissing(storage, 'meridian.aiPanel.connectionMode', 'basic');
+    await setDefaultStringIfMissing(storage, 'meridian.aiPanel.onboardingStep', 'intro');
+    await setDefaultStringIfMissing(storage, 'meridian.aiPanel.apiKeyTemp', '');
+    await setDefaultBooleanIfMissing(storage, 'meridian.aiPanel.omnixEnabled', true);
+  }
 }
 
 async function addDefaultGlobalSearchIgnoredPaths(

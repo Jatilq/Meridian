@@ -7,7 +7,7 @@
   },
   "aiPanel": {
     "title": "Rain",
-    "endpointPlaceholder": "Endpoint URL (e.g. http://localhost:9777)",
+    "endpointPlaceholder": "Endpoint URL (e.g. http://localhost:11434/v1)",
     "endpointUrl": "Endpoint URL",
     "model": "Model",
     "omnixEnabled": "Use Omnix",
@@ -32,7 +32,22 @@
     "renamed": "Files renamed",
     "confirmDeleteTitle": "Delete files?",
     "confirmDeleteDescription": "Delete {count} item(s)?",
-    "deleted": "Files deleted"
+    "deleted": "Files deleted",
+    "onboarding": {
+      "intro": "Hey, I'm Rain. I'm built into Meridian to help you manage your files. I can work right now with basic features, or connect to an AI model for smarter responses. What sounds right?",
+      "localServer": "I have a local AI server",
+      "apiKey": "I have an API key",
+      "basicFeatures": "Start with basic features",
+      "localEndpoint": "What's your endpoint URL?",
+      "apiIntro": "Choose your provider and paste your API key. It will be stored securely.",
+      "apiKeyPlaceholder": "Paste API key",
+      "saveApiKey": "Save securely and continue",
+      "basicIntro": "No problem — I'll use my built-in engine for now. You can always add a model later in Settings.",
+      "downloadFolder": "Where should downloads go?",
+      "done": "You're all set. Ask me anything.",
+      "skip": "Skip",
+      "connect": "Connect"
+    }
   },
   "downloader": {
     "title": "Downloader",

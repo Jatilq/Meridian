@@ -6,6 +6,10 @@ Copyright © 2021 - present Aleksey Hoffman. All rights reserved.
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+import { useUserSettingsStore } from '@/stores/storage/user-settings';
+
+const userSettingsStore = useUserSettingsStore();
+const sshConnections = computed(() => userSettingsStore.userSettings.meridian?.sshConnections ?? []);
 
 interface GpuStat {
   index: number;
@@ -77,22 +81,6 @@ const nodeDefs = computed<NodeDef[]>(() => {
       host: c.host,
       role: 'Worker node',
       local: false,
-    });
-  });
-
-  return nodes;
-});
-  }
-
-  // Other connections are remote
-  conns.filter(c => c.label !== 'MAMBA').forEach(c => {
-    nodes.push({
-      id: c.host,
-      name: c.label || c.host,
-      host: c.host,
-      role: 'Worker node',
-      local: false,
-      vendor: 'nvidia', // default, could be detected
     });
   });
 

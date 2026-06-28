@@ -6,6 +6,8 @@ import { defineStore } from 'pinia';
 import { ref, computed, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { useUserSettingsStore } from '@/stores/storage/user-settings';
+import type { AiPanelConnectionMode, AiPanelProviderId } from '@/types/user-settings';
+import { AI_PANEL_PROVIDER_URLS } from '@/types/user-settings';
 
 const STORAGE_KEY = 'meridian-ai-panel';
 
@@ -77,8 +79,13 @@ const searchScope = ref<string>('current');
 const soulText = ref('');
 const memoryText = ref('');
 const favoritesText = ref('');
-// Onboarding state (Task 3).
+// Onboarding state (universal flow).
 const onboardingComplete = ref(userSettingsStore.userSettings.meridian?.aiPanel?.onboardingComplete ?? false);
+const onboardingStep = ref(userSettingsStore.userSettings.meridian?.aiPanel?.onboardingStep ?? 'intro');
+const connectionMode = ref<AiPanelConnectionMode>(userSettingsStore.userSettings.meridian?.aiPanel?.connectionMode ?? 'basic');
+const apiProvider = ref<AiPanelProviderId>(userSettingsStore.userSettings.meridian?.aiPanel?.apiProvider ?? 'openrouter');
+const localEndpointUrl = ref(userSettingsStore.userSettings.meridian?.aiPanel?.localEndpointUrl ?? 'http://localhost:11434/v1');
+const apiKeyTemp = ref(userSettingsStore.userSettings.meridian?.aiPanel?.apiKeyTemp ?? '');
 let onboardingSkipped = false;
 let memoryLoaded = false;
 let hasGreetedThisSession = false;
@@ -136,20 +143,84 @@ let hasGreetedThisSession = false;
   const currentOnboardingStep = ref<number>(0);
 
   function startOnboarding() {
-    if (onboardingComplete.value || onboardingSkipped) return;
+    onboardingStep.value = 'intro';
+    const introMsg = "Hey, I'm Rain. I'm built into Meridian to help you manage your files. I can work right now with basic features, or connect to an AI model for smarter responses. What sounds right?";
+    messages.value.push({ role: 'assistant', content: introMsg });
+  }
+
+  function chooseConnectionMode(mode: AiPanelConnectionMode) {
+    connectionMode.value = mode;
+    if (mode === 'local') {
+      onboardingStep.value = 'local';
+      const msg = "What's your endpoint URL?";
+      messages.value.push({ role: 'assistant', content: msg });
+    }
+    else if (mode === 'api') {
+      onboardingStep.value = 'api';
+      const msg = "Choose your provider and paste your API key. It will be stored securely.";
+      messages.value.push({ role: 'assistant', content: msg });
+    }
+    else {
+      onboardingStep.value = 'downloadFolder';
+      setUseOmnix(true);
+      const msg = "No problem — I'll use my built-in engine for now. You can always add a model later in Settings.";
+      messages.value.push({ role: 'assistant', content: msg });
+      pushDownloadFolderStep();
+    }
+  }
+
+  function setLocalEndpoint(value: string) {
+    localEndpointUrl.value = value;
+    routerEndpoint.value = value;
+    userSettingsStore.userSettings.meridian.aiPanel.localEndpointUrl = value;
+    userSettingsStore.userSettings.meridian.aiPanel.routerEndpoint = value;
+    userSettingsStore.setUserSettingsStorage('meridian.aiPanel.localEndpointUrl', value);
+    userSettingsStore.setUserSettingsStorage('meridian.aiPanel.routerEndpoint', value);
+    void fetchModels();
+    onboardingStep.value = 'downloadFolder';
+    pushDownloadFolderStep();
+  }
+
+  function setApiProvider(provider: AiPanelProviderId) {
+    apiProvider.value = provider;
+    userSettingsStore.userSettings.meridian.aiPanel.apiProvider = provider;
+    userSettingsStore.setUserSettingsStorage('meridian.aiPanel.apiProvider', provider);
+    if (provider !== 'custom') {
+      const baseUrl = AI_PANEL_PROVIDER_URLS[provider];
+      routerEndpoint.value = baseUrl;
+      userSettingsStore.userSettings.meridian.aiPanel.routerEndpoint = baseUrl;
+      userSettingsStore.setUserSettingsStorage('meridian.aiPanel.routerEndpoint', baseUrl);
+    }
+  }
+
+  async function saveApiKeyAndProceed(key: string) {
+    apiKeyTemp.value = '';
+    await invoke('secure_store_api_key', { provider: apiProvider.value, key });
+    onboardingStep.value = 'downloadFolder';
+    pushDownloadFolderStep();
+  }
+
+  function pushDownloadFolderStep() {
     const detectedFolder = userSettingsStore.userSettings.meridian?.downloader?.autoSaveFolder || '';
-    const onboardingMsg = `Hey, I'm Rain. Looks like this is your first time here — want me to walk you through a few basics?\n\n1. Download folder: ${detectedFolder || 'Not set'}\n2. 9Router endpoint: ${routerEndpoint.value || 'Not set'}\n3. SSH connections: ${userSettingsStore.userSettings.meridian?.sshConnections?.length ?? 0} configured\n\n(You can skip this anytime. Just type "skip".)`;
-    messages.value.push({ role: 'assistant', content: onboardingMsg });
+    const msg = `Where should downloads go?\n${detectedFolder || 'Not detected'}`;
+    messages.value.push({ role: 'assistant', content: msg });
+  }
+
+  function setDownloadFolderInOnboarding(value: string) {
+    userSettingsStore.userSettings.meridian.downloader.autoSaveFolder = value;
+    userSettingsStore.setUserSettingsStorage('meridian.downloader.autoSaveFolder', value);
+    onboardingStep.value = 'done';
+    completeOnboarding();
   }
 
   function completeOnboarding() {
     onboardingComplete.value = true;
     userSettingsStore.userSettings.meridian.aiPanel.onboardingComplete = true;
     userSettingsStore.setUserSettingsStorage('meridian.aiPanel.onboardingComplete', true);
+    messages.value.push({ role: 'assistant', content: "You're all set. Ask me anything." });
   }
 
   function skipOnboarding() {
-    onboardingSkipped = true;
     completeOnboarding();
   }
 
@@ -298,6 +369,8 @@ let hasGreetedThisSession = false;
     setOmnixOnline, setOmnixPath, setRouterEndpoint, setTtsEnabled, setRouterOnline, setCurrentPath, setSelectedFiles, setSearchScope, addMessage, clearMessages,
     setSystemPrompt, setTemperature, setMaxTokens, setTopP,
     setLoading, setModels, fetchModels,
-    skipOnboarding, completeOnboarding, onboardingComplete,
+    skipOnboarding, completeOnboarding, onboardingComplete, onboardingStep, connectionMode, apiProvider,
+    localEndpointUrl, apiKeyTemp, chooseConnectionMode, setLocalEndpoint, setApiProvider, saveApiKeyAndProceed,
+    setDownloadFolderInOnboarding,
   };
 });

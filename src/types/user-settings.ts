@@ -159,6 +159,10 @@ export type ChangelogSettings = {
   lastSeenVersion: string;
 };
 
+export type AiPanelConnectionMode = 'local' | 'api' | 'basic';
+
+export type AiPanelProviderId = 'openai' | 'anthropic' | 'openrouter' | 'groq' | 'custom';
+
 export type AiPanelSettings = {
   endpointUrl: string;
   model: string;
@@ -171,6 +175,19 @@ export type AiPanelSettings = {
   maxTokens: number;
   topP: number;
   onboardingComplete: boolean;
+  onboardingStep: 'intro' | 'local' | 'api' | 'basic' | 'downloadFolder' | 'done';
+  connectionMode: AiPanelConnectionMode;
+  apiProvider: AiPanelProviderId;
+  localEndpointUrl: string;
+  apiKeyTemp: string;
+};
+
+export const AI_PANEL_PROVIDER_URLS: Record<AiPanelProviderId, string> = {
+  openai: 'https://api.openai.com/v1',
+  anthropic: 'https://api.anthropic.com/v1',
+  openrouter: 'https://openrouter.ai/api/v1',
+  groq: 'https://api.groq.com/openai/v1',
+  custom: '',
 };
 
 export type DownloaderSettings = {
