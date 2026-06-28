@@ -821,6 +821,7 @@ const confirmDescription = computed(() => confirmDialogData.value?.description |
           <CheckIcon :size="14" />
           {{ t('common.confirm') }}
         </Button>
+      </div>
       <div
         v-if="!aiPanelStore.onboardingComplete && aiPanelStore.messages.length > 0 && aiPanelStore.messages[0].content.includes('built into Meridian')"
         class="ai-panel__onboarding-skip"
@@ -829,6 +830,7 @@ const confirmDescription = computed(() => confirmDialogData.value?.description |
           Skip
         </Button>
       </div>
+    </div>
 
       <!-- Universal onboarding controls -->
       <div v-if="showOnboardingControls" class="ai-panel__onboarding">

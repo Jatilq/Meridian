@@ -16,7 +16,7 @@ import {
 import { BUILTIN_NAVIGATOR_ICON_THEME_IDS } from '@/types/icon-theme';
 
 export const USER_SETTINGS_SCHEMA_VERSION_KEY = '__schemaVersion';
-export const USER_SETTINGS_SCHEMA_VERSION = 23;
+export const USER_SETTINGS_SCHEMA_VERSION = 25;
 
 export const DEFAULT_GLOBAL_SEARCH_IGNORED_PATHS = [
   '/node_modules',
@@ -443,11 +443,34 @@ async function migrateUserSettingsStep(storage: StorageAdapter, fromVersion: num
 
   if (fromVersion === 20 && toVersion === 21) {
     // Backfill the configurable SSH connections list (Phase 7 step 9) for
-    // installs created before it existed. Pre-populated with MAMBA + BLACK.
-    await setDefaultObjectIfMissing(storage, 'meridian.sshConnections', [
-      { host: '192.168.1.67', label: 'MAMBA', port: 22, username: 'jatilq', keyPath: 'C:\\Users\\jatilq\\.ssh\\meridian_black' },
-      { host: '192.168.1.64', label: 'BLACK', port: 22, username: 'jatilq', keyPath: 'C:\\Users\\jatilq\\.ssh\\meridian_black' },
-    ] as unknown as Record<string, unknown>);
+    // installs created before it existed. Seed empty so users add their own.
+    await setDefaultObjectIfMissing(storage, 'meridian.sshConnections', [] as unknown as Record<string, unknown>);
+  }
+
+  if (fromVersion === 23 && toVersion === 24) {
+    // Models folder is now user-configurable; backfill empty default.
+    await setDefaultStringIfMissing(storage, 'meridian.modelsFolder', '');
+  }
+
+  if (fromVersion === 24 && toVersion === 25) {
+    // SSH password auth option: backfill authMethod on existing stored
+    // connections. All connections predating this migration were key-based,
+    // so default to 'key'. Passwords are stored in plaintext in this MVP —
+    // documented security trade-off for now.
+    const sshConnsValue = await storage.get<Array<Record<string, unknown>>>('meridian.sshConnections');
+    if (Array.isArray(sshConnsValue)) {
+      let mutated = false;
+      const nextConns = sshConnsValue.map((entry) => {
+        if (!entry || typeof entry !== 'object') return entry;
+        const current = entry.authMethod;
+        if (current === 'key' || current === 'password') return entry;
+        mutated = true;
+        return { ...entry, authMethod: 'key' as const };
+      });
+      if (mutated) {
+        await storage.set('meridian.sshConnections', nextConns);
+      }
+    }
   }
 
   if (fromVersion === 21 && toVersion === 22) {

@@ -4,8 +4,9 @@ Copyright © 2021 - present Aleksey Hoffman. All rights reserved.
 -->
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+import { useUserSettingsStore } from '@/stores/storage/user-settings';
 import catalogData from '@/data/backends.json';
 import type { DirContents } from '@/types/dir-entry';
 
@@ -46,6 +47,7 @@ interface BackendCatalog {
 }
 
 const catalog = catalogData as BackendCatalog;
+const userSettingsStore = useUserSettingsStore();
 
 // ============================================================================
 // Tauri command payloads — mirror backend_manager.rs camelCase DTOs.
@@ -110,7 +112,7 @@ function formatBytes(bytes: number | undefined | null): string {
 // ============================================================================
 // Models tab state
 // ============================================================================
-const modelsDir = 'E:\\ai\\Models';
+const modelsDir = computed(() => userSettingsStore.userSettings.meridian?.modelsFolder ?? '');
 
 interface ModelRow {
   filename: string;
@@ -156,16 +158,10 @@ interface SlaveRow {
   role: string;
 }
 
-const slaves = ref<SlaveRow[]>([
-  {
-    name: 'BLACK',
-    host: '192.168.1.64',
-    port: 22,
-    username: 'jatilq',
-    keyPath: 'C:\\Users\\jatilq\\.ssh\\meridian_black',
-    role: 'cluster-worker',
-  },
-]);
+// No JC-specific default: slaves are populated from userSettingsStore.meridian
+// connections in the next pass; we keep the ref empty here so a fresh install
+// shows the empty state instead of a fake BLACK row.
+const slaves = ref<SlaveRow[]>([]);
 
 // ============================================================================
 // Tauri command wrappers
@@ -243,7 +239,7 @@ async function refreshModels(): Promise<void> {
   modelsBusy.value = true;
   modelsNote.value = '';
   try {
-    const dir = await invoke<DirContents>('list_directory', { path: modelsDir });
+    const dir = await invoke<DirContents>('list_directory', { path: modelsDir.value });
     models.value = dir.entries
       .filter((entry) => entry.is_file && /\.gguf$/i.test(entry.name))
       .map((entry) => ({
@@ -254,11 +250,11 @@ async function refreshModels(): Promise<void> {
       }))
       .sort((a, b) => b.sizeBytes - a.sizeBytes);
     if (models.value.length === 0) {
-      modelsNote.value = `No .gguf files found in ${modelsDir}`;
+      modelsNote.value = `No .gguf files found in ${modelsDir.value}`;
     }
   }
   catch (error) {
-    modelsNote.value = `Could not read ${modelsDir}: ${error}`;
+    modelsNote.value = `Could not read ${modelsDir.value}: ${error}`;
     models.value = [];
   }
   finally {

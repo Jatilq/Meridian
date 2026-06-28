@@ -223,10 +223,8 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
         autoSaveFolder: '',
         chunkCount: 8,
       },
-      sshConnections: [
-        { host: '192.168.1.67', label: 'MAMBA', port: 22, username: 'jatilq', keyPath: 'C:\\Users\\jatilq\\.ssh\\meridian_black' },
-        { host: '192.168.1.64', label: 'BLACK', port: 22, username: 'jatilq', keyPath: 'C:\\Users\\jatilq\\.ssh\\meridian_black' },
-      ],
+      sshConnections: [],
+      modelsFolder: '',
     },
   });
 

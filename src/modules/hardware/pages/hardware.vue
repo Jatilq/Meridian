@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+import { useUserSettingsStore } from '@/stores/storage/user-settings';
+
+const userSettingsStore = useUserSettingsStore();
+const modelsFolder = computed(() => userSettingsStore.userSettings.meridian?.modelsFolder ?? '');
 
 interface ModelInfo {
   id: string;
@@ -73,7 +77,7 @@ async function downloadModel(model: ModelInfo) {
     url: `https://huggingface.co/${model.id}/resolve/main/`,
     file_name: `${model.name}.gguf`,
     format_id: null,
-    auto_save_folder: 'E:\\ai\\Models',
+    auto_save_folder: modelsFolder.value,
     chunk_count: null,
   });
 }

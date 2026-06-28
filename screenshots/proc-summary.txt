@@ -1,0 +1,146 @@
+﻿timestamp,event,summary
+2026-06-28T18:33:08.0983646-04:00,CMD_FLASH_COUNT,144
+2026-06-28T18:32:06.3877366-04:00,CMD_FLASH,conhost.exe pid=14752 ppid=14744 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:06.8320084-04:00,CMD_FLASH,conhost.exe pid=27912 ppid=27124 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:06.8502995-04:00,CMD_FLASH,powershell.exe pid=27992 ppid=27124 cmd=powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -InputFormat Text -OutputFormat Text -File E:\ai\apps\npm\node_modules\9router\src\cli\tray\tray.ps1 -IconPath E:\ai\apps\npm\node_modules\9router\src\cli\tray\icon.ico -Tooltip "9Router - Port 20128"
+2026-06-28T18:32:06.8654973-04:00,CMD_FLASH,conhost.exe pid=26764 ppid=27992 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:07.6799650-04:00,CMD_FLASH,conhost.exe pid=3192 ppid=31244 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:08.0050973-04:00,CMD_FLASH,powershell.exe pid=26912 ppid=32612 cmd=C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File E:/ai/Projects/Meridian/screenshots/proc-poller.ps1
+2026-06-28T18:32:08.9498141-04:00,CMD_FLASH,conhost.exe pid=14752 ppid=14744 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:09.3631599-04:00,CMD_FLASH,conhost.exe pid=27912 ppid=27124 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:09.3854585-04:00,CMD_FLASH,powershell.exe pid=27992 ppid=27124 cmd=powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -InputFormat Text -OutputFormat Text -File E:\ai\apps\npm\node_modules\9router\src\cli\tray\tray.ps1 -IconPath E:\ai\apps\npm\node_modules\9router\src\cli\tray\icon.ico -Tooltip "9Router - Port 20128"
+2026-06-28T18:32:09.4032561-04:00,CMD_FLASH,conhost.exe pid=26764 ppid=27992 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:10.2153351-04:00,CMD_FLASH,conhost.exe pid=3192 ppid=31244 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:10.5423468-04:00,CMD_FLASH,powershell.exe pid=26912 ppid=32612 cmd=C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File E:/ai/Projects/Meridian/screenshots/proc-poller.ps1
+2026-06-28T18:32:11.4732157-04:00,CMD_FLASH,conhost.exe pid=14752 ppid=14744 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:11.9041061-04:00,CMD_FLASH,conhost.exe pid=27912 ppid=27124 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:11.9273789-04:00,CMD_FLASH,powershell.exe pid=27992 ppid=27124 cmd=powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -InputFormat Text -OutputFormat Text -File E:\ai\apps\npm\node_modules\9router\src\cli\tray\tray.ps1 -IconPath E:\ai\apps\npm\node_modules\9router\src\cli\tray\icon.ico -Tooltip "9Router - Port 20128"
+2026-06-28T18:32:11.9478948-04:00,CMD_FLASH,conhost.exe pid=26764 ppid=27992 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:12.7640774-04:00,CMD_FLASH,conhost.exe pid=3192 ppid=31244 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:13.0986207-04:00,CMD_FLASH,powershell.exe pid=26912 ppid=32612 cmd=C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File E:/ai/Projects/Meridian/screenshots/proc-poller.ps1
+2026-06-28T18:32:14.0487394-04:00,CMD_FLASH,conhost.exe pid=14752 ppid=14744 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:14.4716333-04:00,CMD_FLASH,conhost.exe pid=27912 ppid=27124 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:14.4934648-04:00,CMD_FLASH,powershell.exe pid=27992 ppid=27124 cmd=powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -InputFormat Text -OutputFormat Text -File E:\ai\apps\npm\node_modules\9router\src\cli\tray\tray.ps1 -IconPath E:\ai\apps\npm\node_modules\9router\src\cli\tray\icon.ico -Tooltip "9Router - Port 20128"
+2026-06-28T18:32:14.5125221-04:00,CMD_FLASH,conhost.exe pid=26764 ppid=27992 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:15.3361863-04:00,CMD_FLASH,conhost.exe pid=3192 ppid=31244 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:15.6636948-04:00,CMD_FLASH,powershell.exe pid=26912 ppid=32612 cmd=C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File E:/ai/Projects/Meridian/screenshots/proc-poller.ps1
+2026-06-28T18:32:16.6085255-04:00,CMD_FLASH,conhost.exe pid=14752 ppid=14744 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:17.0526965-04:00,CMD_FLASH,conhost.exe pid=27912 ppid=27124 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:17.0751809-04:00,CMD_FLASH,powershell.exe pid=27992 ppid=27124 cmd=powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -InputFormat Text -OutputFormat Text -File E:\ai\apps\npm\node_modules\9router\src\cli\tray\tray.ps1 -IconPath E:\ai\apps\npm\node_modules\9router\src\cli\tray\icon.ico -Tooltip "9Router - Port 20128"
+2026-06-28T18:32:17.0954565-04:00,CMD_FLASH,conhost.exe pid=26764 ppid=27992 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:17.8958094-04:00,CMD_FLASH,conhost.exe pid=3192 ppid=31244 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:18.2423285-04:00,CMD_FLASH,powershell.exe pid=26912 ppid=32612 cmd=C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File E:/ai/Projects/Meridian/screenshots/proc-poller.ps1
+2026-06-28T18:32:19.1839576-04:00,CMD_FLASH,conhost.exe pid=14752 ppid=14744 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:19.6163971-04:00,CMD_FLASH,conhost.exe pid=27912 ppid=27124 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:19.6386081-04:00,CMD_FLASH,powershell.exe pid=27992 ppid=27124 cmd=powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -InputFormat Text -OutputFormat Text -File E:\ai\apps\npm\node_modules\9router\src\cli\tray\tray.ps1 -IconPath E:\ai\apps\npm\node_modules\9router\src\cli\tray\icon.ico -Tooltip "9Router - Port 20128"
+2026-06-28T18:32:19.6585186-04:00,CMD_FLASH,conhost.exe pid=26764 ppid=27992 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:20.4783220-04:00,CMD_FLASH,conhost.exe pid=3192 ppid=31244 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:20.8250826-04:00,CMD_FLASH,powershell.exe pid=26912 ppid=32612 cmd=C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File E:/ai/Projects/Meridian/screenshots/proc-poller.ps1
+2026-06-28T18:32:21.8060360-04:00,CMD_FLASH,conhost.exe pid=14752 ppid=14744 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:22.2455810-04:00,CMD_FLASH,conhost.exe pid=27912 ppid=27124 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:22.2701553-04:00,CMD_FLASH,powershell.exe pid=27992 ppid=27124 cmd=powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -InputFormat Text -OutputFormat Text -File E:\ai\apps\npm\node_modules\9router\src\cli\tray\tray.ps1 -IconPath E:\ai\apps\npm\node_modules\9router\src\cli\tray\icon.ico -Tooltip "9Router - Port 20128"
+2026-06-28T18:32:22.2900758-04:00,CMD_FLASH,conhost.exe pid=26764 ppid=27992 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:23.1040966-04:00,CMD_FLASH,conhost.exe pid=3192 ppid=31244 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:23.4515846-04:00,CMD_FLASH,powershell.exe pid=26912 ppid=32612 cmd=C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File E:/ai/Projects/Meridian/screenshots/proc-poller.ps1
+2026-06-28T18:32:24.4393710-04:00,CMD_FLASH,conhost.exe pid=14752 ppid=14744 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:24.8905460-04:00,CMD_FLASH,conhost.exe pid=27912 ppid=27124 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:24.9158271-04:00,CMD_FLASH,powershell.exe pid=27992 ppid=27124 cmd=powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -InputFormat Text -OutputFormat Text -File E:\ai\apps\npm\node_modules\9router\src\cli\tray\tray.ps1 -IconPath E:\ai\apps\npm\node_modules\9router\src\cli\tray\icon.ico -Tooltip "9Router - Port 20128"
+2026-06-28T18:32:24.9360650-04:00,CMD_FLASH,conhost.exe pid=26764 ppid=27992 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:25.7926648-04:00,CMD_FLASH,conhost.exe pid=3192 ppid=31244 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:26.1399960-04:00,CMD_FLASH,powershell.exe pid=26912 ppid=32612 cmd=C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File E:/ai/Projects/Meridian/screenshots/proc-poller.ps1
+2026-06-28T18:32:27.1220358-04:00,CMD_FLASH,conhost.exe pid=14752 ppid=14744 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:27.5535250-04:00,CMD_FLASH,conhost.exe pid=27912 ppid=27124 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:27.5778514-04:00,CMD_FLASH,powershell.exe pid=27992 ppid=27124 cmd=powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -InputFormat Text -OutputFormat Text -File E:\ai\apps\npm\node_modules\9router\src\cli\tray\tray.ps1 -IconPath E:\ai\apps\npm\node_modules\9router\src\cli\tray\icon.ico -Tooltip "9Router - Port 20128"
+2026-06-28T18:32:27.5999281-04:00,CMD_FLASH,conhost.exe pid=26764 ppid=27992 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:28.4171706-04:00,CMD_FLASH,conhost.exe pid=3192 ppid=31244 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:28.7595229-04:00,CMD_FLASH,powershell.exe pid=26912 ppid=32612 cmd=C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File E:/ai/Projects/Meridian/screenshots/proc-poller.ps1
+2026-06-28T18:32:29.6980371-04:00,CMD_FLASH,conhost.exe pid=14752 ppid=14744 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:30.1275576-04:00,CMD_FLASH,conhost.exe pid=27912 ppid=27124 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:30.1506526-04:00,CMD_FLASH,powershell.exe pid=27992 ppid=27124 cmd=powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -InputFormat Text -OutputFormat Text -File E:\ai\apps\npm\node_modules\9router\src\cli\tray\tray.ps1 -IconPath E:\ai\apps\npm\node_modules\9router\src\cli\tray\icon.ico -Tooltip "9Router - Port 20128"
+2026-06-28T18:32:30.1690705-04:00,CMD_FLASH,conhost.exe pid=26764 ppid=27992 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:30.9915415-04:00,CMD_FLASH,conhost.exe pid=3192 ppid=31244 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:31.3507455-04:00,CMD_FLASH,powershell.exe pid=26912 ppid=32612 cmd=C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File E:/ai/Projects/Meridian/screenshots/proc-poller.ps1
+2026-06-28T18:32:32.2987495-04:00,CMD_FLASH,conhost.exe pid=14752 ppid=14744 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:32.7201268-04:00,CMD_FLASH,conhost.exe pid=27912 ppid=27124 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:32.7432495-04:00,CMD_FLASH,powershell.exe pid=27992 ppid=27124 cmd=powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -InputFormat Text -OutputFormat Text -File E:\ai\apps\npm\node_modules\9router\src\cli\tray\tray.ps1 -IconPath E:\ai\apps\npm\node_modules\9router\src\cli\tray\icon.ico -Tooltip "9Router - Port 20128"
+2026-06-28T18:32:32.7645332-04:00,CMD_FLASH,conhost.exe pid=26764 ppid=27992 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:33.5766367-04:00,CMD_FLASH,conhost.exe pid=3192 ppid=31244 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:33.9284714-04:00,CMD_FLASH,powershell.exe pid=26912 ppid=32612 cmd=C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File E:/ai/Projects/Meridian/screenshots/proc-poller.ps1
+2026-06-28T18:32:34.8867051-04:00,CMD_FLASH,conhost.exe pid=14752 ppid=14744 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:35.2749423-04:00,CMD_FLASH,conhost.exe pid=27912 ppid=27124 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:35.2989140-04:00,CMD_FLASH,powershell.exe pid=27992 ppid=27124 cmd=powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -InputFormat Text -OutputFormat Text -File E:\ai\apps\npm\node_modules\9router\src\cli\tray\tray.ps1 -IconPath E:\ai\apps\npm\node_modules\9router\src\cli\tray\icon.ico -Tooltip "9Router - Port 20128"
+2026-06-28T18:32:35.3166567-04:00,CMD_FLASH,conhost.exe pid=26764 ppid=27992 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:36.0670997-04:00,CMD_FLASH,conhost.exe pid=3192 ppid=31244 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:36.4018890-04:00,CMD_FLASH,powershell.exe pid=26912 ppid=32612 cmd=C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File E:/ai/Projects/Meridian/screenshots/proc-poller.ps1
+2026-06-28T18:32:37.3398954-04:00,CMD_FLASH,conhost.exe pid=14752 ppid=14744 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:37.7735003-04:00,CMD_FLASH,conhost.exe pid=27912 ppid=27124 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:37.7959295-04:00,CMD_FLASH,powershell.exe pid=27992 ppid=27124 cmd=powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -InputFormat Text -OutputFormat Text -File E:\ai\apps\npm\node_modules\9router\src\cli\tray\tray.ps1 -IconPath E:\ai\apps\npm\node_modules\9router\src\cli\tray\icon.ico -Tooltip "9Router - Port 20128"
+2026-06-28T18:32:37.8172913-04:00,CMD_FLASH,conhost.exe pid=26764 ppid=27992 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:38.6256698-04:00,CMD_FLASH,conhost.exe pid=3192 ppid=31244 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:38.9714494-04:00,CMD_FLASH,powershell.exe pid=26912 ppid=32612 cmd=C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File E:/ai/Projects/Meridian/screenshots/proc-poller.ps1
+2026-06-28T18:32:39.9338123-04:00,CMD_FLASH,conhost.exe pid=14752 ppid=14744 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:40.3487209-04:00,CMD_FLASH,conhost.exe pid=27912 ppid=27124 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:40.3715864-04:00,CMD_FLASH,powershell.exe pid=27992 ppid=27124 cmd=powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -InputFormat Text -OutputFormat Text -File E:\ai\apps\npm\node_modules\9router\src\cli\tray\tray.ps1 -IconPath E:\ai\apps\npm\node_modules\9router\src\cli\tray\icon.ico -Tooltip "9Router - Port 20128"
+2026-06-28T18:32:40.3916097-04:00,CMD_FLASH,conhost.exe pid=26764 ppid=27992 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:41.2076341-04:00,CMD_FLASH,conhost.exe pid=3192 ppid=31244 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:41.5475034-04:00,CMD_FLASH,powershell.exe pid=26912 ppid=32612 cmd=C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File E:/ai/Projects/Meridian/screenshots/proc-poller.ps1
+2026-06-28T18:32:42.4903187-04:00,CMD_FLASH,conhost.exe pid=14752 ppid=14744 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:42.9277931-04:00,CMD_FLASH,conhost.exe pid=27912 ppid=27124 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:42.9534937-04:00,CMD_FLASH,powershell.exe pid=27992 ppid=27124 cmd=powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -InputFormat Text -OutputFormat Text -File E:\ai\apps\npm\node_modules\9router\src\cli\tray\tray.ps1 -IconPath E:\ai\apps\npm\node_modules\9router\src\cli\tray\icon.ico -Tooltip "9Router - Port 20128"
+2026-06-28T18:32:42.9720805-04:00,CMD_FLASH,conhost.exe pid=26764 ppid=27992 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:43.8062395-04:00,CMD_FLASH,conhost.exe pid=3192 ppid=31244 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:44.1500211-04:00,CMD_FLASH,powershell.exe pid=26912 ppid=32612 cmd=C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File E:/ai/Projects/Meridian/screenshots/proc-poller.ps1
+2026-06-28T18:32:45.0992377-04:00,CMD_FLASH,conhost.exe pid=14752 ppid=14744 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:45.5201850-04:00,CMD_FLASH,conhost.exe pid=27912 ppid=27124 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:45.5433675-04:00,CMD_FLASH,powershell.exe pid=27992 ppid=27124 cmd=powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -InputFormat Text -OutputFormat Text -File E:\ai\apps\npm\node_modules\9router\src\cli\tray\tray.ps1 -IconPath E:\ai\apps\npm\node_modules\9router\src\cli\tray\icon.ico -Tooltip "9Router - Port 20128"
+2026-06-28T18:32:45.5658264-04:00,CMD_FLASH,conhost.exe pid=26764 ppid=27992 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:46.3958918-04:00,CMD_FLASH,conhost.exe pid=3192 ppid=31244 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:46.7355259-04:00,CMD_FLASH,powershell.exe pid=26912 ppid=32612 cmd=C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File E:/ai/Projects/Meridian/screenshots/proc-poller.ps1
+2026-06-28T18:32:47.6857818-04:00,CMD_FLASH,conhost.exe pid=14752 ppid=14744 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:48.1334302-04:00,CMD_FLASH,conhost.exe pid=27912 ppid=27124 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:48.1585203-04:00,CMD_FLASH,powershell.exe pid=27992 ppid=27124 cmd=powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -InputFormat Text -OutputFormat Text -File E:\ai\apps\npm\node_modules\9router\src\cli\tray\tray.ps1 -IconPath E:\ai\apps\npm\node_modules\9router\src\cli\tray\icon.ico -Tooltip "9Router - Port 20128"
+2026-06-28T18:32:48.1794971-04:00,CMD_FLASH,conhost.exe pid=26764 ppid=27992 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:49.0243832-04:00,CMD_FLASH,conhost.exe pid=3192 ppid=31244 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:49.3811805-04:00,CMD_FLASH,powershell.exe pid=26912 ppid=32612 cmd=C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File E:/ai/Projects/Meridian/screenshots/proc-poller.ps1
+2026-06-28T18:32:50.3276021-04:00,CMD_FLASH,conhost.exe pid=14752 ppid=14744 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:50.7666576-04:00,CMD_FLASH,conhost.exe pid=27912 ppid=27124 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:50.7887165-04:00,CMD_FLASH,powershell.exe pid=27992 ppid=27124 cmd=powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -InputFormat Text -OutputFormat Text -File E:\ai\apps\npm\node_modules\9router\src\cli\tray\tray.ps1 -IconPath E:\ai\apps\npm\node_modules\9router\src\cli\tray\icon.ico -Tooltip "9Router - Port 20128"
+2026-06-28T18:32:50.8096772-04:00,CMD_FLASH,conhost.exe pid=26764 ppid=27992 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:51.6263296-04:00,CMD_FLASH,conhost.exe pid=3192 ppid=31244 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:51.9765844-04:00,CMD_FLASH,powershell.exe pid=26912 ppid=32612 cmd=C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File E:/ai/Projects/Meridian/screenshots/proc-poller.ps1
+2026-06-28T18:32:52.9555091-04:00,CMD_FLASH,conhost.exe pid=14752 ppid=14744 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:53.3518072-04:00,CMD_FLASH,conhost.exe pid=27912 ppid=27124 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:53.3745178-04:00,CMD_FLASH,powershell.exe pid=27992 ppid=27124 cmd=powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -InputFormat Text -OutputFormat Text -File E:\ai\apps\npm\node_modules\9router\src\cli\tray\tray.ps1 -IconPath E:\ai\apps\npm\node_modules\9router\src\cli\tray\icon.ico -Tooltip "9Router - Port 20128"
+2026-06-28T18:32:53.3929368-04:00,CMD_FLASH,conhost.exe pid=26764 ppid=27992 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:54.1629602-04:00,CMD_FLASH,conhost.exe pid=3192 ppid=31244 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:54.4861388-04:00,CMD_FLASH,powershell.exe pid=26912 ppid=32612 cmd=C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File E:/ai/Projects/Meridian/screenshots/proc-poller.ps1
+2026-06-28T18:32:55.4758553-04:00,CMD_FLASH,conhost.exe pid=14752 ppid=14744 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:55.9199829-04:00,CMD_FLASH,conhost.exe pid=27912 ppid=27124 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:55.9448508-04:00,CMD_FLASH,powershell.exe pid=27992 ppid=27124 cmd=powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -InputFormat Text -OutputFormat Text -File E:\ai\apps\npm\node_modules\9router\src\cli\tray\tray.ps1 -IconPath E:\ai\apps\npm\node_modules\9router\src\cli\tray\icon.ico -Tooltip "9Router - Port 20128"
+2026-06-28T18:32:55.9646890-04:00,CMD_FLASH,conhost.exe pid=26764 ppid=27992 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:56.7941396-04:00,CMD_FLASH,conhost.exe pid=3192 ppid=31244 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:57.1419823-04:00,CMD_FLASH,powershell.exe pid=26912 ppid=32612 cmd=C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File E:/ai/Projects/Meridian/screenshots/proc-poller.ps1
+2026-06-28T18:32:58.1524545-04:00,CMD_FLASH,conhost.exe pid=14752 ppid=14744 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:58.5829778-04:00,CMD_FLASH,conhost.exe pid=27912 ppid=27124 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:58.6105078-04:00,CMD_FLASH,powershell.exe pid=27992 ppid=27124 cmd=powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -InputFormat Text -OutputFormat Text -File E:\ai\apps\npm\node_modules\9router\src\cli\tray\tray.ps1 -IconPath E:\ai\apps\npm\node_modules\9router\src\cli\tray\icon.ico -Tooltip "9Router - Port 20128"
+2026-06-28T18:32:58.6303359-04:00,CMD_FLASH,conhost.exe pid=26764 ppid=27992 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:59.4491014-04:00,CMD_FLASH,conhost.exe pid=3192 ppid=31244 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:32:59.8576976-04:00,CMD_FLASH,powershell.exe pid=26912 ppid=32612 cmd=C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File E:/ai/Projects/Meridian/screenshots/proc-poller.ps1
+2026-06-28T18:33:00.8669233-04:00,CMD_FLASH,conhost.exe pid=14752 ppid=14744 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:33:01.2532369-04:00,CMD_FLASH,conhost.exe pid=27912 ppid=27124 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:33:01.2754159-04:00,CMD_FLASH,powershell.exe pid=27992 ppid=27124 cmd=powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -InputFormat Text -OutputFormat Text -File E:\ai\apps\npm\node_modules\9router\src\cli\tray\tray.ps1 -IconPath E:\ai\apps\npm\node_modules\9router\src\cli\tray\icon.ico -Tooltip "9Router - Port 20128"
+2026-06-28T18:33:01.2951645-04:00,CMD_FLASH,conhost.exe pid=26764 ppid=27992 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:33:02.0509588-04:00,CMD_FLASH,conhost.exe pid=3192 ppid=31244 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:33:02.3717616-04:00,CMD_FLASH,powershell.exe pid=26912 ppid=32612 cmd=C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File E:/ai/Projects/Meridian/screenshots/proc-poller.ps1
+2026-06-28T18:33:03.3280209-04:00,CMD_FLASH,conhost.exe pid=14752 ppid=14744 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:33:03.7580509-04:00,CMD_FLASH,conhost.exe pid=27912 ppid=27124 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:33:03.7840043-04:00,CMD_FLASH,powershell.exe pid=27992 ppid=27124 cmd=powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -InputFormat Text -OutputFormat Text -File E:\ai\apps\npm\node_modules\9router\src\cli\tray\tray.ps1 -IconPath E:\ai\apps\npm\node_modules\9router\src\cli\tray\icon.ico -Tooltip "9Router - Port 20128"
+2026-06-28T18:33:03.8047696-04:00,CMD_FLASH,conhost.exe pid=26764 ppid=27992 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:33:04.6114543-04:00,CMD_FLASH,conhost.exe pid=3192 ppid=31244 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:33:04.9643305-04:00,CMD_FLASH,powershell.exe pid=26912 ppid=32612 cmd=C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File E:/ai/Projects/Meridian/screenshots/proc-poller.ps1
+2026-06-28T18:33:05.9304078-04:00,CMD_FLASH,conhost.exe pid=14752 ppid=14744 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:33:06.3526095-04:00,CMD_FLASH,conhost.exe pid=27912 ppid=27124 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:33:06.3762147-04:00,CMD_FLASH,powershell.exe pid=27992 ppid=27124 cmd=powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -InputFormat Text -OutputFormat Text -File E:\ai\apps\npm\node_modules\9router\src\cli\tray\tray.ps1 -IconPath E:\ai\apps\npm\node_modules\9router\src\cli\tray\icon.ico -Tooltip "9Router - Port 20128"
+2026-06-28T18:33:06.3976720-04:00,CMD_FLASH,conhost.exe pid=26764 ppid=27992 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:33:07.2086336-04:00,CMD_FLASH,conhost.exe pid=3192 ppid=31244 cmd=\??\C:\Windows\system32\conhost.exe 0x4
+2026-06-28T18:33:07.5610400-04:00,CMD_FLASH,powershell.exe pid=26912 ppid=32612 cmd=C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File E:/ai/Projects/Meridian/screenshots/proc-poller.ps1

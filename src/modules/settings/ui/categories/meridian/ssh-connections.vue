@@ -6,12 +6,12 @@ Copyright © 2021 - present Aleksey Hoffman. All rights reserved.
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { ServerIcon, PlusIcon, Trash2Icon } from '@lucide/vue';
+import { ServerIcon, PlusIcon, Trash2Icon, KeyRoundIcon, LockIcon } from '@lucide/vue';
 import { SettingsItem } from '@/modules/settings';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useUserSettingsStore } from '@/stores/storage/user-settings';
-import type { SshConnectionSetting } from '@/types/user-settings';
+import type { SshConnectionSetting, SshAuthMethod } from '@/types/user-settings';
 
 const { t } = useI18n();
 const userSettingsStore = useUserSettingsStore();
@@ -27,11 +27,18 @@ function persist() {
   );
 }
 
-function updateField(index: number, field: keyof SshConnectionSetting, value: string | number | undefined) {
+function updateField(
+  index: number,
+  field: keyof SshConnectionSetting,
+  value: string | number | undefined,
+) {
   const conn = userSettingsStore.userSettings.meridian.sshConnections[index];
   if (!conn) return;
   if (field === 'port') {
     conn.port = Number(value) || 22;
+  }
+  else if (field === 'authMethod') {
+    conn.authMethod = value === 'password' ? 'password' : 'key';
   }
   else {
     (conn[field] as string) = String(value ?? '');
@@ -46,6 +53,8 @@ function addConnection() {
     port: 22,
     username: '',
     keyPath: '',
+    authMethod: 'key',
+    password: '',
   });
   persist();
 }
@@ -53,6 +62,10 @@ function addConnection() {
 function removeConnection(index: number) {
   userSettingsStore.userSettings.meridian.sshConnections.splice(index, 1);
   persist();
+}
+
+function setAuthMethod(index: number, method: SshAuthMethod) {
+  updateField(index, 'authMethod', method);
 }
 </script>
 
@@ -99,16 +112,50 @@ function removeConnection(index: number) {
             <label class="ssh-settings__label">{{ t('settings.meridian.ssh.username') }}</label>
             <Input
               :model-value="conn.username"
-              placeholder="jatilq"
+              placeholder="username"
               @update:model-value="(v) => updateField(index, 'username', v)"
             />
           </div>
+          <div class="ssh-settings__field ssh-settings__field--auth">
+            <label class="ssh-settings__label">Auth method</label>
+            <div class="ssh-settings__toggle">
+              <button
+                type="button"
+                class="ssh-settings__toggle-btn"
+                :class="{ 'ssh-settings__toggle-btn--active': conn.authMethod === 'key' }"
+                title="Key file authentication"
+                @click="setAuthMethod(index, 'key')"
+              >
+                <KeyRoundIcon :size="14" />
+                Key file
+              </button>
+              <button
+                type="button"
+                class="ssh-settings__toggle-btn"
+                :class="{ 'ssh-settings__toggle-btn--active': conn.authMethod === 'password' }"
+                title="Password authentication"
+                @click="setAuthMethod(index, 'password')"
+              >
+                <LockIcon :size="14" />
+                Password
+              </button>
+            </div>
+          </div>
           <div class="ssh-settings__field ssh-settings__field--wide">
-            <label class="ssh-settings__label">{{ t('settings.meridian.ssh.keyPath') }}</label>
+            <label v-if="conn.authMethod === 'key'" class="ssh-settings__label">{{ t('settings.meridian.ssh.keyPath') }}</label>
+            <label v-else class="ssh-settings__label">Password</label>
             <Input
+              v-if="conn.authMethod === 'key'"
               :model-value="conn.keyPath"
               placeholder="C:\Users\name\.ssh\id_ed25519"
               @update:model-value="(v) => updateField(index, 'keyPath', v)"
+            />
+            <Input
+              v-else
+              :model-value="conn.password ?? ''"
+              type="password"
+              placeholder="••••••••"
+              @update:model-value="(v) => updateField(index, 'password', v)"
             />
           </div>
           <Button
@@ -169,6 +216,10 @@ function removeConnection(index: number) {
   flex: 0 0 70px;
 }
 
+.ssh-settings__field--auth {
+  flex: 0 0 auto;
+}
+
 .ssh-settings__field--wide {
   flex: 2;
 }
@@ -176,6 +227,42 @@ function removeConnection(index: number) {
 .ssh-settings__label {
   color: hsl(var(--muted-foreground));
   font-size: 0.75rem;
+}
+
+.ssh-settings__toggle {
+  display: inline-flex;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+}
+
+.ssh-settings__toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.75rem;
+  background: transparent;
+  border: 0;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.ssh-settings__toggle-btn + .ssh-settings__toggle-btn {
+  border-left: 1px solid hsl(var(--border));
+}
+
+.ssh-settings__toggle-btn:hover {
+  background: hsl(var(--button-hover, var(--background-2)));
+  color: hsl(var(--foreground));
+}
+
+.ssh-settings__toggle-btn--active {
+  background: hsl(var(--primary) / 15%);
+  color: hsl(var(--foreground));
+  font-weight: 600;
 }
 
 .ssh-settings__remove {

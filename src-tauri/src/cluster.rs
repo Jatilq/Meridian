@@ -73,8 +73,12 @@ pub struct SshCredentials {
     #[serde(default = "default_port")]
     pub port: u16,
     pub username: String,
-    /// Absolute path to a private key file (key-based auth).
+    /// Absolute path to a private key file (key-based auth). Takes precedence
+    /// over `password` if both are provided.
     pub key_path: Option<String>,
+    /// Optional password for password-based SSH auth (used when `key_path`
+    /// is None or empty).
+    pub password: Option<String>,
 }
 
 fn default_port() -> u16 {
@@ -97,29 +101,48 @@ impl client::Handler for ClientHandler {
     }
 }
 
-/// Connect over SSH using key-based auth and run a single command, returning
-/// its stdout. Returns Err on connect/auth/exec failure.
+/// Connect over SSH and run a single command, returning its stdout.
+/// Auth method: key-based if `key_path` is provided and non-empty,
+/// password-based if `password` is provided and non-empty, otherwise errors.
+/// Returns Err on connect/auth/exec failure.
 async fn ssh_exec(creds: &SshCredentials, command: &str) -> Result<String, String> {
     let key_path = creds
         .key_path
         .clone()
-        .filter(|p| !p.trim().is_empty())
-        .ok_or_else(|| "No SSH key path configured".to_string())?;
+        .filter(|p| !p.trim().is_empty());
+    let password = creds
+        .password
+        .clone()
+        .filter(|p| !p.is_empty());
 
-    let key_pair = russh::keys::load_secret_key(&key_path, None)
-        .map_err(|e| format!("Failed to load SSH key {}: {}", key_path, e))?;
+    if key_path.is_none() && password.is_none() {
+        return Err("No authentication method configured \u{2014} provide a key path or password".to_string());
+    }
 
     let config = Arc::new(client::Config::default());
     let mut session = client::connect(config, (creds.host.as_str(), creds.port), ClientHandler)
         .await
         .map_err(|e| format!("SSH connect to {}:{} failed: {}", creds.host, creds.port, e))?;
 
-    let authed = session
-        .authenticate_publickey(&creds.username, Arc::new(key_pair))
-        .await
-        .map_err(|e| format!("SSH auth failed: {}", e))?;
+    let authed = match (key_path, password) {
+        (Some(key_path), _) => {
+            let key_pair = russh::keys::load_secret_key(&key_path, None)
+                .map_err(|e| format!("Failed to load SSH key {}: {}", key_path, e))?;
+            session
+                .authenticate_publickey(&creds.username, Arc::new(key_pair))
+                .await
+                .map_err(|e| format!("SSH key auth failed: {}", e))?
+        }
+        (None, Some(password)) => {
+            session
+                .authenticate_password(&creds.username, password)
+                .await
+                .map_err(|e| format!("SSH password auth failed: {}", e))?
+        }
+        (None, None) => unreachable!("checked above"),
+    };
     if !authed {
-        return Err(format!("SSH key auth rejected for {}@{}", creds.username, creds.host));
+        return Err(format!("SSH auth rejected for {}@{}", creds.username, creds.host));
     }
 
     let mut channel = session
@@ -304,7 +327,7 @@ pub async fn get_remote_hardware(creds: SshCredentials) -> Result<HardwareSnapsh
     // Auto-detect GPU vendor via WMI (get all non-virtual GPUs with VRAM)
     let gpu_vendor_out = ssh_exec(
         &creds,
-        "powershell -Command \"Get-WmiObject Win32_VideoController | Where-Object { $_.Name -notmatch 'Parsec|Virtual|Basic|Microsoft' -and $_.AdapterRAM -gt 0 } | Select-Object Name,AdapterRAM | ConvertTo-Json\"",
+        "powershell -Command \"Get-CimInstance Win32_VideoController | Where-Object { $_.Name -notmatch 'Parsec|Virtual|Basic|Microsoft' -and $_.AdapterRAM -gt 0 } | Select-Object Name,AdapterRAM | ConvertTo-Json\"",
     )
     .await
     .unwrap_or_default();

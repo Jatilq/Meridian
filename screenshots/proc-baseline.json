@@ -1,0 +1,1862 @@
+﻿[
+    {
+        "ProcessId":  0,
+        "ParentProcessId":  0,
+        "Name":  "System Idle Process",
+        "CreationDate":  "\/Date(1782667834972)\/"
+    },
+    {
+        "ProcessId":  4,
+        "ParentProcessId":  0,
+        "Name":  "System",
+        "CreationDate":  "\/Date(1782667834972)\/"
+    },
+    {
+        "ProcessId":  916,
+        "ParentProcessId":  4,
+        "Name":  "Secure System",
+        "CreationDate":  "\/Date(1782667796107)\/"
+    },
+    {
+        "ProcessId":  964,
+        "ParentProcessId":  4,
+        "Name":  "Registry",
+        "CreationDate":  "\/Date(1782667796221)\/"
+    },
+    {
+        "ProcessId":  2308,
+        "ParentProcessId":  4,
+        "Name":  "smss.exe",
+        "CreationDate":  "\/Date(1782667835058)\/"
+    },
+    {
+        "ProcessId":  2912,
+        "ParentProcessId":  2960,
+        "Name":  "csrss.exe",
+        "CreationDate":  "\/Date(1782667843171)\/"
+    },
+    {
+        "ProcessId":  3500,
+        "ParentProcessId":  2960,
+        "Name":  "wininit.exe",
+        "CreationDate":  "\/Date(1782667847956)\/"
+    },
+    {
+        "ProcessId":  3508,
+        "ParentProcessId":  3488,
+        "Name":  "csrss.exe",
+        "CreationDate":  "\/Date(1782667847960)\/"
+    },
+    {
+        "ProcessId":  3580,
+        "ParentProcessId":  3500,
+        "Name":  "services.exe",
+        "CreationDate":  "\/Date(1782667848313)\/"
+    },
+    {
+        "ProcessId":  3608,
+        "ParentProcessId":  3488,
+        "Name":  "winlogon.exe",
+        "CreationDate":  "\/Date(1782667848330)\/"
+    },
+    {
+        "ProcessId":  3656,
+        "ParentProcessId":  3500,
+        "Name":  "LsaIso.exe",
+        "CreationDate":  "\/Date(1782667848382)\/"
+    },
+    {
+        "ProcessId":  3664,
+        "ParentProcessId":  3500,
+        "Name":  "lsass.exe",
+        "CreationDate":  "\/Date(1782667848388)\/"
+    },
+    {
+        "ProcessId":  3808,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667849365)\/"
+    },
+    {
+        "ProcessId":  3840,
+        "ParentProcessId":  3608,
+        "Name":  "fontdrvhost.exe",
+        "CreationDate":  "\/Date(1782667849393)\/"
+    },
+    {
+        "ProcessId":  3848,
+        "ParentProcessId":  3500,
+        "Name":  "fontdrvhost.exe",
+        "CreationDate":  "\/Date(1782667849393)\/"
+    },
+    {
+        "ProcessId":  3940,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667849495)\/"
+    },
+    {
+        "ProcessId":  3980,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667849534)\/"
+    },
+    {
+        "ProcessId":  4044,
+        "ParentProcessId":  3608,
+        "Name":  "dwm.exe",
+        "CreationDate":  "\/Date(1782667849699)\/"
+    },
+    {
+        "ProcessId":  4112,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850031)\/"
+    },
+    {
+        "ProcessId":  4136,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850035)\/"
+    },
+    {
+        "ProcessId":  4204,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850048)\/"
+    },
+    {
+        "ProcessId":  4216,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850048)\/"
+    },
+    {
+        "ProcessId":  4272,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850063)\/"
+    },
+    {
+        "ProcessId":  4280,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850063)\/"
+    },
+    {
+        "ProcessId":  4368,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850086)\/"
+    },
+    {
+        "ProcessId":  4420,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850110)\/"
+    },
+    {
+        "ProcessId":  4452,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850118)\/"
+    },
+    {
+        "ProcessId":  4532,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850143)\/"
+    },
+    {
+        "ProcessId":  4568,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850147)\/"
+    },
+    {
+        "ProcessId":  4716,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850235)\/"
+    },
+    {
+        "ProcessId":  4816,
+        "ParentProcessId":  3580,
+        "Name":  "vmms.exe",
+        "CreationDate":  "\/Date(1782667850280)\/"
+    },
+    {
+        "ProcessId":  4824,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850282)\/"
+    },
+    {
+        "ProcessId":  5016,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850361)\/"
+    },
+    {
+        "ProcessId":  5056,
+        "ParentProcessId":  3580,
+        "Name":  "NVDisplay.Container.exe",
+        "CreationDate":  "\/Date(1782667850376)\/"
+    },
+    {
+        "ProcessId":  5076,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850382)\/"
+    },
+    {
+        "ProcessId":  4632,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850424)\/"
+    },
+    {
+        "ProcessId":  4504,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850429)\/"
+    },
+    {
+        "ProcessId":  5136,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850434)\/"
+    },
+    {
+        "ProcessId":  5224,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850452)\/"
+    },
+    {
+        "ProcessId":  5244,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850455)\/"
+    },
+    {
+        "ProcessId":  5268,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850458)\/"
+    },
+    {
+        "ProcessId":  5376,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850477)\/"
+    },
+    {
+        "ProcessId":  5432,
+        "ParentProcessId":  4,
+        "Name":  "Memory Compression",
+        "CreationDate":  "\/Date(1782667850492)\/"
+    },
+    {
+        "ProcessId":  5512,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850502)\/"
+    },
+    {
+        "ProcessId":  5520,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850502)\/"
+    },
+    {
+        "ProcessId":  5528,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850506)\/"
+    },
+    {
+        "ProcessId":  5620,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850531)\/"
+    },
+    {
+        "ProcessId":  5716,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850607)\/"
+    },
+    {
+        "ProcessId":  5752,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850635)\/"
+    },
+    {
+        "ProcessId":  5832,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850680)\/"
+    },
+    {
+        "ProcessId":  5844,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850680)\/"
+    },
+    {
+        "ProcessId":  5956,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850735)\/"
+    },
+    {
+        "ProcessId":  6028,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850756)\/"
+    },
+    {
+        "ProcessId":  6088,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850780)\/"
+    },
+    {
+        "ProcessId":  6160,
+        "ParentProcessId":  3580,
+        "Name":  "spoolsv.exe",
+        "CreationDate":  "\/Date(1782667850857)\/"
+    },
+    {
+        "ProcessId":  6248,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850917)\/"
+    },
+    {
+        "ProcessId":  6424,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850942)\/"
+    },
+    {
+        "ProcessId":  6432,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850943)\/"
+    },
+    {
+        "ProcessId":  6440,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850943)\/"
+    },
+    {
+        "ProcessId":  6448,
+        "ParentProcessId":  3580,
+        "Name":  "AppleMobileDeviceService.exe",
+        "CreationDate":  "\/Date(1782667850943)\/"
+    },
+    {
+        "ProcessId":  6460,
+        "ParentProcessId":  3580,
+        "Name":  "BtwRSupportService.exe",
+        "CreationDate":  "\/Date(1782667850944)\/"
+    },
+    {
+        "ProcessId":  6468,
+        "ParentProcessId":  3580,
+        "Name":  "GameInputRedistService.exe",
+        "CreationDate":  "\/Date(1782667850946)\/"
+    },
+    {
+        "ProcessId":  6476,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850947)\/"
+    },
+    {
+        "ProcessId":  6484,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850949)\/"
+    },
+    {
+        "ProcessId":  6492,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850949)\/"
+    },
+    {
+        "ProcessId":  6500,
+        "ParentProcessId":  3580,
+        "Name":  "pservice.exe",
+        "CreationDate":  "\/Date(1782667850949)\/"
+    },
+    {
+        "ProcessId":  6524,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850950)\/"
+    },
+    {
+        "ProcessId":  6536,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850951)\/"
+    },
+    {
+        "ProcessId":  6544,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667850951)\/"
+    },
+    {
+        "ProcessId":  6556,
+        "ParentProcessId":  3580,
+        "Name":  "sshd.exe",
+        "CreationDate":  "\/Date(1782667850952)\/"
+    },
+    {
+        "ProcessId":  6568,
+        "ParentProcessId":  3580,
+        "Name":  "nvcontainer.exe",
+        "CreationDate":  "\/Date(1782667850952)\/"
+    },
+    {
+        "ProcessId":  6580,
+        "ParentProcessId":  3580,
+        "Name":  "wslservice.exe",
+        "CreationDate":  "\/Date(1782667850952)\/"
+    },
+    {
+        "ProcessId":  6588,
+        "ParentProcessId":  3580,
+        "Name":  "MpDefenderCoreService.exe",
+        "CreationDate":  "\/Date(1782667850952)\/"
+    },
+    {
+        "ProcessId":  6608,
+        "ParentProcessId":  3580,
+        "Name":  "MsMpEng.exe",
+        "CreationDate":  "\/Date(1782667850953)\/"
+    },
+    {
+        "ProcessId":  6616,
+        "ParentProcessId":  3580,
+        "Name":  "vmcompute.exe",
+        "CreationDate":  "\/Date(1782667850953)\/"
+    },
+    {
+        "ProcessId":  6948,
+        "ParentProcessId":  3580,
+        "Name":  "mtt-search-service.exe",
+        "CreationDate":  "\/Date(1782667850979)\/"
+    },
+    {
+        "ProcessId":  7144,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667851015)\/"
+    },
+    {
+        "ProcessId":  6884,
+        "ParentProcessId":  3580,
+        "Name":  "tailscaled.exe",
+        "CreationDate":  "\/Date(1782667851022)\/"
+    },
+    {
+        "ProcessId":  7736,
+        "ParentProcessId":  5056,
+        "Name":  "NVDisplay.Container.exe",
+        "CreationDate":  "\/Date(1782667851180)\/"
+    },
+    {
+        "ProcessId":  8452,
+        "ParentProcessId":  6884,
+        "Name":  "tailscaled.exe",
+        "CreationDate":  "\/Date(1782667851611)\/"
+    },
+    {
+        "ProcessId":  9380,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667853203)\/"
+    },
+    {
+        "ProcessId":  9832,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667854330)\/"
+    },
+    {
+        "ProcessId":  9848,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667854332)\/"
+    },
+    {
+        "ProcessId":  10048,
+        "ParentProcessId":  3580,
+        "Name":  "cowork-svc.exe",
+        "CreationDate":  "\/Date(1782667854409)\/"
+    },
+    {
+        "ProcessId":  10056,
+        "ParentProcessId":  3580,
+        "Name":  "gamingservicesnet.exe",
+        "CreationDate":  "\/Date(1782667854414)\/"
+    },
+    {
+        "ProcessId":  10072,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667854415)\/"
+    },
+    {
+        "ProcessId":  10220,
+        "ParentProcessId":  3580,
+        "Name":  "warp-svc.exe",
+        "CreationDate":  "\/Date(1782667854480)\/"
+    },
+    {
+        "ProcessId":  10476,
+        "ParentProcessId":  6424,
+        "Name":  "AggregatorHost.exe",
+        "CreationDate":  "\/Date(1782667855009)\/"
+    },
+    {
+        "ProcessId":  10640,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667855267)\/"
+    },
+    {
+        "ProcessId":  10896,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667857204)\/"
+    },
+    {
+        "ProcessId":  10960,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667857241)\/"
+    },
+    {
+        "ProcessId":  11088,
+        "ParentProcessId":  6568,
+        "Name":  "nvcontainer.exe",
+        "CreationDate":  "\/Date(1782667857392)\/"
+    },
+    {
+        "ProcessId":  3748,
+        "ParentProcessId":  3580,
+        "Name":  "NisSrv.exe",
+        "CreationDate":  "\/Date(1782667863584)\/"
+    },
+    {
+        "ProcessId":  9004,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667894511)\/"
+    },
+    {
+        "ProcessId":  8832,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667894535)\/"
+    },
+    {
+        "ProcessId":  4492,
+        "ParentProcessId":  6432,
+        "Name":  "dasHost.exe",
+        "CreationDate":  "\/Date(1782667906926)\/"
+    },
+    {
+        "ProcessId":  5876,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667906957)\/"
+    },
+    {
+        "ProcessId":  11460,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667907445)\/"
+    },
+    {
+        "ProcessId":  11568,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667907469)\/"
+    },
+    {
+        "ProcessId":  11648,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667907507)\/"
+    },
+    {
+        "ProcessId":  11664,
+        "ParentProcessId":  3580,
+        "Name":  "WUDFHost.exe",
+        "CreationDate":  "\/Date(1782667907518)\/"
+    },
+    {
+        "ProcessId":  11788,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667911600)\/"
+    },
+    {
+        "ProcessId":  7860,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667926911)\/"
+    },
+    {
+        "ProcessId":  8480,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667935881)\/"
+    },
+    {
+        "ProcessId":  12308,
+        "ParentProcessId":  6468,
+        "Name":  "GameInputRedistService.exe",
+        "CreationDate":  "\/Date(1782667936269)\/"
+    },
+    {
+        "ProcessId":  12548,
+        "ParentProcessId":  6568,
+        "Name":  "nvcontainer.exe",
+        "CreationDate":  "\/Date(1782667936396)\/"
+    },
+    {
+        "ProcessId":  12676,
+        "ParentProcessId":  4568,
+        "Name":  "sihost.exe",
+        "CreationDate":  "\/Date(1782667937663)\/"
+    },
+    {
+        "ProcessId":  12776,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667937768)\/"
+    },
+    {
+        "ProcessId":  12804,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667937805)\/"
+    },
+    {
+        "ProcessId":  12844,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667937838)\/"
+    },
+    {
+        "ProcessId":  12952,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667937875)\/"
+    },
+    {
+        "ProcessId":  12640,
+        "ParentProcessId":  4368,
+        "Name":  "taskhostw.exe",
+        "CreationDate":  "\/Date(1782667937998)\/"
+    },
+    {
+        "ProcessId":  12428,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667938032)\/"
+    },
+    {
+        "ProcessId":  12972,
+        "ParentProcessId":  12436,
+        "Name":  "explorer.exe",
+        "CreationDate":  "\/Date(1782667938116)\/"
+    },
+    {
+        "ProcessId":  13360,
+        "ParentProcessId":  12676,
+        "Name":  "ShellHost.exe",
+        "CreationDate":  "\/Date(1782667938157)\/"
+    },
+    {
+        "ProcessId":  13748,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667938409)\/"
+    },
+    {
+        "ProcessId":  13928,
+        "ParentProcessId":  12676,
+        "Name":  "CrossDeviceResume.exe",
+        "CreationDate":  "\/Date(1782667938481)\/"
+    },
+    {
+        "ProcessId":  14744,
+        "ParentProcessId":  12960,
+        "Name":  "cmd.exe",
+        "CreationDate":  "\/Date(1782667939548)\/"
+    },
+    {
+        "ProcessId":  14752,
+        "ParentProcessId":  14744,
+        "Name":  "conhost.exe",
+        "CreationDate":  "\/Date(1782667939566)\/"
+    },
+    {
+        "ProcessId":  14876,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667940251)\/"
+    },
+    {
+        "ProcessId":  15284,
+        "ParentProcessId":  14744,
+        "Name":  "node.exe",
+        "CreationDate":  "\/Date(1782667941168)\/"
+    },
+    {
+        "ProcessId":  14776,
+        "ParentProcessId":  3808,
+        "Name":  "SearchHost.exe",
+        "CreationDate":  "\/Date(1782667941511)\/"
+    },
+    {
+        "ProcessId":  14616,
+        "ParentProcessId":  3808,
+        "Name":  "StartMenuExperienceHost.exe",
+        "CreationDate":  "\/Date(1782667941514)\/"
+    },
+    {
+        "ProcessId":  15636,
+        "ParentProcessId":  3808,
+        "Name":  "Widgets.exe",
+        "CreationDate":  "\/Date(1782667941625)\/"
+    },
+    {
+        "ProcessId":  15988,
+        "ParentProcessId":  3808,
+        "Name":  "RuntimeBroker.exe",
+        "CreationDate":  "\/Date(1782667942007)\/"
+    },
+    {
+        "ProcessId":  16004,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667942013)\/"
+    },
+    {
+        "ProcessId":  16016,
+        "ParentProcessId":  3808,
+        "Name":  "WidgetService.exe",
+        "CreationDate":  "\/Date(1782667942017)\/"
+    },
+    {
+        "ProcessId":  16352,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667943789)\/"
+    },
+    {
+        "ProcessId":  16524,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667944962)\/"
+    },
+    {
+        "ProcessId":  16708,
+        "ParentProcessId":  14776,
+        "Name":  "msedgewebview2.exe",
+        "CreationDate":  "\/Date(1782667945035)\/"
+    },
+    {
+        "ProcessId":  16908,
+        "ParentProcessId":  16708,
+        "Name":  "msedgewebview2.exe",
+        "CreationDate":  "\/Date(1782667945130)\/"
+    },
+    {
+        "ProcessId":  17028,
+        "ParentProcessId":  16708,
+        "Name":  "msedgewebview2.exe",
+        "CreationDate":  "\/Date(1782667945524)\/"
+    },
+    {
+        "ProcessId":  16376,
+        "ParentProcessId":  16708,
+        "Name":  "msedgewebview2.exe",
+        "CreationDate":  "\/Date(1782667945525)\/"
+    },
+    {
+        "ProcessId":  17400,
+        "ParentProcessId":  16708,
+        "Name":  "msedgewebview2.exe",
+        "CreationDate":  "\/Date(1782667945570)\/"
+    },
+    {
+        "ProcessId":  18072,
+        "ParentProcessId":  16708,
+        "Name":  "msedgewebview2.exe",
+        "CreationDate":  "\/Date(1782667945854)\/"
+    },
+    {
+        "ProcessId":  14452,
+        "ParentProcessId":  3808,
+        "Name":  "PhoneExperienceHost.exe",
+        "CreationDate":  "\/Date(1782667948709)\/"
+    },
+    {
+        "ProcessId":  8420,
+        "ParentProcessId":  5752,
+        "Name":  "ctfmon.exe",
+        "CreationDate":  "\/Date(1782667949073)\/"
+    },
+    {
+        "ProcessId":  19180,
+        "ParentProcessId":  3808,
+        "Name":  "SystemSettings.exe",
+        "CreationDate":  "\/Date(1782667957797)\/"
+    },
+    {
+        "ProcessId":  19188,
+        "ParentProcessId":  3808,
+        "Name":  "ApplicationFrameHost.exe",
+        "CreationDate":  "\/Date(1782667957797)\/"
+    },
+    {
+        "ProcessId":  13628,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667958522)\/"
+    },
+    {
+        "ProcessId":  7936,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667959180)\/"
+    },
+    {
+        "ProcessId":  19612,
+        "ParentProcessId":  12972,
+        "Name":  "SecurityHealthSystray.exe",
+        "CreationDate":  "\/Date(1782667961214)\/"
+    },
+    {
+        "ProcessId":  19632,
+        "ParentProcessId":  3580,
+        "Name":  "SecurityHealthService.exe",
+        "CreationDate":  "\/Date(1782667961241)\/"
+    },
+    {
+        "ProcessId":  19792,
+        "ParentProcessId":  12972,
+        "Name":  "RAVCpl64.exe",
+        "CreationDate":  "\/Date(1782667966117)\/"
+    },
+    {
+        "ProcessId":  19980,
+        "ParentProcessId":  3808,
+        "Name":  "dllhost.exe",
+        "CreationDate":  "\/Date(1782667971317)\/"
+    },
+    {
+        "ProcessId":  20020,
+        "ParentProcessId":  3808,
+        "Name":  "dllhost.exe",
+        "CreationDate":  "\/Date(1782667971410)\/"
+    },
+    {
+        "ProcessId":  20208,
+        "ParentProcessId":  20068,
+        "Name":  "mmc.exe",
+        "CreationDate":  "\/Date(1782667972071)\/"
+    },
+    {
+        "ProcessId":  20248,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667974665)\/"
+    },
+    {
+        "ProcessId":  20276,
+        "ParentProcessId":  12972,
+        "Name":  "Cloudflare WARP.exe",
+        "CreationDate":  "\/Date(1782667974700)\/"
+    },
+    {
+        "ProcessId":  13136,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667975268)\/"
+    },
+    {
+        "ProcessId":  6156,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667975582)\/"
+    },
+    {
+        "ProcessId":  19940,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667975739)\/"
+    },
+    {
+        "ProcessId":  20332,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667976021)\/"
+    },
+    {
+        "ProcessId":  19820,
+        "ParentProcessId":  3580,
+        "Name":  "SearchIndexer.exe",
+        "CreationDate":  "\/Date(1782667976181)\/"
+    },
+    {
+        "ProcessId":  20660,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667976576)\/"
+    },
+    {
+        "ProcessId":  20832,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667976982)\/"
+    },
+    {
+        "ProcessId":  20908,
+        "ParentProcessId":  3580,
+        "Name":  "wmpnetwk.exe",
+        "CreationDate":  "\/Date(1782667977152)\/"
+    },
+    {
+        "ProcessId":  20992,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782667977787)\/"
+    },
+    {
+        "ProcessId":  21232,
+        "ParentProcessId":  21212,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782667980148)\/"
+    },
+    {
+        "ProcessId":  21264,
+        "ParentProcessId":  21232,
+        "Name":  "crashhelper.exe",
+        "CreationDate":  "\/Date(1782667980325)\/"
+    },
+    {
+        "ProcessId":  21428,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782667980568)\/"
+    },
+    {
+        "ProcessId":  21064,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782667980832)\/"
+    },
+    {
+        "ProcessId":  21552,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782667981189)\/"
+    },
+    {
+        "ProcessId":  21796,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782667981275)\/"
+    },
+    {
+        "ProcessId":  22348,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782667981851)\/"
+    },
+    {
+        "ProcessId":  22912,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782667983754)\/"
+    },
+    {
+        "ProcessId":  23424,
+        "ParentProcessId":  12972,
+        "Name":  "IDMan.exe",
+        "CreationDate":  "\/Date(1782667985289)\/"
+    },
+    {
+        "ProcessId":  23504,
+        "ParentProcessId":  4368,
+        "Name":  "simplewall.exe",
+        "CreationDate":  "\/Date(1782667986084)\/"
+    },
+    {
+        "ProcessId":  7972,
+        "ParentProcessId":  11728,
+        "Name":  "UniGetUI.Avalonia.exe",
+        "CreationDate":  "\/Date(1782667993827)\/"
+    },
+    {
+        "ProcessId":  7588,
+        "ParentProcessId":  3808,
+        "Name":  "WindowsPackageManagerServer.exe",
+        "CreationDate":  "\/Date(1782668002444)\/"
+    },
+    {
+        "ProcessId":  24588,
+        "ParentProcessId":  15636,
+        "Name":  "msedgewebview2.exe",
+        "CreationDate":  "\/Date(1782668006341)\/"
+    },
+    {
+        "ProcessId":  9032,
+        "ParentProcessId":  24588,
+        "Name":  "msedgewebview2.exe",
+        "CreationDate":  "\/Date(1782668006397)\/"
+    },
+    {
+        "ProcessId":  25548,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782668006500)\/"
+    },
+    {
+        "ProcessId":  25436,
+        "ParentProcessId":  24588,
+        "Name":  "msedgewebview2.exe",
+        "CreationDate":  "\/Date(1782668006647)\/"
+    },
+    {
+        "ProcessId":  24124,
+        "ParentProcessId":  24588,
+        "Name":  "msedgewebview2.exe",
+        "CreationDate":  "\/Date(1782668006651)\/"
+    },
+    {
+        "ProcessId":  25188,
+        "ParentProcessId":  24588,
+        "Name":  "msedgewebview2.exe",
+        "CreationDate":  "\/Date(1782668006704)\/"
+    },
+    {
+        "ProcessId":  26064,
+        "ParentProcessId":  24588,
+        "Name":  "msedgewebview2.exe",
+        "CreationDate":  "\/Date(1782668006874)\/"
+    },
+    {
+        "ProcessId":  27688,
+        "ParentProcessId":  12044,
+        "Name":  "steam.exe",
+        "CreationDate":  "\/Date(1782668007907)\/"
+    },
+    {
+        "ProcessId":  28248,
+        "ParentProcessId":  27688,
+        "Name":  "steamwebhelper.exe",
+        "CreationDate":  "\/Date(1782668009427)\/"
+    },
+    {
+        "ProcessId":  28360,
+        "ParentProcessId":  3580,
+        "Name":  "steamservice.exe",
+        "CreationDate":  "\/Date(1782668009760)\/"
+    },
+    {
+        "ProcessId":  28460,
+        "ParentProcessId":  28248,
+        "Name":  "steamwebhelper.exe",
+        "CreationDate":  "\/Date(1782668010267)\/"
+    },
+    {
+        "ProcessId":  18392,
+        "ParentProcessId":  28248,
+        "Name":  "steamwebhelper.exe",
+        "CreationDate":  "\/Date(1782668010767)\/"
+    },
+    {
+        "ProcessId":  24752,
+        "ParentProcessId":  28248,
+        "Name":  "steamwebhelper.exe",
+        "CreationDate":  "\/Date(1782668011849)\/"
+    },
+    {
+        "ProcessId":  23024,
+        "ParentProcessId":  28248,
+        "Name":  "steamwebhelper.exe",
+        "CreationDate":  "\/Date(1782668011970)\/"
+    },
+    {
+        "ProcessId":  27416,
+        "ParentProcessId":  28248,
+        "Name":  "steamwebhelper.exe",
+        "CreationDate":  "\/Date(1782668014612)\/"
+    },
+    {
+        "ProcessId":  16028,
+        "ParentProcessId":  12972,
+        "Name":  "SABnzbd.exe",
+        "CreationDate":  "\/Date(1782668019416)\/"
+    },
+    {
+        "ProcessId":  27236,
+        "ParentProcessId":  12972,
+        "Name":  "tailscale-ipn.exe",
+        "CreationDate":  "\/Date(1782668022429)\/"
+    },
+    {
+        "ProcessId":  27124,
+        "ParentProcessId":  27200,
+        "Name":  "node.exe",
+        "CreationDate":  "\/Date(1782668025535)\/"
+    },
+    {
+        "ProcessId":  27912,
+        "ParentProcessId":  27124,
+        "Name":  "conhost.exe",
+        "CreationDate":  "\/Date(1782668025545)\/"
+    },
+    {
+        "ProcessId":  20724,
+        "ParentProcessId":  27124,
+        "Name":  "node.exe",
+        "CreationDate":  "\/Date(1782668027687)\/"
+    },
+    {
+        "ProcessId":  27992,
+        "ParentProcessId":  27124,
+        "Name":  "powershell.exe",
+        "CreationDate":  "\/Date(1782668029731)\/"
+    },
+    {
+        "ProcessId":  26764,
+        "ParentProcessId":  27992,
+        "Name":  "conhost.exe",
+        "CreationDate":  "\/Date(1782668029751)\/"
+    },
+    {
+        "ProcessId":  21000,
+        "ParentProcessId":  3808,
+        "Name":  "ShellExperienceHost.exe",
+        "CreationDate":  "\/Date(1782668044241)\/"
+    },
+    {
+        "ProcessId":  28492,
+        "ParentProcessId":  3808,
+        "Name":  "RuntimeBroker.exe",
+        "CreationDate":  "\/Date(1782668044864)\/"
+    },
+    {
+        "ProcessId":  28684,
+        "ParentProcessId":  3808,
+        "Name":  "RuntimeBroker.exe",
+        "CreationDate":  "\/Date(1782668046512)\/"
+    },
+    {
+        "ProcessId":  19932,
+        "ParentProcessId":  28248,
+        "Name":  "steamwebhelper.exe",
+        "CreationDate":  "\/Date(1782668049954)\/"
+    },
+    {
+        "ProcessId":  29560,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782668177103)\/"
+    },
+    {
+        "ProcessId":  28668,
+        "ParentProcessId":  3808,
+        "Name":  "explorer.exe",
+        "CreationDate":  "\/Date(1782668342781)\/"
+    },
+    {
+        "ProcessId":  15856,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782668350296)\/"
+    },
+    {
+        "ProcessId":  13324,
+        "ParentProcessId":  3808,
+        "Name":  "dllhost.exe",
+        "CreationDate":  "\/Date(1782668534626)\/"
+    },
+    {
+        "ProcessId":  25904,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782668600694)\/"
+    },
+    {
+        "ProcessId":  5648,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782669281587)\/"
+    },
+    {
+        "ProcessId":  7464,
+        "ParentProcessId":  6500,
+        "Name":  "parsecd.exe",
+        "CreationDate":  "\/Date(1782671065049)\/"
+    },
+    {
+        "ProcessId":  24556,
+        "ParentProcessId":  7464,
+        "Name":  "parsecd.exe",
+        "CreationDate":  "\/Date(1782671065710)\/"
+    },
+    {
+        "ProcessId":  28768,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782671186734)\/"
+    },
+    {
+        "ProcessId":  24244,
+        "ParentProcessId":  12972,
+        "Name":  "Docker Desktop.exe",
+        "CreationDate":  "\/Date(1782673687372)\/"
+    },
+    {
+        "ProcessId":  29016,
+        "ParentProcessId":  24244,
+        "Name":  "com.docker.backend.exe",
+        "CreationDate":  "\/Date(1782673687560)\/"
+    },
+    {
+        "ProcessId":  24312,
+        "ParentProcessId":  29016,
+        "Name":  "conhost.exe",
+        "CreationDate":  "\/Date(1782673687572)\/"
+    },
+    {
+        "ProcessId":  8580,
+        "ParentProcessId":  29016,
+        "Name":  "com.docker.backend.exe",
+        "CreationDate":  "\/Date(1782673687758)\/"
+    },
+    {
+        "ProcessId":  14432,
+        "ParentProcessId":  8580,
+        "Name":  "com.docker.build.exe",
+        "CreationDate":  "\/Date(1782673692987)\/"
+    },
+    {
+        "ProcessId":  12896,
+        "ParentProcessId":  8580,
+        "Name":  "docker-sandbox.exe",
+        "CreationDate":  "\/Date(1782673693116)\/"
+    },
+    {
+        "ProcessId":  4380,
+        "ParentProcessId":  8580,
+        "Name":  "wsl.exe",
+        "CreationDate":  "\/Date(1782673693421)\/"
+    },
+    {
+        "ProcessId":  28600,
+        "ParentProcessId":  4380,
+        "Name":  "wsl.exe",
+        "CreationDate":  "\/Date(1782673693462)\/"
+    },
+    {
+        "ProcessId":  28436,
+        "ParentProcessId":  6616,
+        "Name":  "vmwp.exe",
+        "CreationDate":  "\/Date(1782673693544)\/"
+    },
+    {
+        "ProcessId":  7808,
+        "ParentProcessId":  28436,
+        "Name":  "vmmemWSL",
+        "CreationDate":  "\/Date(1782673693642)\/"
+    },
+    {
+        "ProcessId":  29272,
+        "ParentProcessId":  3808,
+        "Name":  "dllhost.exe",
+        "CreationDate":  "\/Date(1782673693981)\/"
+    },
+    {
+        "ProcessId":  3888,
+        "ParentProcessId":  8580,
+        "Name":  "docker-agent.exe",
+        "CreationDate":  "\/Date(1782673694139)\/"
+    },
+    {
+        "ProcessId":  30416,
+        "ParentProcessId":  3808,
+        "Name":  "dllhost.exe",
+        "CreationDate":  "\/Date(1782673696865)\/"
+    },
+    {
+        "ProcessId":  30884,
+        "ParentProcessId":  6580,
+        "Name":  "wslrelay.exe",
+        "CreationDate":  "\/Date(1782673697214)\/"
+    },
+    {
+        "ProcessId":  31040,
+        "ParentProcessId":  6580,
+        "Name":  "wslhost.exe",
+        "CreationDate":  "\/Date(1782673697950)\/"
+    },
+    {
+        "ProcessId":  31064,
+        "ParentProcessId":  31040,
+        "Name":  "conhost.exe",
+        "CreationDate":  "\/Date(1782673698001)\/"
+    },
+    {
+        "ProcessId":  31080,
+        "ParentProcessId":  6580,
+        "Name":  "wslhost.exe",
+        "CreationDate":  "\/Date(1782673698015)\/"
+    },
+    {
+        "ProcessId":  31200,
+        "ParentProcessId":  28600,
+        "Name":  "wslhost.exe",
+        "CreationDate":  "\/Date(1782673698035)\/"
+    },
+    {
+        "ProcessId":  31272,
+        "ParentProcessId":  31080,
+        "Name":  "conhost.exe",
+        "CreationDate":  "\/Date(1782673698047)\/"
+    },
+    {
+        "ProcessId":  31308,
+        "ParentProcessId":  31200,
+        "Name":  "conhost.exe",
+        "CreationDate":  "\/Date(1782673698065)\/"
+    },
+    {
+        "ProcessId":  31424,
+        "ParentProcessId":  31040,
+        "Name":  "msrdc.exe",
+        "CreationDate":  "\/Date(1782673698117)\/"
+    },
+    {
+        "ProcessId":  5896,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782674187176)\/"
+    },
+    {
+        "ProcessId":  24060,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782674191387)\/"
+    },
+    {
+        "ProcessId":  30332,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782674191405)\/"
+    },
+    {
+        "ProcessId":  3348,
+        "ParentProcessId":  3808,
+        "Name":  "UserOOBEBroker.exe",
+        "CreationDate":  "\/Date(1782674290081)\/"
+    },
+    {
+        "ProcessId":  18676,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782674310403)\/"
+    },
+    {
+        "ProcessId":  26420,
+        "ParentProcessId":  30056,
+        "Name":  "Taskmgr.exe",
+        "CreationDate":  "\/Date(1782674356651)\/"
+    },
+    {
+        "ProcessId":  13460,
+        "ParentProcessId":  12972,
+        "Name":  "LM Studio.exe",
+        "CreationDate":  "\/Date(1782674388905)\/"
+    },
+    {
+        "ProcessId":  8048,
+        "ParentProcessId":  13460,
+        "Name":  "LM Studio.exe",
+        "CreationDate":  "\/Date(1782674389928)\/"
+    },
+    {
+        "ProcessId":  25352,
+        "ParentProcessId":  13460,
+        "Name":  "LM Studio.exe",
+        "CreationDate":  "\/Date(1782674391233)\/"
+    },
+    {
+        "ProcessId":  28644,
+        "ParentProcessId":  13460,
+        "Name":  "LM Studio.exe",
+        "CreationDate":  "\/Date(1782674391258)\/"
+    },
+    {
+        "ProcessId":  31612,
+        "ParentProcessId":  13460,
+        "Name":  "LM Studio.exe",
+        "CreationDate":  "\/Date(1782674391338)\/"
+    },
+    {
+        "ProcessId":  29896,
+        "ParentProcessId":  13460,
+        "Name":  "LM Studio.exe",
+        "CreationDate":  "\/Date(1782674393421)\/"
+    },
+    {
+        "ProcessId":  20432,
+        "ParentProcessId":  13460,
+        "Name":  "lmlink-connector.exe",
+        "CreationDate":  "\/Date(1782674398262)\/"
+    },
+    {
+        "ProcessId":  17976,
+        "ParentProcessId":  20432,
+        "Name":  "conhost.exe",
+        "CreationDate":  "\/Date(1782674398276)\/"
+    },
+    {
+        "ProcessId":  4980,
+        "ParentProcessId":  12972,
+        "Name":  "WindowsTerminal.exe",
+        "CreationDate":  "\/Date(1782674596515)\/"
+    },
+    {
+        "ProcessId":  27844,
+        "ParentProcessId":  5716,
+        "Name":  "audiodg.exe",
+        "CreationDate":  "\/Date(1782675769313)\/"
+    },
+    {
+        "ProcessId":  23832,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782677142539)\/"
+    },
+    {
+        "ProcessId":  12368,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782677206668)\/"
+    },
+    {
+        "ProcessId":  13044,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782677570392)\/"
+    },
+    {
+        "ProcessId":  4972,
+        "ParentProcessId":  4980,
+        "Name":  "OpenConsole.exe",
+        "CreationDate":  "\/Date(1782677613136)\/"
+    },
+    {
+        "ProcessId":  27044,
+        "ParentProcessId":  4980,
+        "Name":  "powershell.exe",
+        "CreationDate":  "\/Date(1782677613144)\/"
+    },
+    {
+        "ProcessId":  31976,
+        "ParentProcessId":  27044,
+        "Name":  "node.exe",
+        "CreationDate":  "\/Date(1782677617773)\/"
+    },
+    {
+        "ProcessId":  14732,
+        "ParentProcessId":  31976,
+        "Name":  "freebuff.exe",
+        "CreationDate":  "\/Date(1782677617887)\/"
+    },
+    {
+        "ProcessId":  33184,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782677862166)\/"
+    },
+    {
+        "ProcessId":  16012,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782677986992)\/"
+    },
+    {
+        "ProcessId":  33680,
+        "ParentProcessId":  12972,
+        "Name":  "SnippingTool.exe",
+        "CreationDate":  "\/Date(1782678217831)\/"
+    },
+    {
+        "ProcessId":  5992,
+        "ParentProcessId":  4368,
+        "Name":  "taskhostw.exe",
+        "CreationDate":  "\/Date(1782678955207)\/"
+    },
+    {
+        "ProcessId":  33556,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782679333974)\/"
+    },
+    {
+        "ProcessId":  24900,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782680114436)\/"
+    },
+    {
+        "ProcessId":  10140,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782680355159)\/"
+    },
+    {
+        "ProcessId":  17236,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782680695931)\/"
+    },
+    {
+        "ProcessId":  25416,
+        "ParentProcessId":  12972,
+        "Name":  "Code.exe",
+        "CreationDate":  "\/Date(1782681227947)\/"
+    },
+    {
+        "ProcessId":  10492,
+        "ParentProcessId":  25416,
+        "Name":  "Code.exe",
+        "CreationDate":  "\/Date(1782681228382)\/"
+    },
+    {
+        "ProcessId":  33468,
+        "ParentProcessId":  25416,
+        "Name":  "Code.exe",
+        "CreationDate":  "\/Date(1782681228499)\/"
+    },
+    {
+        "ProcessId":  20040,
+        "ParentProcessId":  25416,
+        "Name":  "Code.exe",
+        "CreationDate":  "\/Date(1782681228510)\/"
+    },
+    {
+        "ProcessId":  33820,
+        "ParentProcessId":  25416,
+        "Name":  "Code.exe",
+        "CreationDate":  "\/Date(1782681228919)\/"
+    },
+    {
+        "ProcessId":  11760,
+        "ParentProcessId":  25416,
+        "Name":  "Code.exe",
+        "CreationDate":  "\/Date(1782681230769)\/"
+    },
+    {
+        "ProcessId":  33816,
+        "ParentProcessId":  25416,
+        "Name":  "Code.exe",
+        "CreationDate":  "\/Date(1782681230840)\/"
+    },
+    {
+        "ProcessId":  20000,
+        "ParentProcessId":  25416,
+        "Name":  "Code.exe",
+        "CreationDate":  "\/Date(1782681230874)\/"
+    },
+    {
+        "ProcessId":  12152,
+        "ParentProcessId":  11760,
+        "Name":  "Code.exe",
+        "CreationDate":  "\/Date(1782681232161)\/"
+    },
+    {
+        "ProcessId":  16676,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782681682628)\/"
+    },
+    {
+        "ProcessId":  27588,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782681802468)\/"
+    },
+    {
+        "ProcessId":  14848,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782682209398)\/"
+    },
+    {
+        "ProcessId":  9104,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782682257746)\/"
+    },
+    {
+        "ProcessId":  17364,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782684734864)\/"
+    },
+    {
+        "ProcessId":  24216,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782685045118)\/"
+    },
+    {
+        "ProcessId":  34176,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782685188592)\/"
+    },
+    {
+        "ProcessId":  32000,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782685247173)\/"
+    },
+    {
+        "ProcessId":  13028,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782685294217)\/"
+    },
+    {
+        "ProcessId":  30584,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782685696196)\/"
+    },
+    {
+        "ProcessId":  31244,
+        "ParentProcessId":  32648,
+        "Name":  "cmd.exe",
+        "CreationDate":  "\/Date(1782685731683)\/"
+    },
+    {
+        "ProcessId":  3192,
+        "ParentProcessId":  31244,
+        "Name":  "conhost.exe",
+        "CreationDate":  "\/Date(1782685731698)\/"
+    },
+    {
+        "ProcessId":  25092,
+        "ParentProcessId":  31244,
+        "Name":  "node.exe",
+        "CreationDate":  "\/Date(1782685732016)\/"
+    },
+    {
+        "ProcessId":  33012,
+        "ParentProcessId":  25092,
+        "Name":  "bash.exe",
+        "CreationDate":  "\/Date(1782685732379)\/"
+    },
+    {
+        "ProcessId":  17332,
+        "ParentProcessId":  33012,
+        "Name":  "bash.exe",
+        "CreationDate":  "\/Date(1782685732397)\/"
+    },
+    {
+        "ProcessId":  33688,
+        "ParentProcessId":  17332,
+        "Name":  "sh.exe",
+        "CreationDate":  "\/Date(1782685733951)\/"
+    },
+    {
+        "ProcessId":  30048,
+        "ParentProcessId":  33688,
+        "Name":  "node.exe",
+        "CreationDate":  "\/Date(1782685734288)\/"
+    },
+    {
+        "ProcessId":  21084,
+        "ParentProcessId":  30048,
+        "Name":  "cmd.exe",
+        "CreationDate":  "\/Date(1782685734673)\/"
+    },
+    {
+        "ProcessId":  32008,
+        "ParentProcessId":  21084,
+        "Name":  "node.exe",
+        "CreationDate":  "\/Date(1782685734889)\/"
+    },
+    {
+        "ProcessId":  27552,
+        "ParentProcessId":  32008,
+        "Name":  "bash.exe",
+        "CreationDate":  "\/Date(1782685735204)\/"
+    },
+    {
+        "ProcessId":  35804,
+        "ParentProcessId":  27552,
+        "Name":  "bash.exe",
+        "CreationDate":  "\/Date(1782685735221)\/"
+    },
+    {
+        "ProcessId":  33912,
+        "ParentProcessId":  35804,
+        "Name":  "sh.exe",
+        "CreationDate":  "\/Date(1782685735295)\/"
+    },
+    {
+        "ProcessId":  34116,
+        "ParentProcessId":  33912,
+        "Name":  "node.exe",
+        "CreationDate":  "\/Date(1782685735632)\/"
+    },
+    {
+        "ProcessId":  33308,
+        "ParentProcessId":  30048,
+        "Name":  "cargo.exe",
+        "CreationDate":  "\/Date(1782685738808)\/"
+    },
+    {
+        "ProcessId":  17684,
+        "ParentProcessId":  33308,
+        "Name":  "cargo.exe",
+        "CreationDate":  "\/Date(1782685738844)\/"
+    },
+    {
+        "ProcessId":  22336,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782685775373)\/"
+    },
+    {
+        "ProcessId":  31952,
+        "ParentProcessId":  3104,
+        "Name":  "vctip.exe",
+        "CreationDate":  "\/Date(1782685827645)\/"
+    },
+    {
+        "ProcessId":  32144,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782685831849)\/"
+    },
+    {
+        "ProcessId":  34168,
+        "ParentProcessId":  17684,
+        "Name":  "sigma-file-manager.exe",
+        "CreationDate":  "\/Date(1782685850157)\/"
+    },
+    {
+        "ProcessId":  32320,
+        "ParentProcessId":  34168,
+        "Name":  "msedgewebview2.exe",
+        "CreationDate":  "\/Date(1782685850411)\/"
+    },
+    {
+        "ProcessId":  33280,
+        "ParentProcessId":  32320,
+        "Name":  "msedgewebview2.exe",
+        "CreationDate":  "\/Date(1782685850446)\/"
+    },
+    {
+        "ProcessId":  24208,
+        "ParentProcessId":  32320,
+        "Name":  "msedgewebview2.exe",
+        "CreationDate":  "\/Date(1782685850640)\/"
+    },
+    {
+        "ProcessId":  31660,
+        "ParentProcessId":  32320,
+        "Name":  "msedgewebview2.exe",
+        "CreationDate":  "\/Date(1782685850643)\/"
+    },
+    {
+        "ProcessId":  33116,
+        "ParentProcessId":  32320,
+        "Name":  "msedgewebview2.exe",
+        "CreationDate":  "\/Date(1782685850689)\/"
+    },
+    {
+        "ProcessId":  25224,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782685850826)\/"
+    },
+    {
+        "ProcessId":  22448,
+        "ParentProcessId":  32320,
+        "Name":  "msedgewebview2.exe",
+        "CreationDate":  "\/Date(1782685850835)\/"
+    },
+    {
+        "ProcessId":  32988,
+        "ParentProcessId":  32320,
+        "Name":  "msedgewebview2.exe",
+        "CreationDate":  "\/Date(1782685851226)\/"
+    },
+    {
+        "ProcessId":  22188,
+        "ParentProcessId":  32320,
+        "Name":  "msedgewebview2.exe",
+        "CreationDate":  "\/Date(1782685851435)\/"
+    },
+    {
+        "ProcessId":  35204,
+        "ParentProcessId":  3580,
+        "Name":  "svchost.exe",
+        "CreationDate":  "\/Date(1782685857049)\/"
+    },
+    {
+        "ProcessId":  34348,
+        "ParentProcessId":  3808,
+        "Name":  "WmiPrvSE.exe",
+        "CreationDate":  "\/Date(1782685862522)\/"
+    },
+    {
+        "ProcessId":  34032,
+        "ParentProcessId":  21232,
+        "Name":  "firefox.exe",
+        "CreationDate":  "\/Date(1782685895843)\/"
+    },
+    {
+        "ProcessId":  35312,
+        "ParentProcessId":  14732,
+        "Name":  "bash.exe",
+        "CreationDate":  "\/Date(1782685924880)\/"
+    },
+    {
+        "ProcessId":  32612,
+        "ParentProcessId":  35312,
+        "Name":  "bash.exe",
+        "CreationDate":  "\/Date(1782685924897)\/"
+    },
+    {
+        "ProcessId":  26912,
+        "ParentProcessId":  32612,
+        "Name":  "powershell.exe",
+        "CreationDate":  "\/Date(1782685924964)\/"
+    }
+]

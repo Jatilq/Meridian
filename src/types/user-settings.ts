@@ -195,18 +195,23 @@ export type DownloaderSettings = {
   chunkCount: number;
 };
 
+export type SshAuthMethod = 'key' | 'password';
+
 export type SshConnectionSetting = {
   host: string;
   label: string;
   port: number;
   username: string;
   keyPath: string;
+  authMethod: SshAuthMethod;
+  password?: string;
 };
 
 export type MeridianSettings = {
   aiPanel: AiPanelSettings;
   downloader: DownloaderSettings;
   sshConnections: SshConnectionSetting[];
+  modelsFolder: string;
 };
 
 export type TextSettings = {

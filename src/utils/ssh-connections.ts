@@ -20,22 +20,10 @@ export interface SshConnection {
 // Pre-configured cluster connections (Phase 7 step 3) — used as the DEFAULT
 // seed. The live list is driven by user settings via setSshConnections();
 // lookups below read the runtime registry, falling back to these defaults.
-export const SSH_CONNECTIONS: SshConnection[] = [
-  {
-    host: '192.168.1.67',
-    label: 'MAMBA',
-    port: 22,
-    username: 'jatilq',
-    keyPath: 'C:\\Users\\jatilq\\.ssh\\meridian_black',
-  },
-  {
-    host: '192.168.1.64',
-    label: 'BLACK',
-    port: 22,
-    username: 'jatilq',
-    keyPath: 'C:\\Users\\jatilq\\.ssh\\meridian_black',
-  },
-];
+// Seed is intentionally empty so Meridian ships without any user-specific
+// entries; users add their own SSH connections via Settings → SSH or the
+// Add Worker dialog in Cluster Control.
+export const SSH_CONNECTIONS: SshConnection[] = [];
 
 // Runtime registry — populated from user settings at app start / on change.
 // Defaults to the seed list so lookups work even before settings load.
