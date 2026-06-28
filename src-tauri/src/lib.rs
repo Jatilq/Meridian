@@ -13,6 +13,7 @@ mod default_file_manager;
 mod delete_job;
 mod sftp;
 mod rain_memory;
+mod rain_tools;
 mod dir_reader;
 mod dir_size;
 mod dir_watcher;
@@ -412,6 +413,8 @@ pub fn run() {
             rain_memory::rain_load_memory,
             rain_memory::rain_append_memory,
             rain_memory::rain_append_favorite,
+            rain_tools::rain_tool_schemas,
+            rain_tools::rain_run_tool,
         ])
         .setup(setup_handler)
         .on_window_event(|window, event| {
