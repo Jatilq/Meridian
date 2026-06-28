@@ -69,7 +69,8 @@
   "bundle": {
     "active": true,
     "resources": {
-      "binaries/yt-dlp.exe": "yt-dlp.exe"
+      "binaries/yt-dlp.exe": "yt-dlp.exe",
+      "resources/omnix": "omnix"
     },
     "targets": [
       "nsis",

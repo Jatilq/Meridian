@@ -212,6 +212,7 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
         temperature: 0.7,
         maxTokens: 1024,
         topP: 1,
+        onboardingComplete: false,
       },
       downloader: {
         autoSaveFolder: '',

@@ -5,32 +5,110 @@
 use std::path::{Path, PathBuf};
 use std::process::Child;
 use std::sync::Mutex;
+use std::fs;
+use tauri::Manager;
 
 static OMNIX_CHILD: Mutex<Option<Child>> = Mutex::new(None);
 
 /// Default install directory for the Omnix engine.
 const DEFAULT_OMNIX_DIR: &str = "E:\\ai\\Apps\\Omnix";
 
-/// Resolve the Omnix project directory. Uses the caller-provided path when set,
-/// otherwise the default install location. Returns an error if it does not
-/// contain the expected `server.ts` entry point.
-fn resolve_omnix_dir(omnix_path: Option<String>) -> Result<PathBuf, String> {
-    let dir = omnix_path
+/// Flag file to indicate npm install has been run for bundled Omnix.
+const OMNIX_NPM_DONE_MARKER: &str = ".meridian-npm-install-done";
+
+/// Check if bundled Omnix has node_modules (npm install already done).
+fn omnix_npm_done(dir: &Path) -> bool {
+    dir.join(OMNIX_NPM_DONE_MARKER).exists()
+}
+
+/// Mark that npm install has been run for bundled Omnix.
+fn mark_omnix_npm_done(dir: &Path) -> Result<(), String> {
+    fs::write(dir.join(OMNIX_NPM_DONE_MARKER), "")
+        .map_err(|e| format!("Failed to create npm-done marker: {}", e))
+}
+
+/// Resolve the Omnix project directory. If it doesn't exist, extract from
+/// bundled resources first. Returns an error if extraction fails or the
+/// entry point is missing.
+fn resolve_omnix_dir(app: &tauri::AppHandle, omnix_path: Option<String>) -> Result<PathBuf, String> {
+    let target_dir = PathBuf::from(omnix_path
         .filter(|p| !p.trim().is_empty())
-        .unwrap_or_else(|| DEFAULT_OMNIX_DIR.to_string());
-    let dir = PathBuf::from(dir);
-    if !dir.join("server.ts").exists() {
+        .unwrap_or_else(|| DEFAULT_OMNIX_DIR.to_string()));
+
+    // If target exists and has server.ts, we're done.
+    if target_dir.join("server.ts").exists() {
+        return Ok(target_dir);
+    }
+
+    // Need to extract from bundled resources.
+    let resource_dir = app
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("Failed to get resource dir: {}", e))?
+        .join("omnix");
+
+    if !resource_dir.join("server.ts").exists() {
         return Err(format!(
-            "Omnix not found at {}. Set the Omnix path in Settings and run `npm install` there once.",
-            dir.display()
+            "Omnix not found at {} and bundled resources missing server.ts",
+            target_dir.display()
         ));
     }
-    Ok(dir)
+
+    // Copy bundled Omnix to target directory.
+    fs::create_dir_all(&target_dir)
+        .map_err(|e| format!("Failed to create {}: {}", target_dir.display(), e))?;
+
+    copy_dir_recursive(&resource_dir, &target_dir)
+        .map_err(|e| format!("Failed to extract Omnix: {}", e))?;
+
+    Ok(target_dir)
+}
+
+/// Recursively copy a directory (preserves contents, overwrites if exists).
+fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
+    for entry in fs::read_dir(src)
+        .map_err(|e| format!("Failed to read {}: {}", src.display(), e))?
+    {
+        let entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+
+        if src_path.is_dir() {
+            fs::create_dir_all(&dst_path)
+                .map_err(|e| format!("Failed to create dir {}: {}", dst_path.display(), e))?;
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            fs::copy(&src_path, &dst_path)
+                .map_err(|e| format!("Failed to copy {} to {}: {}", src_path.display(), dst_path.display(), e))?;
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
-pub fn spawn_omnix(omnix_path: Option<String>) -> Result<(), String> {
-    let dir = resolve_omnix_dir(omnix_path)?;
+pub fn spawn_omnix(app: tauri::AppHandle, omnix_path: Option<String>) -> Result<(), String> {
+    let dir = resolve_omnix_dir(&app, omnix_path)?;
+
+    // Check if npm install is needed (no node_modules or marker file missing)
+    let needs_npm = !dir.join("node_modules").exists() || !omnix_npm_done(&dir);
+
+    if needs_npm {
+        // Run npm install to populate node_modules
+        let npm_result = std::process::Command::new("npm")
+            .current_dir(&dir)
+            .arg("install")
+            .output()
+            .map_err(|e| format!("Failed to run npm install: {}", e))?;
+
+        if !npm_result.status.success() {
+            let stderr = String::from_utf8_lossy(&npm_result.stderr);
+            return Err(format!("npm install failed: {}", stderr));
+        }
+
+        // Mark that we've done npm install
+        mark_omnix_npm_done(&dir)?;
+    }
+
     // Launch the Electron desktop app (hidden/standalone) rather than bare
     // `node server.ts`. Only the Electron-hosted Chromium renderer provides the
     // WebGPU compute worker that Vision/TTS require; a plain-node launch starts
@@ -42,7 +120,7 @@ pub fn spawn_omnix(omnix_path: Option<String>) -> Result<(), String> {
         .join("electron.exe");
     if !dir.join(&electron).exists() {
         return Err(format!(
-            "Omnix Electron runtime not installed at {}. Run `npm install` in that directory once.",
+            "Omnix Electron runtime not installed at {}. npm install may have failed.",
             dir.display()
         ));
     }
