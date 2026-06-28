@@ -26,6 +26,22 @@ Last updated: June 28, 2026
 
 ---
 
+## User Configurable (any user)
+
+Recent commits removed JC-specific hardcoding so Meridian can configure itself for any user instead of being tied to one developer's filesystem:
+
+- **No hardcoded credentials or paths.** `cluster.vue`, `utils/ssh-connections.ts`, `stores/storage/user-settings.ts`, `stores/schemas/user-settings.ts`, `backend-manager.vue`, `hardware.vue`, and `types/user-settings.ts` no longer seed `jatilq`, `C:\\Users\\jatilq\\.ssh\\meridian_black`, `192.168.1.67`, `192.168.1.64`, or `E:\\ai\\Models` as defaults. All of these now ship empty / blank and the user fills them in via the UI.
+- **SSH supports both key and password auth.** New `SshAuthMethod = 'key' | 'password'` toggle in the SSH settings UI; `cluster.rs::ssh_exec()` branches on `key_path` → `authenticate_publickey`, password-only → `authenticate_password`, and rejects with `"No authentication method configured — provide a key path or password"` otherwise.
+- **Isolated password storage.** SSH passwords live in the secure-keys.json Tauri store (matches the existing api-key isolation pattern) via new `secure_store_secret` / `secure_get_secret` / `secure_delete_secret` Tauri commands in `secure_keys.rs`. The frontend writes only through `storeSshPassword` on save (and clears the in-memory plaintext) so the main user-settings blob never holds plaintext. The Rust side reads via `secure_get_secret` on demand inside `ssh_exec`, gated by a `passwordSecureKey` reference on the connection. Notes: this is isolation, not strong cryptographic encryption — a determined attacker with code execution on the machine can still read `secure-keys.json`. Swapping in Windows Credential Manager / macOS Keychain / libsecret behind the same `secure_*` interface is a local upgrade.
+- **Configurable Models folder.** New `meridian.modelsFolder` setting with `Settings -> Meridian -> Files` panel: a folder-path input + Browse button (Tauri dialog plugin). Hardware Scanner, AI panel, and Backend Manager read this path at runtime.
+- **AMD VRAM cap fix.** `cluster.rs::get_remote_hardware` now uses `Get-CimInstance Win32_VideoController` (CIM reports `AdapterRAM` as UInt64) instead of the legacy `Get-WmiObject` which capped the value to ~4 GB. RX 6900 XT now shows 16 GB.
+- **Add Worker dialog.** `cluster.vue` Add Worker button now opens an inline modal (Label / Host / Port / Username / Auth toggle / key OR password / Test Connection (calls `check_node_status`) / Save / Cancel) instead of dispatching a CustomEvent to global SSH settings.
+- **Configurable download folder with auto-detect.** `Settings -> Meridian -> Downloader` has an `Auto-save folder` input; on first run the schema migration 21→22 prefers `E:\\Downloads` then `C:\\Users\\<user>\\Downloads`, then creates `E:\\Downloads`.
+
+The Hardware Reference table lower in this file still lists JC's MAMBA / BLACK setup because that is documentation of the development environment, not defaults that ship to users.
+
+---
+
 ## Session Complete
 
 All pre-Phase 9 tasks implemented:

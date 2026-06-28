@@ -520,6 +520,10 @@
         "keyPath": "Private key path",
         "add": "Add connection",
         "remove": "Remove"
+      },
+      "files": {
+        "title": "Files",
+        "description": "Shared folders used by the AI panel, hardware scanner, and backend manager"
       }
     }
   },
@@ -568,7 +572,9 @@
     "autostart": "autostart, startup, boot, login, launch, system, wake",
     "extensions": "extensions, plugins, addons, configuration, settings",
     "aiPanel": "ai, artificial intelligence, panel, chat, endpoint, model, omnix",
-    "downloader": "downloader, download, queue, history, yt-dlp, save folder"
+    "downloader": "downloader, download, queue, history, yt-dlp, save folder",
+    "files": "files, models, folder, models folder, gguf, ai, path, save location",
+    "ssh": "ssh, sftp, remote, worker, connection, key, password, cluster"
   },
   "drag": {
     "holdShiftToChangeMode": "Hold [Shift] to change mode",
