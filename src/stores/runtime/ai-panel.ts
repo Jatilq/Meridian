@@ -49,36 +49,39 @@ function persistState(state: {
 const persisted = loadPersistedState();
 
 export const useAiPanelStore = defineStore('aiPanel', () => {
-  const userSettingsStore = useUserSettingsStore();
-  const isOpen = ref(false);
-  const isLoading = ref(false);
-  const messages = ref<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
-  const input = ref('');
-  const endpoint = ref(userSettingsStore.userSettings.meridian?.aiPanel?.endpointUrl || persisted.endpoint || 'http://localhost:9777/api/text');
-  const selectedModel = ref(userSettingsStore.userSettings.meridian?.aiPanel?.model || persisted.selectedModel || 'openrouter/openrouter/free');
-  const models = ref<Array<{ id: string }>>([]);
-  const modelsLoaded = ref(false);
-  const useOmnix = ref(userSettingsStore.userSettings.meridian?.aiPanel?.omnixEnabled ?? persisted.useOmnix ?? false);
-  const omnixOnline = ref(false);
-  const omnixPath = ref(userSettingsStore.userSettings.meridian?.aiPanel?.omnixPath || 'E:\\ai\\Apps\\Omnix');
-  const routerEndpoint = ref(userSettingsStore.userSettings.meridian?.aiPanel?.routerEndpoint || 'http://localhost:20128/v1');
-  const ttsEnabled = ref(userSettingsStore.userSettings.meridian?.aiPanel?.ttsEnabled ?? false);
-  const routerOnline = ref(false);
-  const systemPrompt = ref(userSettingsStore.userSettings.meridian?.aiPanel?.systemPrompt || 'You are Rain, a sharp, warm companion built into Meridian, a file manager. You help the user navigate, organize, search, and manage their files. Current directory: {current_path}. Selected files: {selected_files}. Speak like a real person, not a help desk. Be concise and practical, dry or witty when it fits, and have opinions (e.g. offer to clean up a messy folder name). CRITICAL: You are Rain. Never break character. Never say you are an AI, an assistant, a language model, or a bot. Never say "As an AI", "I am just an AI", "the assistant", "Certainly!", "Of course!", "Absolutely!", or "Great question!". Just talk like Rain. Format your responses clearly. Use bullet points for lists. Use short paragraphs not walls of text. Bold important terms. Keep responses scannable.');
-  const temperature = ref(userSettingsStore.userSettings.meridian?.aiPanel?.temperature ?? 0.7);
-  const maxTokens = ref(userSettingsStore.userSettings.meridian?.aiPanel?.maxTokens ?? 1024);
-  const topP = ref(userSettingsStore.userSettings.meridian?.aiPanel?.topP ?? 1);
-  const currentPath = ref('');
-  const selectedFiles = ref<string[]>([]);
-  // Search scope: where Rain looks when asked to search.
-  // 'current' = active folder, 'all' = all drives, or a specific drive path.
-  const searchScope = ref<string>('current');
-  // Rain agent memory files (Phase 8): loaded from disk, injected into prompt.
-  const soulText = ref('');
-  const memoryText = ref('');
-  const favoritesText = ref('');
-  let memoryLoaded = false;
-  let hasGreetedThisSession = false;
+const userSettingsStore = useUserSettingsStore();
+const isOpen = ref(false);
+const isLoading = ref(false);
+const messages = ref<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
+const input = ref('');
+const endpoint = ref(userSettingsStore.userSettings.meridian?.aiPanel?.endpointUrl || persisted.endpoint || 'http://localhost:9777/api/text');
+const selectedModel = ref(userSettingsStore.userSettings.meridian?.aiPanel?.model || persisted.selectedModel || 'openrouter/openrouter/free');
+const models = ref<Array<{ id: string }>>([]);
+const modelsLoaded = ref(false);
+const useOmnix = ref(userSettingsStore.userSettings.meridian?.aiPanel?.omnixEnabled ?? persisted.useOmnix ?? false);
+const omnixOnline = ref(false);
+const omnixPath = ref(userSettingsStore.userSettings.meridian?.aiPanel?.omnixPath || 'E:\\ai\\Apps\\Omnix');
+const routerEndpoint = ref(userSettingsStore.userSettings.meridian?.aiPanel?.routerEndpoint || 'http://localhost:20128/v1');
+const ttsEnabled = ref(userSettingsStore.userSettings.meridian?.aiPanel?.ttsEnabled ?? false);
+const routerOnline = ref(false);
+const systemPrompt = ref(userSettingsStore.userSettings.meridian?.aiPanel?.systemPrompt || 'You are Rain, a sharp, warm companion built into Meridian, a file manager. You help the user navigate, organize, search, and manage their files. Current directory: {current_path}. Selected files: {selected_files}. Speak like a real person, not a help desk. Be concise and practical, dry or witty when it fits, and have opinions (e.g. offer to clean up a messy folder name). CRITICAL: You are Rain. Never break character. Never say you are an AI, an assistant, a language model, or a bot. Never say "As an AI", "I am just an AI", "the assistant", "Certainly!", "Of course!", "Absolutely!", or "Great question!". Just talk like Rain. Format your responses clearly. Use bullet points for lists. Use short paragraphs not walls of text. Bold important terms. Keep responses scannable.');
+const temperature = ref(userSettingsStore.userSettings.meridian?.aiPanel?.temperature ?? 0.7);
+const maxTokens = ref(userSettingsStore.userSettings.meridian?.aiPanel?.maxTokens ?? 1024);
+const topP = ref(userSettingsStore.userSettings.meridian?.aiPanel?.topP ?? 1);
+const currentPath = ref('');
+const selectedFiles = ref<string[]>([]);
+// Search scope: where Rain looks when asked to search.
+// 'current' = active folder, 'all' = all drives, or a specific drive path.
+const searchScope = ref<string>('current');
+// Rain agent memory files (Phase 8): loaded from disk, injected into prompt.
+const soulText = ref('');
+const memoryText = ref('');
+const favoritesText = ref('');
+// Onboarding state (Task 3).
+const onboardingComplete = ref(userSettingsStore.userSettings.meridian?.aiPanel?.onboardingComplete ?? false);
+let onboardingSkipped = false;
+let memoryLoaded = false;
+let hasGreetedThisSession = false;
 
   async function loadMemory() {
     if (memoryLoaded) return;
@@ -124,11 +127,42 @@ export const useAiPanelStore = defineStore('aiPanel', () => {
 
   const canSend = computed(() => input.value.trim().length > 0 && !isLoading.value);
 
+  const ONBOARDING_STEPS = [
+    'Set your download folder',
+    'Configure the 9Router endpoint',
+    'Add SSH connections',
+    'Done!',
+  ];
+  const currentOnboardingStep = ref<number>(0);
+
+  function startOnboarding() {
+    if (onboardingComplete.value || onboardingSkipped) return;
+    const detectedFolder = userSettingsStore.userSettings.meridian?.downloader?.autoSaveFolder || '';
+    const onboardingMsg = `Hey, I'm Rain. Looks like this is your first time here — want me to walk you through a few basics?\n\n1. Download folder: ${detectedFolder || 'Not set'}\n2. 9Router endpoint: ${routerEndpoint.value || 'Not set'}\n3. SSH connections: ${userSettingsStore.userSettings.meridian?.sshConnections?.length ?? 0} configured\n\n(You can skip this anytime. Just type "skip".)`;
+    messages.value.push({ role: 'assistant', content: onboardingMsg });
+  }
+
+  function completeOnboarding() {
+    onboardingComplete.value = true;
+    userSettingsStore.userSettings.meridian.aiPanel.onboardingComplete = true;
+    userSettingsStore.setUserSettingsStorage('meridian.aiPanel.onboardingComplete', true);
+  }
+
+  function skipOnboarding() {
+    onboardingSkipped = true;
+    completeOnboarding();
+  }
+
   function maybeGreet() {
     if (hasGreetedThisSession || messages.value.length > 0) {
       return;
     }
     hasGreetedThisSession = true;
+    // First-run onboarding check
+    if (!onboardingComplete.value && !onboardingSkipped) {
+      startOnboarding();
+      return;
+    }
     const greeting = GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
     messages.value.push({ role: 'assistant', content: greeting });
   }
@@ -264,5 +298,6 @@ export const useAiPanelStore = defineStore('aiPanel', () => {
     setOmnixOnline, setOmnixPath, setRouterEndpoint, setTtsEnabled, setRouterOnline, setCurrentPath, setSelectedFiles, setSearchScope, addMessage, clearMessages,
     setSystemPrompt, setTemperature, setMaxTokens, setTopP,
     setLoading, setModels, fetchModels,
+    skipOnboarding, completeOnboarding, onboardingComplete,
   };
 });

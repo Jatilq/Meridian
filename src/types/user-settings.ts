@@ -170,6 +170,7 @@ export type AiPanelSettings = {
   temperature: number;
   maxTokens: number;
   topP: number;
+  onboardingComplete: boolean;
 };
 
 export type DownloaderSettings = {

@@ -43,70 +43,132 @@ interface NodeView extends HardwareSnapshot {
   role: string;
 }
 
-// MAMBA runs Meridian (local); BLACK is remote over SSH.
-// IPs/credentials are configurable in Settings → Cluster (pending).
-const NODES = [
-  { name: 'MAMBA', host: '192.168.1.67', role: 'Primary inference (3× RTX 3060)', local: true, vendor: 'nvidia' },
-  { name: 'BLACK', host: '192.168.1.64', role: 'Daily driver / RPC slave (RX 6900 XT)', local: false, vendor: 'amd' },
-];
+// Node definition for the topology map
+interface NodeDef {
+  id: string;
+  name: string;
+  host: string;
+  role: string;
+  local: boolean;
+  vendor: string;
+}
 
-// SSH credentials for remote nodes (BLACK). Default to the passphrase-less
-// Meridian key; configurable in Settings → Cluster (pending). russh requires
-// an UNencrypted key file (no agent/passphrase prompt in headless mode).
-const BLACK_CREDS = {
-  host: '192.168.1.64',
-  port: 22,
-  username: 'jatilq',
-  keyPath: 'C:\\Users\\jatilq\\.ssh\\meridian_black',
-};
+// Load SSH connections from settings (dynamic node list)
+import { useUserSettingsStore } from '@/stores/storage/user-settings';
+const userSettingsStore = useUserSettingsStore();
 
-const nodes = ref<NodeView[]>(
-  NODES.map(n => ({ name: n.name, host: n.host, role: n.role, online: false, cpu: null, ram: null, gpus: [], error: null })),
-);
+const sshConnections = computed(() => userSettingsStore.userSettings.meridian.sshConnections);
+
+// Build node list from SSH connections + mark local status
+const nodeDefs = computed<NodeDef[]>(() => {
+  const conns = sshConnections.value || [];
+  // MAMBA is special - it's local (where Meridian runs)
+  const mambaConn = conns.find(c => c.label === 'MAMBA');
+  const nodes: NodeDef[] = [];
+
+  if (mambaConn) {
+    nodes.push({
+      id: mambaConn.host,
+      name: mambaConn.label || mambaConn.host,
+      host: mambaConn.host,
+      role: 'Primary inference',
+      local: true,
+      vendor: 'nvidia',
+    });
+  }
+
+  // Other connections are remote
+  conns.filter(c => c.label !== 'MAMBA').forEach(c => {
+    nodes.push({
+      id: c.host,
+      name: c.label || c.host,
+      host: c.host,
+      role: 'Worker node',
+      local: false,
+      vendor: 'nvidia', // default, could be detected
+    });
+  });
+
+  return nodes;
+});
+
+const nodeViews = ref<NodeView[]>([]);
 const rpcLaunching = ref(false);
 const rpcMessage = ref('');
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
-async function refreshNode(idx: number) {
-  const def = NODES[idx];
-  try {
-    const snap = def.local
-      ? await invoke<HardwareSnapshot>('get_local_hardware')
-      : await invoke<HardwareSnapshot>('get_remote_hardware', { creds: BLACK_CREDS, vendor: def.vendor });
-    nodes.value[idx] = { name: def.name, host: def.host, role: def.role, ...snap };
-  }
-  catch (error) {
-    nodes.value[idx] = {
-      name: def.name, host: def.host, role: def.role,
-      online: false, cpu: null, ram: null, gpus: [], error: String(error),
+async function refreshNodeViews() {
+  const views: NodeView[] = [];
+  for (const def of nodeDefs.value) {
+    // Use stored credentials from the SSH connection
+    const conn = sshConnections.value?.find(c => c.host === def.host);
+    const creds = {
+      host: def.host,
+      port: conn?.port ?? def.local ? 22 : 22,
+      username: conn?.username ?? (def.local ? 'jatilq' : 'jatilq'),
+      keyPath: conn?.keyPath ?? 'C:\\Users\\jatilq\\.ssh\\meridian_black',
     };
+
+    try {
+      const snap = def.local
+        ? await invoke<HardwareSnapshot>('get_local_hardware')
+        : await invoke<HardwareSnapshot>('get_remote_hardware', { creds, vendor: def.vendor });
+      views.push({
+        name: def.name,
+        host: def.host,
+        role: def.role,
+        ...snap,
+      });
+    } catch (error) {
+      views.push({
+        name: def.name,
+        host: def.host,
+        role: def.role,
+        online: false,
+        cpu: null,
+        ram: null,
+        gpus: [],
+        error: String(error),
+      });
+    }
   }
+  nodeViews.value = views;
 }
 
 async function refreshAll() {
-  await Promise.all(NODES.map((_, i) => refreshNode(i)));
+  await refreshNodeViews();
 }
 
 async function launchRpcSlave() {
   rpcLaunching.value = true;
   rpcMessage.value = '';
-  try {
-    const out = await invoke<string>('launch_rpc_slave', {
-      creds: BLACK_CREDS,
-      rpcCommand: 'llama-server --rpc 0.0.0.0:50052',
-    });
-    rpcMessage.value = out || 'RPC slave launch requested.';
+  const blackConn = sshConnections.value?.find(c => c.label === 'BLACK');
+  if (blackConn) {
+    try {
+      const out = await invoke<string>('launch_rpc_slave', {
+        creds: {
+          host: blackConn.host,
+          port: blackConn.port,
+          username: blackConn.username,
+          keyPath: blackConn.keyPath,
+        },
+        rpcCommand: 'llama-server --rpc 0.0.0.0:50052',
+      });
+      rpcMessage.value = out || 'RPC slave launch requested.';
+    } catch (error) {
+      rpcMessage.value = `Failed: ${error}`;
+    }
   }
-  catch (error) {
-    rpcMessage.value = `Failed: ${error}`;
-  }
-  finally {
-    rpcLaunching.value = false;
-  }
+  rpcLaunching.value = false;
+}
+
+function openSettings() {
+  // Navigate to settings SSH connections panel
+  window.dispatchEvent(new CustomEvent('open-settings-ssh'));
 }
 
 const combinedVram = computed(() => {
-  const totalMb = nodes.value
+  const totalMb = nodeViews.value
     .flatMap(n => n.gpus)
     .reduce((sum, g) => sum + (g.memoryTotal || 0), 0);
   return totalMb > 0 ? `${(totalMb / 1024).toFixed(0)}GB` : '—';
@@ -131,13 +193,102 @@ onUnmounted(() => {
     <div class="cluster__header">
       <h1 class="cluster__title">Cluster Control</h1>
       <div class="cluster__summary">
-        Combined VRAM: <strong>{{ combinedVram }}</strong>
+        Combined VRAM: <strong class="cluster__vram-value">{{ combinedVram }}</strong>
       </div>
     </div>
 
+    <!-- Topology Map -->
+    <div class="cluster__topology">
+      <svg
+        viewBox="0 0 600 200"
+        class="cluster__topology-svg"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <!-- Connection line -->
+        <line
+          v-if="nodeViews.length > 1"
+          x1="150"
+          y1="100"
+          :x2="150 + (nodeViews.length - 1) * 180"
+          y2="100"
+          class="cluster__connection-line"
+        />
+        <text
+          v-if="nodeViews.length > 1"
+          x="250"
+          y="90"
+          class="cluster__connection-label"
+        >
+          LAN
+        </text>
+
+        <!-- Node cards -->
+        <g
+          v-for="(node, idx) in nodeViews"
+          :key="node.host"
+        >
+          <rect
+            :x="idx * 180 + 20"
+            y="40"
+            width="140"
+            height="120"
+            rx="6"
+            class="cluster__node-svg-card"
+            :class="{
+              'cluster__node-svg-card--online': node.online,
+              'cluster__node-svg-card--offline': !node.online,
+            }"
+          />
+          <circle
+            :cx="idx * 180 + 30"
+            cy="55"
+            r="5"
+            class="cluster__dot-svg"
+            :class="node.online ? 'cluster__dot-svg--on' : 'cluster__dot-svg--off'"
+          />
+          <text
+            :x="idx * 180 + 40"
+            y="58"
+            class="cluster__node-name-svg"
+          >
+            {{ node.name }}
+          </text>
+          <text
+            :x="idx * 180 + 40"
+            y="78"
+            class="cluster__node-host-svg"
+          >
+            {{ node.host }}
+          </text>
+          <text
+            :x="idx * 180 + 40"
+            y="98"
+            class="cluster__node-gpu-svg"
+          >
+            {{ node.gpus.length > 0 ? node.gpus[0].name : 'No GPU' }}
+          </text>
+          <text
+            :x="idx * 180 + 40"
+            y="118"
+            class="cluster__node-vram-svg"
+          >
+            {{ node.gpus.length > 0 ? `${gb(node.gpus[0].memoryUsed)}/${gb(node.gpus[0].memoryTotal)}GB` : '—' }}
+          </text>
+        </g>
+      </svg>
+
+      <button
+        class="cluster__add-worker"
+        @click="openSettings"
+      >
+        Add Worker
+      </button>
+    </div>
+
+    <!-- Detailed Hardware Cards -->
     <div class="cluster__nodes">
       <div
-        v-for="(node, idx) in nodes"
+        v-for="(node, idx) in nodeViews"
         :key="node.host"
         class="cluster__node"
       >
@@ -149,7 +300,7 @@ onUnmounted(() => {
           <span class="cluster__node-name">{{ node.name }}</span>
           <span class="cluster__node-host">{{ node.host }}</span>
           <span class="cluster__node-role">{{ node.role }}</span>
-          <button class="cluster__refresh" @click="refreshNode(idx)">Refresh</button>
+          <button class="cluster__refresh" @click="refreshAll()">Refresh</button>
         </div>
 
         <template v-if="node.online">
@@ -234,6 +385,89 @@ onUnmounted(() => {
 .cluster__summary {
   color: hsl(var(--muted-foreground));
   font-size: 0.875rem;
+}
+
+.cluster__vram-value {
+  color: #c9a84c;
+  font-weight: 600;
+}
+
+.cluster__topology {
+  margin-bottom: 1rem;
+  position: relative;
+}
+
+.cluster__topology-svg {
+  width: 100%;
+  height: 160px;
+  background: #1e1e1e;
+  border-radius: var(--radius-sm);
+  border: 1px solid hsl(var(--border));
+}
+
+.cluster__connection-line {
+  stroke: hsl(var(--primary) / 40%);
+  stroke-width: 2;
+  stroke-dasharray: 4 2;
+}
+
+.cluster__connection-label {
+  fill: hsl(var(--muted-foreground));
+  font-size: 10px;
+  text-anchor: middle;
+}
+
+.cluster__node-svg-card {
+  fill: hsl(var(--background-2));
+  stroke: hsl(var(--border));
+  stroke-width: 1;
+}
+
+.cluster__node-svg-card--online {
+  stroke: #c9a84c;
+  stroke-width: 1.5;
+}
+
+.cluster__dot-svg {
+  fill: #6b7280;
+}
+
+.cluster__dot-svg--on {
+  fill: #34d399;
+}
+
+.cluster__node-name-svg {
+  fill: hsl(var(--foreground));
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.cluster__node-host-svg {
+  fill: hsl(var(--muted-foreground));
+  font-size: 10px;
+}
+
+.cluster__node-gpu-svg {
+  fill: hsl(var(--muted-foreground));
+  font-size: 10px;
+}
+
+.cluster__node-vram-svg {
+  fill: hsl(var(--foreground));
+  font-size: 10px;
+}
+
+.cluster__add-worker {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-size: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid hsl(var(--primary));
+  background: hsl(var(--primary) / 10%);
+  color: hsl(var(--foreground));
+  cursor: pointer;
 }
 
 .cluster__nodes {
