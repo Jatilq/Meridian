@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Rounded dark background tile -->
+  <rect width="256" height="256" rx="48" ry="48" fill="#1a1a1a"/>
+
+  <!-- North-pointing compass needle (gold, dominant) -->
+  <polygon points="128,32 100,128 156,128" fill="#c9a84c"/>
+  <!-- South-pointing compass needle (gold, subdued to suggest orientation) -->
+  <polygon points="128,224 100,128 156,128" fill="#c9a84c" opacity="0.6"/>
+
+  <!-- Horizontal MERIDIAN line: gold, full width, broken at the pivot -->
+  <rect x="24"  y="120" width="76" height="16" fill="#c9a84c"/>
+  <rect x="156" y="120" width="76" height="16" fill="#c9a84c"/>
+
+  <!-- Gold pivot ring (stroked, dark interior shows the tile bg through it) -->
+  <circle cx="128" cy="128" r="40" fill="none" stroke="#c9a84c" stroke-width="8"/>
+</svg>
