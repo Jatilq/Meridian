@@ -1056,7 +1056,40 @@
     "showOnUpdate": "Show changelog on app update",
     "viewChangelog": "View changelog",
     "current": "Current",
-    "selectVersion": "Select version"
+    "selectVersion": "Select version",
+    "whatsNew": {
+      "badge": "Meridian v{version}",
+      "title": "Welcome to Meridian",
+      "description": "Your local-first AI workstation is ready. Here's what's new in this release.",
+      "viewFullChangelog": "View full changelog",
+      "gotIt": "Got it"
+    },
+    "feature": {
+      "rain": {
+        "title": "Rain — AI assistant built in",
+        "description": "A warm, capable companion that helps you search, organize, and manage your files."
+      },
+      "cluster": {
+        "title": "Cluster Control — multi-node GPU pooling",
+        "description": "Pool VRAM across MAMBA, BLACK, and any worker you add over SSH."
+      },
+      "sftp": {
+        "title": "SSH/SFTP Browser — remote machines as local drives",
+        "description": "Browse, transfer, and manage remote filesystems right next to local panes."
+      },
+      "downloader": {
+        "title": "Smart Downloader — yt-dlp powered",
+        "description": "Queue downloads with pause, resume, cancel, and browser-extension capture."
+      },
+      "vision": {
+        "title": "Vision & TTS — Omnix powered",
+        "description": "Analyze selected images and speak responses with local Omnix inference."
+      },
+      "agent": {
+        "title": "Agent Mode — Rain can act",
+        "description": "Move, rename, and delete files through natural-language commands with confirmation cards."
+      }
+    }
   },
   "extensions": {
     "subtitle": "Browse and manage extensions from the community",

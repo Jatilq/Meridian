@@ -230,6 +230,7 @@ export function useChangelog() {
 
   return {
     isOpen,
+    isWhatsNewOpen,
     appVersion,
     releases,
     currentRelease,
@@ -238,6 +239,8 @@ export function useChangelog() {
     init,
     open,
     close,
+    openWhatsNew,
+    closeWhatsNew,
     markAsSeen,
     checkAndShowChangelog,
   };
