@@ -54,6 +54,8 @@ function handleScopeChange(value: string) {
 const resultAreaRef = ref<InstanceType<typeof ScrollArea> | null>(null);
 const confirmDialogOpen = ref(false);
 const confirmDialogData = ref<{ title: string; description: string; onConfirm: () => void | Promise<void> } | null>(null);
+// Pending resolver for an in-flight tool confirmation (Rain agent loop).
+let toolConfirmResolve: ((confirmed: boolean) => void) | null = null;
 
 watch(
   () => aiPanelStore.isOpen,
@@ -103,6 +105,145 @@ async function maybeSpeak(text: string) {
     // TTS is best-effort; ignore failures
   }
 }
+// Rain agent loop: POST to 9Router with tool schemas; while the model returns
+// tool_calls, execute them (read-only/create immediately, destructive ones via
+// confirmation) and feed results back. Caps at 10 iterations. Returns the final
+// assistant text. `pendingDestructive` collects tool calls needing confirmation.
+async function runAgentLoop(
+  routerBase: string,
+  model: string | undefined,
+  systemPrompt: string,
+  prompt: string,
+): Promise<string> {
+  // OpenAI-style message list we grow across iterations.
+  const messages: Array<Record<string, unknown>> = [
+    { role: 'system', content: systemPrompt },
+    ...aiPanelStore.messages.map((m: { role: 'user' | 'assistant'; content: string }) => ({ role: m.role, content: m.content })),
+    { role: 'user', content: prompt },
+  ];
+
+  // Tool schemas from the backend (OpenAI tools array).
+  let tools: unknown[] = [];
+  try {
+    tools = JSON.parse(await invoke<string>('rain_tool_schemas'));
+  }
+  catch {
+    tools = [];
+  }
+
+  const DESTRUCTIVE = new Set(['move_files', 'rename_item', 'delete_item']);
+  const MAX_ITERATIONS = 10;
+
+  for (let i = 0; i < MAX_ITERATIONS; i++) {
+    const res = await fetch(`${routerBase}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(model ? { 'X-Model-Id': model } : {}) },
+      body: JSON.stringify({
+        model: model || 'default',
+        messages,
+        tools,
+        tool_choice: 'auto',
+        temperature: aiPanelStore.temperature,
+        max_tokens: aiPanelStore.maxTokens,
+        top_p: aiPanelStore.topP,
+      }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+
+    const data = JSON.parse((await res.text()).replace(/\s*data:\s*\[DONE\]\s*$/i, '').trim());
+    const choice = data?.choices?.[0]?.message;
+    if (!choice) return 'No response received.';
+
+    const toolCalls = choice.tool_calls as Array<{ id: string; function: { name: string; arguments: string } }> | undefined;
+
+    // No tool calls -> final answer.
+    if (!toolCalls || toolCalls.length === 0) {
+      return choice.content ?? 'No response received.';
+    }
+
+    // Record the assistant turn (with its tool_calls) before appending results.
+    messages.push({ role: 'assistant', content: choice.content ?? '', tool_calls: toolCalls });
+
+    for (const call of toolCalls) {
+      const name = call.function?.name ?? '';
+      let args: Record<string, unknown> = {};
+      try { args = JSON.parse(call.function?.arguments || '{}'); }
+      catch { args = {}; }
+
+      let resultJson: string;
+      if (DESTRUCTIVE.has(name)) {
+        // Gate behind a confirmation card; await the user's decision.
+        const confirmed = await requestToolConfirmation(name, args);
+        if (confirmed) {
+          resultJson = await executeDestructiveTool(name, args);
+        }
+        else {
+          resultJson = JSON.stringify({ ok: false, cancelled: true, error: 'User cancelled the operation.' });
+        }
+      }
+      else {
+        resultJson = await invoke<string>('rain_run_tool', { name, args });
+      }
+
+      void logToolCall(name, args, resultJson);
+      messages.push({ role: 'tool', tool_call_id: call.id, content: resultJson });
+    }
+  }
+
+  return 'Stopped after the maximum number of tool steps. Ask me to continue if you need more.';
+}
+
+// --- Step 4 (confirmation) + Step 5 (memory) helpers ---
+// requestToolConfirmation / executeDestructiveTool are fleshed out in Step 4.
+// logToolCall / maybeRememberFromTurn are fleshed out in Step 5.
+
+async function requestToolConfirmation(name: string, args: Record<string, unknown>): Promise<boolean> {
+  // Step 4 replaces this with an in-panel confirmation card. For now, resolve
+  // via the existing confirm dialog (Confirm => true, Cancel => false).
+  return new Promise<boolean>((resolve) => {
+    const summary = name === 'move_files'
+      ? `Move ${Array.isArray(args.src) ? (args.src as string[]).length : 1} item(s) to ${String(args.dest)}`
+      : name === 'rename_item'
+        ? `Rename ${String(args.old)} → ${String(args.new)}`
+        : `Delete ${String(args.path)}${args.permanent === true ? ' permanently' : ' (to recycle bin)'}`;
+    toolConfirmResolve = resolve;
+    showConfirm(name, summary, () => {
+      const r = toolConfirmResolve; toolConfirmResolve = null;
+      if (r) r(true);
+    });
+  });
+}
+
+async function executeDestructiveTool(name: string, args: Record<string, unknown>): Promise<string> {
+  try {
+    if (name === 'move_files') {
+      await invoke('move_items', { sourcePaths: args.src, destinationPath: args.dest });
+      return JSON.stringify({ ok: true, moved: args.src, dest: args.dest });
+    }
+    if (name === 'rename_item') {
+      await invoke('rename_item', { sourcePath: args.old, newName: args.new });
+      return JSON.stringify({ ok: true, renamed: args.old, to: args.new });
+    }
+    if (name === 'delete_item') {
+      await invoke('delete_items', { files: [args.path], permanent: args.permanent === true });
+      return JSON.stringify({ ok: true, deleted: args.path });
+    }
+  }
+  catch (error) {
+    return JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) });
+  }
+  return JSON.stringify({ ok: false, error: `Unknown destructive tool: ${name}` });
+}
+
+async function logToolCall(name: string, args: Record<string, unknown>, resultJson: string): Promise<void> {
+  // Placeholder — SQLite logging wired in a later pass. Console for now.
+  // eslint-disable-next-line no-console
+  console.debug('[rain tool]', name, args, resultJson?.slice(0, 200));
+}
+
+async function maybeRememberFromTurn(_prompt: string, _finalText: string): Promise<void> {
+  // Placeholder — Step 5 implements MEMORY.md auto-append heuristics.
+}
 
 async function handleSend() {
   const prompt = aiPanelStore.input.trim();
@@ -137,7 +278,10 @@ async function handleSend() {
       .replace(/\{current_path\}/g, currentPath || '')
       .replace(/\{selected_files\}/g, selectedFiles.length > 0 ? selectedFiles.join(', ') : 'none')
       .replace(/\{search_scope\}/g, scopeText)
-      + `\n\nWhen searching for files, search ${scopeText} unless the user says otherwise.`;
+      + `\n\nWhen searching for files, search ${scopeText} unless the user says otherwise.`
+      + (aiPanelStore.soulText ? `\n\n=== SOUL (your identity) ===\n${aiPanelStore.soulText}` : '')
+      + (aiPanelStore.memoryText ? `\n\n=== MEMORY (what you've learned) ===\n${aiPanelStore.memoryText}` : '')
+      + (aiPanelStore.favoritesText ? `\n\n=== FAVORITES (noticed preferences) ===\n${aiPanelStore.favoritesText}` : '');
 
     let response: Response;
     if (omnixVisionReady && hasImage) {
@@ -166,91 +310,17 @@ async function handleSend() {
       return;
     }
     else {
-      // Text inference -> 9Router (OpenAI-compatible chat completions).
+      // Text inference -> 9Router via the Rain agent loop (tool calling).
       if (!routerBase) {
         throw new Error('9Router endpoint not configured. Set it in Settings.');
       }
-      response = await fetch(`${routerBase}/v1/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(model ? { 'X-Model-Id': model } : {}),
-        },
-        body: JSON.stringify({
-          model: model || 'default',
-          messages: [
-            { role: 'system', content: systemPrompt },
-            ...aiPanelStore.messages.map((m: { role: 'user' | 'assistant'; content: string }) => ({ role: m.role, content: m.content })),
-            { role: 'user', content: prompt },
-          ],
-          temperature: aiPanelStore.temperature,
-          max_tokens: aiPanelStore.maxTokens,
-          top_p: aiPanelStore.topP,
-        }),
-      });
-    }
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    // Read as text first so a non-clean-JSON body (SSE/streaming "data:" lines,
-    // or JSON with a trailing "data: [DONE]" marker) never throws on .json().
-    const rawBody = await response.text();
-    let content = 'No response received.';
-
-    // Strip any trailing SSE "data: [DONE]" marker and surrounding whitespace.
-    const cleaned = rawBody
-      .replace(/\s*data:\s*\[DONE\]\s*$/i, '')
-      .trim();
-
-    const extractContent = (obj: any): string | null =>
-      obj?.choices?.[0]?.message?.content
-        ?? obj?.choices?.[0]?.delta?.content
-        ?? obj?.response
-        ?? obj?.text
-        ?? null;
-
-    try {
-      // Non-streaming: the body is a single JSON object (possibly with the
-      // trailing [DONE] already stripped above).
-      const data = JSON.parse(cleaned);
-      content = extractContent(data) ?? content;
-    }
-    catch {
-      // Streaming/SSE: concatenate the content deltas from each "data:" line.
-      const lines = cleaned.split('\n').map(l => l.trim()).filter(l => l.startsWith('data:'));
-      if (lines.length > 0) {
-        let acc = '';
-        for (const line of lines) {
-          const payload = line.slice(5).trim();
-          if (payload === '[DONE]' || payload === '') continue;
-          try {
-            acc += extractContent(JSON.parse(payload)) ?? '';
-          }
-          catch {
-            // skip malformed SSE chunk
-          }
-        }
-        content = acc || content;
-      }
-    }
-    aiPanelStore.addMessage('assistant', content);
-    await maybeSpeak(content);
-
-    // Only attempt intent routing when the response actually looks like JSON.
-    // General chat returns plain text — display it as-is, never error.
-    const trimmed = content.trim();
-    if (trimmed.startsWith('{')) {
-      try {
-        const parsed = JSON.parse(trimmed);
-        if (parsed.intent && ['organize', 'rename', 'delete'].includes(parsed.intent)) {
-          handleIntentConfirmation(parsed);
-        }
-      }
-      catch {
-        // Looked like JSON but wasn't valid — leave the text as a chat reply.
-      }
+      const finalText = await runAgentLoop(routerBase, model, systemPrompt, prompt);
+      aiPanelStore.addMessage('assistant', finalText);
+      await maybeSpeak(finalText);
+      // Step 5 (memory auto-append) runs after the turn — see maybeRememberFromTurn.
+      void maybeRememberFromTurn(prompt, finalText);
+      aiPanelStore.setLoading(false);
+      return;
     }
   }
   catch (error) {
@@ -278,6 +348,10 @@ async function confirmAction() {
 function cancelAction() {
   confirmDialogOpen.value = false;
   confirmDialogData.value = null;
+  if (toolConfirmResolve) {
+    const r = toolConfirmResolve; toolConfirmResolve = null;
+    r(false);
+  }
 }
 
 async function handleIntentConfirmation(intent: { intent: string; scope?: string; action: Record<string, unknown>; message: string }) {
