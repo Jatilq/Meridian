@@ -4,7 +4,7 @@
 
 import HomePage from '@/modules/home/pages/home.vue';
 import {
-  BlocksIcon, FolderClosedIcon, HomeIcon, BookmarkIcon, ServerIcon, SettingsIcon, XIcon,
+  BlocksIcon, CpuIcon, FolderClosedIcon, HomeIcon, BookmarkIcon, ServerIcon, SettingsIcon, XIcon,
   ZapIcon,
 } from '@lucide/vue';
 import type { RouteRecordRaw } from 'vue-router';
@@ -60,6 +60,12 @@ export const routes: Array<RouteRecordRaw & { icon: typeof XIcon }> = [
     name: 'hardware',
     icon: ZapIcon,
     component: () => import('@/modules/hardware/pages/hardware.vue'),
+  },
+  {
+    path: '/backend-manager',
+    name: 'backend-manager',
+    icon: CpuIcon,
+    component: () => import('@/modules/backend-manager/pages/backend-manager.vue'),
   },
   {
     path: '/settings',

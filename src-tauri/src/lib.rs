@@ -23,6 +23,7 @@ mod downloader;
 mod extension_receiver;
 mod input_simulation;
 mod omnix;
+mod backend_manager;
 mod extensions;
 mod file_operations;
 mod global_search;
@@ -206,6 +207,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(startup_storage_bootstrap::StartupStorageBootstrapState::default())
         .manage(downloader::DownloaderRegistry::new())
+        .manage(backend_manager::BackendRegistry::default())
         .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
             #[cfg(windows)]
             {
@@ -413,6 +415,11 @@ pub fn run() {
             cluster::launch_rpc_slave,
             cluster::get_local_hardware,
             cluster::get_remote_hardware,
+            backend_manager::detect_local_gpu_vendor,
+            backend_manager::download_backend,
+            backend_manager::start_backend,
+            backend_manager::stop_backend,
+            backend_manager::get_backend_status,
             sftp::sftp_read_dir,
             rain_memory::rain_load_memory,
             rain_memory::rain_append_memory,
@@ -435,6 +442,12 @@ pub fn run() {
             if let tauri::WindowEvent::Destroyed = event {
                 if window.label() == "main" {
                     tauri::async_runtime::spawn(async { lan_share::stop_lan_share().await.ok() });
+                    if let Some(state) = window.try_state::<backend_manager::BackendRegistry>() {
+                        let registry = state.inner().clone();
+                        tauri::async_runtime::spawn(async move {
+                            let _ = backend_manager::reap_backends(&registry);
+                        });
+                    }
                 }
             }
         })

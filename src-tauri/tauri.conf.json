@@ -70,7 +70,8 @@
     "active": true,
     "resources": {
       "binaries/yt-dlp.exe": "yt-dlp.exe",
-      "resources/omnix": "omnix"
+      "resources/omnix": "omnix",
+      "../src/data/backends.json": "backends.json"
     },
     "targets": [
       "nsis",

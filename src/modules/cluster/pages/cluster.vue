@@ -4,10 +4,12 @@ Copyright © 2021 - present Aleksey Hoffman. All rights reserved.
 -->
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { invoke } from '@tauri-apps/api/core';
 import { useUserSettingsStore } from '@/stores/storage/user-settings';
 
+const { t } = useI18n();
 const userSettingsStore = useUserSettingsStore();
 const sshConnections = computed(() => userSettingsStore.userSettings.meridian?.sshConnections ?? []);
 
