@@ -16,7 +16,7 @@ import {
 import { BUILTIN_NAVIGATOR_ICON_THEME_IDS } from '@/types/icon-theme';
 
 export const USER_SETTINGS_SCHEMA_VERSION_KEY = '__schemaVersion';
-export const USER_SETTINGS_SCHEMA_VERSION = 21;
+export const USER_SETTINGS_SCHEMA_VERSION = 22;
 
 export const DEFAULT_GLOBAL_SEARCH_IGNORED_PATHS = [
   '/node_modules',
@@ -448,6 +448,42 @@ async function migrateUserSettingsStep(storage: StorageAdapter, fromVersion: num
       { host: '192.168.1.67', label: 'MAMBA', port: 22, username: 'jatilq', keyPath: 'C:\\Users\\jatilq\\.ssh\\meridian_black' },
       { host: '192.168.1.64', label: 'BLACK', port: 22, username: 'jatilq', keyPath: 'C:\\Users\\jatilq\\.ssh\\meridian_black' },
     ] as unknown as Record<string, unknown>);
+  }
+
+  if (fromVersion === 21 && toVersion === 22) {
+    // Auto-detect default download folder on first run.
+    // Priority: E:\Downloads > C:\Users\jatilq\Downloads > create E:\Downloads
+    const existingFolder = await storage.get<string>('meridian.downloader.autoSaveFolder');
+    const isMissing = typeof existingFolder !== 'string' || existingFolder.trim() === '';
+
+    if (isMissing) {
+      const candidatePaths = ['E:\\Downloads', 'C:\\Users\\jatilq\\Downloads'];
+      let detectedFolder = '';
+
+      for (const candidate of candidatePaths) {
+        try {
+          const exists = await invoke<boolean>('path_exists', { path: candidate });
+          if (exists) {
+            detectedFolder = candidate;
+            break;
+          }
+        } catch {
+          // ignore errors during detection
+        }
+      }
+
+      // If neither exists, create E:\Downloads
+      if (!detectedFolder) {
+        try {
+          await invoke('ensure_directory', { directoryPath: 'E:\\Downloads' });
+          detectedFolder = 'E:\\Downloads';
+        } catch {
+          // creation failed, leave as empty string
+        }
+      }
+
+      await storage.set('meridian.downloader.autoSaveFolder', detectedFolder);
+    }
   }
 
   if (fromVersion === 6 && toVersion === 7) {
