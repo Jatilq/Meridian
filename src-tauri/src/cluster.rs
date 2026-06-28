@@ -67,6 +67,7 @@ pub struct HardwareSnapshot {
 
 /// SSH connection parameters supplied by the frontend (from encrypted store).
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SshCredentials {
     pub host: String,
     #[serde(default = "default_port")]
