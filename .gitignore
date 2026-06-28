@@ -33,3 +33,11 @@ flatpak/.deb-input/
 flatpak/.build/
 flatpak/.repo/
 flatpak/output/
+
+# Secrets and credentials
+.env
+.env.*
+.npmrc
+.ssh/
+*.pem
+*.key
