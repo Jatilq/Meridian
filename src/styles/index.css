@@ -2,3 +2,65 @@
 @import "./main.css";
 @import "./general.css";
 @import "./stagger-animation.css";
+
+/* ============================================================
+   Global scrollable-padding rule.
+
+   Every scrollable region gets 24px of bottom padding so the
+   last item is never flush against (or clipped under) the
+   scroll edge. Mirrors the 24px convention already in
+   src/modules/navigator/components/file-browser/file-browser-content.vue
+   (--file-browser-scrollbar-gutter: 1.25rem). No app-level
+   status bar exists; 24px = ~16px visual breathing room
+   plus ~8px scrollbar reservation.
+
+   Three deliberate choices (audited May 2026):
+
+   1. Explicit selectors only — no `style="..."` catch-all.
+      Vue scoped styles compile to `.selector[data-v-XXX]`
+      and never emit `style="overflow-y: auto"` on the DOM.
+      A grep across every .vue / .css / .scss file in src/
+      found zero inline overflow-y declarations; the attribute
+      selector would have matched nothing.
+
+   2. `:where(...)` zero-specificity wrapper. The global rule
+      acts as a default that any per-component padding-bottom
+      overrides cleanly. No `!important` arms race. Panels that
+      already declared a value (e.g. settings-view__content =
+      12px) keep their local number; panels that declared none
+      (the majority) gain the project's 24px standard.
+
+   3.   Real class names verified against DOM:
+        .cluster__nodes               → cluster.vue:796
+        .cluster-modal__body          → cluster.vue ([Add Worker] modal body, line 965)
+                                       NOTE: this selector is a no-op in this rule
+                                       — the modal's local `.cluster-modal__body
+                                       { padding: 1rem }` shorthand (specificity
+                                       (0,2,0)) wins over `:where(...)` (0,0,0) and
+                                       keeps padding-bottom at 16px. Listed here for
+                                       audit completeness only.
+        .bm__section                  → backend-manager.vue:1132
+        .bm__models                   → backend-manager.vue:844, 921
+        .hardware__models             → hardware.vue:314
+        .settings-view__content       → settings/ui/view.vue:134
+        .settings-nav                 → settings/ui/nav.vue:26
+        .sigma-ui-dialog-scroll-content
+                                      → components/ui/dialog/
+                                        dialog-scroll-content.vue:32,74
+      (`.settings__view`, `.settings__nav` and
+      `.dialog-scroll-content` were names from a stale audit —
+      they don't exist on any element.)
+   ============================================================ */
+
+:where(
+  .cluster__nodes,
+  .cluster-modal__body,
+  .bm__section,
+  .bm__models,
+  .hardware__models,
+  .settings-view__content,
+  .settings-nav,
+  .sigma-ui-dialog-scroll-content
+) {
+  padding-bottom: 24px;
+}
