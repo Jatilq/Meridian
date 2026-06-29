@@ -147,23 +147,42 @@ async function refreshAll() {
   await refreshNodeViews();
 }
 
+// Generic RPC slave launcher. Targets the first connected worker. A
+// brand-new install has zero SSH workers, so the function guards on
+// `nodeViews.length` and exits early — the surrounding empty-state card
+// owns the UI in that case. The previous BLACK-specific lookup silently
+// no-op'd when the label was absent, which is what the screenshot bug
+// showed.
 async function launchRpcSlave() {
+  if (!nodeViews.value.length) {
+    rpcMessage.value = 'No workers to launch on. Add one above first.';
+    return;
+  }
   rpcLaunching.value = true;
   rpcMessage.value = '';
-  const blackConn = sshConnections.value?.find(c => c.label === 'BLACK');
-  if (blackConn) {
-    try {
-      const out = await invoke<string>('launch_rpc_slave', {
-        creds: credsFromConn(blackConn),
-        rpcCommand: 'llama-server --rpc 0.0.0.0:50052',
-      });
-      rpcMessage.value = out || 'RPC slave launch requested.';
-    } catch (error) {
-      rpcMessage.value = `Failed: ${error}`;
-    }
+  const target = nodeViews.value[0];
+  const conn = sshConnections.value?.find(c => c.host === target.host);
+  if (!conn) {
+    rpcMessage.value = `No SSH connection found for ${target.name}. Re-add the worker.`;
+    rpcLaunching.value = false;
+    return;
   }
-  rpcLaunching.value = false;
+  try {
+    const out = await invoke<string>('launch_rpc_slave', {
+      creds: credsFromConn(conn),
+      rpcCommand: 'llama-server --rpc 0.0.0.0:50052',
+    });
+    rpcMessage.value = out || `RPC slave launch sent to ${target.name}.`;
+  } catch (error) {
+    rpcMessage.value = `Failed: ${error}`;
+  } finally {
+    rpcLaunching.value = false;
+  }
 }
+
+// Template label helper. Empty when there are no workers — that's the
+// empty-state branch (button hidden via v-if), not a derelict label.
+const firstWorkerName = computed(() => nodeViews.value[0]?.name ?? '');
 
 // ----- Add Worker dialog (Fix 4) -----
 interface WorkerForm {
@@ -311,8 +330,9 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Topology Map -->
-    <div class="cluster__topology">
+    <template v-if="nodeViews.length">
+      <!-- Topology Map -->
+      <div class="cluster__topology">
       <svg
         viewBox="0 0 600 200"
         class="cluster__topology-svg"
@@ -468,10 +488,39 @@ onUnmounted(() => {
         :disabled="rpcLaunching"
         @click="launchRpcSlave"
       >
-        {{ rpcLaunching ? 'Launching…' : 'Launch RPC Slave on BLACK' }}
+        {{ rpcLaunching ? 'Launching…' : firstWorkerName ? `Launch RPC Slave on ${firstWorkerName}` : 'Launch RPC Slave' }}
       </button>
       <span v-if="rpcMessage" class="cluster__msg">{{ rpcMessage }}</span>
     </div>
+    </template>
+
+    <!-- ===================== Empty state (no SSH workers) ===================== -->
+    <template v-else>
+      <div class="cluster__empty" role="region" aria-labelledby="cluster-empty-title">
+        <div class="cluster__empty-icon" aria-hidden="true">
+          <PlusIcon :size="48" />
+        </div>
+        <h2 id="cluster-empty-title" class="cluster__empty-title">No workers yet</h2>
+        <p class="cluster__empty-text">
+          Add your first worker to coordinate llama.cpp inference across machines.
+          Cluster Control shows the topology, hardware profile, and lets you launch
+          an RPC slave on any connected box.
+        </p>
+        <button
+          type="button"
+          class="cluster__empty-cta"
+          @click="openAddWorker"
+        >
+          <PlusIcon :size="14" />
+          Add your first worker
+        </button>
+        <p class="cluster__empty-hint">
+          Each worker needs an SSH connection (key file or password). Launch RPC
+          Slave then runs <code>llama-server --rpc 0.0.0.0:50052</code> over SSH on
+          the chosen target — make sure llama.cpp is installed there.
+        </p>
+      </div>
+    </template>
 
     <!-- Add Worker dialog -->
     <Teleport to="body">
@@ -647,8 +696,17 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 1rem;
   padding: 1.5rem;
-  overflow-y: auto;
-  height: 100%;
+  /* Page-level no-scroll container. The active tab's inner list is the
+     only scroll region. Previous `height: 100%; overflow-y: auto` made
+     .cluster AND .cluster__nodes BOTH scroll targets — wheel events
+     split between them and the inner list's `max-height: calc(100vh - ...)`
+     cap was usually larger than the actual remaining space, so its
+     bottom got clipped under .cluster's `overflow: auto` boundary
+     instead of being reachable via scroll. `flex: 1; min-height: 0`
+     claims the full router-view-wrapper height without bleeding past it. */
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .cluster__header {
@@ -758,6 +816,34 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  /* The ONLY scroll container in this page. `flex: 1; min-height: 0`
+     claims the leftover vertical space inside .cluster, AND
+     `max-height` enforces a concrete cap so the list scrolls reliably
+     even when the upstream height chain is unconstrained. 100vh /
+     100dvh cascade follows the "modern wins last-decl" pattern —
+     mobile webviews: dvh constrains; Tauri desktop: both units
+     evaluate identically so cascade is effectively a no-op there.
+     320 cap is empirically tight against the topology-heavy chrome:
+       page padding top (.cluster)   24px
+       header                         40px
+       gap (header → topology)        16px
+       topology SVG                  160px  (the dominant chart)
+       gap (topology → nodes)         16px
+     Subtotal above section ≈ 256px. Add window-toolbar (32, in
+     router-view above .cluster): ~288px above the section's top
+     edge. At 100vh=720, available=432, cap=400 (32px tighter) → cap
+     kicks in early. At 100vh=1080, available=792, cap=760 (32px
+     tighter) → cap still wins. .cluster has overflow:hidden, so
+     without this cap the nodes list bleeds past .cluster's bottom
+     and gets clipped at the viewport edge — that's the bug this
+     cap prevents. Add Worker modal teleports to document body so
+     its height doesn't shift .cluster layout. */
+  flex: 1;
+  min-height: 0;
+  max-height: calc(100vh - var(--window-toolbar-height, 48px) - 320px);
+  max-height: calc(100dvh - var(--window-toolbar-height, 48px) - 320px);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .cluster__node {
@@ -1120,5 +1206,91 @@ onUnmounted(() => {
 .cluster-modal-enter-active .cluster-modal__panel,
 .cluster-modal-leave-active .cluster-modal__panel {
   transition: transform 0.18s ease;
+}
+
+/* ===================== Empty state (no SSH workers) ===================== */
+.cluster__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 2.5rem 1.5rem;
+  margin: 1.5rem 0;
+  text-align: center;
+  background: hsl(var(--background-2));
+  border: 1px dashed hsl(var(--border));
+  border-radius: var(--radius-md);
+  flex: 1;
+  min-height: 280px;
+}
+
+.cluster__empty-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--background-3));
+  border: 2px dashed hsl(var(--border));
+  border-radius: 50%;
+}
+
+.cluster__empty-title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+
+.cluster__empty-text {
+  margin: 0;
+  font-size: 0.9rem;
+  color: hsl(var(--muted-foreground));
+  max-width: 480px;
+  line-height: 1.5;
+}
+
+.cluster__empty-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.6rem 1.2rem;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground, hsl(var(--background))));
+  border: 0;
+  border-radius: var(--radius-sm);
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 0.5rem;
+  font-family: inherit;
+}
+
+.cluster__empty-cta:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.cluster__empty-cta:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.cluster__empty-hint {
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
+  font-style: italic;
+  max-width: 540px;
+  line-height: 1.4;
+}
+
+.cluster__empty-hint code {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.7rem;
+  background: hsl(var(--background-3));
+  padding: 0.1rem 0.35rem;
+  border-radius: var(--radius-sm);
 }
 </style>
