@@ -398,10 +398,20 @@ async function openSshConnection(host: string) {
 .quick-access-panel {
   --tooltip-height: 40px;
   --header-height: 32px;
-  --max-height: calc(100vh - 12px - var(--tooltip-height));
+  /* Popover cap: keep the viewport-based bound but subtract the
+     window-toolbar so the popover never bleeds under the app header.
+     Two declarations: 100vh is the legacy fallback (browsers without
+     dvh support) and 100dvh is the modern unit that excludes mobile
+     browser chrome. In CSS the LAST declaration wins, so the modern
+     unit takes precedence on mobile webview while both evaluate
+     identically in Tauri desktop (where there is no browser chrome). */
+  --max-height: calc(100vh - var(--window-toolbar-height, 0px) - 12px - var(--tooltip-height));
+  --max-height: calc(100dvh - var(--window-toolbar-height, 0px) - 12px - var(--tooltip-height));
 
+  display: flex;
   width: var(--quick-access-panel-width);
   max-height: var(--max-height);
+  flex-direction: column;
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow-md);
 }

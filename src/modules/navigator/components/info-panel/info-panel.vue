@@ -162,9 +162,17 @@ const isDrawerOpen = ref(false);
   display: flex;
   overflow: hidden;
   width: 100%;
+  /* Drawer is a positioned overlay; viewport-based cap is structural
+     (must not exceed the visible window). Two declarations per
+     property: 100vh is the legacy fallback and 100dvh is the modern
+     unit that excludes mobile browser chrome. In CSS the LAST
+     declaration wins, so the modern unit takes precedence on mobile
+     webview while both evaluate identically in Tauri desktop. */
   height: min(65vh, calc(100vh - var(--window-toolbar-height) - 8px));
+  height: min(65vh, calc(100dvh - var(--window-toolbar-height) - 8px));
   min-height: 240px;
   max-height: calc(100vh - var(--window-toolbar-height) - 8px);
+  max-height: calc(100dvh - var(--window-toolbar-height) - 8px);
   flex-direction: column;
   padding: 6px;
   padding-top: 0;

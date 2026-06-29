@@ -211,11 +211,28 @@ export type SshConnectionSetting = {
   passwordSecureKey?: string;
 };
 
+export type MeridianBackendKind = 'llama.cpp' | 'llamafile' | 'koboldcpp' | 'turboquant' | 'lemonade';
+
+/// Per-backend preferences. `port` is the HTTP listen port to launch the
+/// backend on (defaults: llama.cpp=8080, llamafile=8080, koboldcpp=5001).
+/// `modelPath` is the most-recently-loaded model — re-applying it via the
+/// Backend Manager's Load button keeps the previous selection handy.
+export type MeridianBackendConfig = {
+  port?: number;
+  modelPath?: string;
+  lastApiCheckAt?: number;
+  lastApiCheckOk?: boolean;
+};
+
 export type MeridianSettings = {
   aiPanel: AiPanelSettings;
   downloader: DownloaderSettings;
   sshConnections: SshConnectionSetting[];
   modelsFolder: string;
+  /// Per-backend runtime config (keyed by `MeridianBackendKind`). Stored as
+  /// a Record so adding new backends in future doesn't require schema
+  /// migration.
+  backend: Record<MeridianBackendKind, MeridianBackendConfig>;
 };
 
 export type TextSettings = {

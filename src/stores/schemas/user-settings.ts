@@ -16,7 +16,7 @@ import {
 import { BUILTIN_NAVIGATOR_ICON_THEME_IDS } from '@/types/icon-theme';
 
 export const USER_SETTINGS_SCHEMA_VERSION_KEY = '__schemaVersion';
-export const USER_SETTINGS_SCHEMA_VERSION = 25;
+export const USER_SETTINGS_SCHEMA_VERSION = 26;
 
 export const DEFAULT_GLOBAL_SEARCH_IGNORED_PATHS = [
   '/node_modules',
@@ -416,10 +416,10 @@ async function migrateUserSettingsStep(storage: StorageAdapter, fromVersion: num
   if (fromVersion === 18 && toVersion === 19) {
     await setDefaultObjectIfMissing(storage, 'meridian.aiPanel', {
       endpointUrl: 'http://localhost:9777/api/text',
-      model: 'openrouter/openrouter/free',
+      model: '',
       omnixEnabled: false,
       omnixPath: 'E:\\ai\\Apps\\Omnix',
-      routerEndpoint: 'http://localhost:20128/v1',
+      routerEndpoint: 'http://localhost:11434/v1',
       ttsEnabled: false,
     });
     await setDefaultObjectIfMissing(storage, 'meridian.downloader', {
@@ -432,8 +432,8 @@ async function migrateUserSettingsStep(storage: StorageAdapter, fromVersion: num
     // Backfill per-key aiPanel defaults for installs that already had a
     // meridian.aiPanel object (where setDefaultObjectIfMissing skipped the
     // new keys, leaving routerEndpoint/model/ttsEnabled unset).
-    await setDefaultStringIfMissing(storage, 'meridian.aiPanel.routerEndpoint', 'http://localhost:20128/v1');
-    await setDefaultStringIfMissing(storage, 'meridian.aiPanel.model', 'openrouter/openrouter/free');
+    await setDefaultStringIfMissing(storage, 'meridian.aiPanel.routerEndpoint', 'http://localhost:11434/v1');
+    await setDefaultStringIfMissing(storage, 'meridian.aiPanel.model', '');
     await setDefaultBooleanIfMissing(storage, 'meridian.aiPanel.ttsEnabled', false);
     await setDefaultStringIfMissing(storage, 'meridian.aiPanel.systemPrompt', 'You are Rain, a sharp, warm companion built into Meridian, a file manager. You help the user navigate, organize, search, and manage their files. Current directory: {current_path}. Selected files: {selected_files}. Speak like a real person, not a help desk. Be concise and practical, dry or witty when it fits, and have opinions (e.g. offer to clean up a messy folder name). CRITICAL: You are Rain. Never break character. Never say you are an AI, an assistant, a language model, or a bot. Never say "As an AI", "I am just an AI", "the assistant", "Certainly!", "Of course!", "Absolutely!", or "Great question!". Just talk like Rain. Format your responses clearly. Use bullet points for lists. Use short paragraphs not walls of text. Bold important terms. Keep responses scannable.');
     await setDefaultNumberIfMissing(storage, 'meridian.aiPanel.temperature', 0.7);
@@ -469,6 +469,43 @@ async function migrateUserSettingsStep(storage: StorageAdapter, fromVersion: num
       });
       if (mutated) {
         await storage.set('meridian.sshConnections', nextConns);
+      }
+    }
+  }
+
+  if (fromVersion === 25 && toVersion === 26) {
+    // Purge any persisted SSH connections that target the developer's
+    // home lab (MAMBA / BLACK). Those host/username combinations are
+    // implementation details of the original Meridian dev environment
+    // and must not be carried into user installs that share this build.
+    // Match only on the exact (host, username) pair — a user named
+    // "jatilq" on a different host, or the dev hosts with a different
+    // username, are preserved. All other connections are preserved.
+    const sshConnsValue = await storage.get<Array<Record<string, unknown>>>('meridian.sshConnections');
+    if (Array.isArray(sshConnsValue) && sshConnsValue.length > 0) {
+      const DEV_HOSTS = new Set(['192.168.1.67', '192.168.1.64']);
+      const DEV_USERS = new Set(['jatilq']);
+      const droppedHosts: string[] = [];
+      const kept = sshConnsValue.filter((entry) => {
+        if (!entry || typeof entry !== 'object') return true;
+        const host = typeof entry.host === 'string' ? entry.host.trim() : '';
+        const username = typeof entry.username === 'string' ? entry.username.trim() : '';
+        if (DEV_HOSTS.has(host) && DEV_USERS.has(username)) {
+          droppedHosts.push(host);
+          return false;
+        }
+        return true;
+      });
+      if (kept.length !== sshConnsValue.length) {
+        await storage.set('meridian.sshConnections', kept);
+        // Audit log (no credentials, just the host strings the developer
+        // already knows). Surface the purge so it's not silent.
+        if (typeof console !== 'undefined' && console.info) {
+          console.info(
+            `[meridian] schema 25→26: purged ${sshConnsValue.length - kept.length} `
+            + `dev-lab SSH connection(s) (hosts: ${[...new Set(droppedHosts)].join(', ')})`,
+          );
+        }
       }
     }
   }
@@ -534,7 +571,7 @@ async function migrateUserSettingsStep(storage: StorageAdapter, fromVersion: num
     // Universal onboarding v2: enable Omnix by default, add onboarding flow keys,
     // and migrate existing installs to connection-mode-aware defaults.
     await setDefaultStringIfMissing(storage, 'meridian.aiPanel.localEndpointUrl', 'http://localhost:11434/v1');
-    await setDefaultStringIfMissing(storage, 'meridian.aiPanel.apiProvider', 'openrouter');
+    await setDefaultStringIfMissing(storage, 'meridian.aiPanel.apiProvider', 'custom');
     await setDefaultStringIfMissing(storage, 'meridian.aiPanel.connectionMode', 'basic');
     await setDefaultStringIfMissing(storage, 'meridian.aiPanel.onboardingStep', 'intro');
     await setDefaultStringIfMissing(storage, 'meridian.aiPanel.apiKeyTemp', '');

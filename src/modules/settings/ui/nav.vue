@@ -28,12 +28,20 @@ const settingsStore = useSettingsStore();
 
 <style scoped>
 .settings-nav {
-  position: sticky;
-  top: 0;
   display: flex;
-  max-height: calc(100vh - var(--window-toolbar-height));
   flex-direction: column;
-  align-self: start;
+  align-self: stretch;
+  /* The nav is a grid item inside `.settings-content__inner` which has
+     `height: 100%`. Switching the cap from `100vh` (which ignores the
+     actual grid cell height) to `100%` (which respects it) prevents
+     the bleed-past-overflow-hidden bug: when the grid cell is shorter
+     than 100vh - toolbar, the nav used to be capped at the larger
+     viewport-derived value and clipped by the parent's overflow. Now
+     the nav's scrollable area matches the actual available space.
+     `position: sticky` is intentionally dropped — the nav lives in a
+     grid that already handles its own vertical context. */
+  min-height: 0;
+  max-height: 100%;
   padding-right: 1rem;
   border-right: 1px solid hsl(var(--border));
   gap: 1rem;
@@ -49,7 +57,6 @@ const settingsStore = useSettingsStore();
 
 @media (width <= 768px) {
   .settings-nav {
-    position: static;
     max-height: none;
     padding-right: 0;
     border-right: none;
