@@ -44,12 +44,12 @@ dirs = "5"
 tantivy = "0.25"
 walkdir = "2.5"
 rayon = "1.11"
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "process", "io-util", "macros"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "process", "io-util", "macros", "time"] }
 notify = "8"
 tauri-plugin-drag = "2"
 tauri-plugin-window-state = "2"
 tauri-plugin-single-instance = "2"
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream", "multipart"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream", "multipart", "json"] }
 httpdate = "1.0"
 futures-util = "0.3"
 zip = "8.4"
@@ -86,7 +86,7 @@ drag = { path = "./patches/drag" }
 
 [dev-dependencies]
 tempfile = "3"
-tokio = { version = "1", features = ["macros", "test-util"] }
+tokio = { version = "1", features = ["macros", "test-util", "time"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

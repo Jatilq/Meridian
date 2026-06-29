@@ -4,19 +4,43 @@ Copyright © 2021 - present Aleksey Hoffman. All rights reserved.
 -->
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { useUserSettingsStore } from '@/stores/storage/user-settings';
+import type { MeridianBackendKind, MeridianBackendConfig } from '@/types/user-settings';
 import catalogData from '@/data/backends.json';
-import type { DirContents } from '@/types/dir-entry';
+import omnixCatalogData from '@/data/omnix-catalog.json';
 
 // ============================================================================
-// Catalog types — mirror src/data/backends.json. Kept inline (not exported) so
-// the Vue panel compiles against the bundled catalog string-with-asset-paths
-// without needing a separate schema-validation step. If the catalog grows a
-// richer schema, move these to src/types/backend-catalog.ts.
+// Catalog types — mirror src/data/backends.json shape.
 // ============================================================================
 type Hardware = 'cpu' | 'nvidia' | 'amd';
+
+// ============================================================================
+// Omnix catalog — bundled from src/data/omnix-catalog.json (built from
+// E:/ai/Apps/Omnix/src/shared/modelList.ts). Static so we don't have to
+// runtime-parse TypeScript upstream.
+// ============================================================================
+type OmnixCategory =
+  | 'text' | 'vision' | 'tts' | 'image-gen' | 'stt' | 'music-gen'
+  | 'director' | 'coder' | 'embedding';
+
+interface OmnixCatalogEntry {
+  id: string;
+  modelID: string;
+  name: string;
+  description: string;
+  size?: string;
+  category: OmnixCategory;
+  make?: string;
+  minRam?: number;
+  internal?: boolean;
+  verifiedWorking?: boolean;
+}
+
+// Raw array carries everything including the synthetic router entry
+// ('use-text-model'); the `omnixCatalog` computed below hides `internal` ones.
+const omnixCatalogRaw = omnixCatalogData as OmnixCatalogEntry[];
 
 interface BackendVariant {
   id: string;
@@ -31,7 +55,7 @@ interface BackendVariant {
 }
 
 interface BackendEntry {
-  id: string;
+  id: MeridianBackendKind;
   name: string;
   description: string;
   homepage: string;
@@ -58,7 +82,7 @@ interface GpuVendorInfo {
   source: string;
 }
 
-type RuntimeStatusKind = 'llama.cpp' | 'llamafile' | 'koboldcpp';
+type RuntimeStatusKind = MeridianBackendKind;
 type RuntimeStatusString = 'notInstalled' | 'installed' | 'running';
 
 interface BackendRuntimeStatus {
@@ -69,36 +93,156 @@ interface BackendRuntimeStatus {
   pid?: number;
   startedAt?: number;
   modelPath?: string;
+  port?: number;
 }
+
+interface BackendApiStatus {
+  ok: boolean;
+  kind: RuntimeStatusKind;
+  port: number;
+  urlTested: string;
+  elapsedMs: number;
+  httpStatus?: number;
+  error?: string;
+}
+
+// One concrete model file inside a HuggingFace repo — the payload shape
+// from `hf_resolve_model_files` (see src-tauri/src/backend_manager.rs).
+// Sorted quantized-first by the Rust side so files[0] is the best on-device
+// inference asset.
+interface HfModelFile {
+  filename: string;
+  url: string;
+  sizeBytes?: number;
+}
+
+const DEFAULT_PORTS: Record<MeridianBackendKind, number> = {
+  'llama.cpp': 8080,
+  'koboldcpp': 5001,
+  'llamafile': 8080,
+  'turboquant': 8080,
+  'lemonade': 13305,
+};
 
 // ============================================================================
 // Tab state
 // ============================================================================
-type TabId = 'backends' | 'models' | 'slaves';
+type TabId = 'backends' | 'models' | 'slaves' | 'omnix-models';
 
 const tabs: { id: TabId; label: string }[] = [
   { id: 'backends', label: 'Backends' },
   { id: 'models', label: 'Models' },
   { id: 'slaves', label: 'RPC Slaves' },
+  { id: 'omnix-models', label: 'Omnix Models' },
 ];
 
 const activeTab = ref<TabId>('backends');
 
 // ============================================================================
+// Per-backend config (read from user-settings, written on change).
+// ============================================================================
+const backendConfig = computed(() => {
+  return userSettingsStore.userSettings.meridian?.backend ?? {
+    'llama.cpp': {},
+    'llamafile': {},
+    'koboldcpp': {},
+    'turboquant': {},
+    'lemonade': {},
+  };
+});
+
+// ============================================================================
+// Hardware-tier recommendation banner — derived from `detected.vendor`.
+// Mirrors the three tiers the user agreed on (Omnix / Lemonade / llama.cpp).
+// ============================================================================
+interface TierRecommendation {
+  tier: string;
+  copy: string;
+  detail: string;
+}
+
+const tierRecommendation = computed<TierRecommendation | null>(() => {
+  if (detectedLoading.value) return null;
+  const vendor = detected.value?.vendor ?? 'cpu';
+  switch (vendor) {
+    case 'cpu':
+      return {
+        tier: 'Tier 1',
+        copy: 'Your hardware is best suited for Omnix built-in models.',
+        detail: 'Zero-config, runs on any GPU including integrated graphics. Open the Omnix Models tab above.',
+      };
+    case 'nvidia':
+      return {
+        tier: 'Tier 3',
+        copy: 'llama.cpp CUDA is recommended for your NVIDIA GPU.',
+        detail: 'For the largest models, use the llama.cpp CUDA variant. Lemonade is also supported and includes AMD/Intel NPU passthrough for mixed hardware.',
+      };
+    case 'amd':
+      return {
+        tier: 'Tier 2 / Tier 3',
+        copy: 'Lemonade is recommended for your AMD hardware.',
+        detail: 'Supports AMD Radeon GPUs and (separately) Intel NPUs at runtime. llama.cpp ROCm is a strong alternative for big Radeon-only setups.',
+      };
+    default:
+      return null;
+  }
+});
+
+function getPort(kind: MeridianBackendKind): number {
+  const cfg = backendConfig.value[kind];
+  return cfg?.port ?? DEFAULT_PORTS[kind];
+}
+
+function getModelPath(kind: MeridianBackendKind): string {
+  return backendConfig.value[kind]?.modelPath ?? '';
+}
+
+function setConfig(kind: MeridianBackendKind, patch: Partial<MeridianBackendConfig>) {
+  const current = userSettingsStore.userSettings.meridian?.backend ?? {};
+  const merged = { ...(current[kind] ?? {}), ...patch };
+  const nextBackend = { ...current, [kind]: merged };
+  userSettingsStore.userSettings.meridian.backend = nextBackend;
+  // Write the WHOLE backend object to a single storage key. Writing
+  // `meridian.backend.${kind}` would let the dot in 'llama.cpp' be parsed
+  // as a path separator by `setNestedValue` and corrupt the nested object.
+  userSettingsStore.setUserSettingsStorage('meridian.backend', nextBackend);
+}
+
+// ============================================================================
 // Backends tab state
 // ============================================================================
 const detected = ref<GpuVendorInfo | null>(null);
+const detectedLoading = ref(true);
 const statuses = ref<Partial<Record<string, BackendRuntimeStatus>>>({});
 const busy = ref<Partial<Record<string, boolean>>>({});
 const note = ref<Partial<Record<string, string>>>({});
+const apiProbes = ref<Partial<Record<string, BackendApiStatus>>>({});
 
-function matchVariant(entry: BackendEntry): BackendVariant {
+// User-selected variant per backend; falls back to detected-vendor match.
+const selectedVariantId = ref<Partial<Record<string, string>>>({});
+
+function autoPickVariantId(entry: BackendEntry): string {
   const desired = detected.value?.vendor ?? 'cpu';
-  return (
-    entry.variants.find((variant) => variant.hardware === desired) ??
-    entry.variants.find((variant) => variant.hardware === 'cpu') ??
-    entry.variants[0]
-  );
+  const match =
+    entry.variants.find((v) => v.hardware === desired) ??
+    entry.variants.find((v) => v.hardware === 'cpu') ??
+    entry.variants[0];
+  return match.id;
+}
+
+function getActiveVariant(entry: BackendEntry): BackendVariant {
+  const selected = selectedVariantId.value[entry.id];
+  if (selected) {
+    const found = entry.variants.find((v) => v.id === selected);
+    if (found) return found;
+  }
+  const id = autoPickVariantId(entry);
+  return entry.variants.find((v) => v.id === id) ?? entry.variants[0];
+}
+
+function selectVariant(entry: BackendEntry, variantId: string) {
+  selectedVariantId.value[entry.id] = variantId;
+  note.value[entry.id] = `Selected: ${entry.variants.find((v) => v.id === variantId)?.label ?? variantId}`;
 }
 
 function formatBytes(bytes: number | undefined | null): string {
@@ -112,29 +256,37 @@ function formatBytes(bytes: number | undefined | null): string {
 // ============================================================================
 // Models tab state
 // ============================================================================
-const modelsDir = computed(() => userSettingsStore.userSettings.meridian?.modelsFolder ?? '');
+const modelsDir = ref(userSettingsStore.userSettings.meridian?.modelsFolder ?? '');
+watch(modelsDir, (val) => {
+  if (userSettingsStore.userSettings.meridian && val !== userSettingsStore.userSettings.meridian.modelsFolder) {
+    userSettingsStore.userSettings.meridian.modelsFolder = val;
+    userSettingsStore.setUserSettingsStorage('meridian.modelsFolder', val);
+  }
+});
 
 interface ModelRow {
   filename: string;
   path: string;
   sizeBytes: number;
   quant: string;
+  modifiedAt: number;
+}
+
+interface RawModelEntry {
+  name: string;
+  path: string;
+  sizeBytes: number;
+  modifiedAt: number;
 }
 
 const models = ref<ModelRow[]>([]);
 const modelsBusy = ref(false);
 const modelsNote = ref('');
+// User-selected target backend per model (keyed by model.path) so each row
+// in the Models tab keeps an independent choice instead of falling back to
+// DOM sibling-groping at click time.
+const loadTargetFor = ref<Partial<Record<string, MeridianBackendKind>>>({});
 
-// Detects common GGUF quant tokens from a filename. Patterns we recognize:
-//
-//   Major-quant-mode  : Q4_K_M / Q5_K_S / Q8_K / Q4_0 / Q4_1 / Q5_0 / Q5_1 / Q8_0
-//   Important-Quant   : IQ1_S / IQ2_XXS / IQ2_XS / IQ2_S / IQ2_M
-//                        IQ3_XXS / IQ3_XS / IQ3_S / IQ3_M
-//                        IQ4_XS / IQ4_NL
-//   Float             : F16 / F32 / BF16
-//
-// Anchored on `_`, `-`, or `.` so we don't accidentally match whole-word
-// substrings inside unrelated parts of the filename.
 const QUANT_RE = /(?:^|[._-])(IQ[1-4]_(?:XXS|XS|S|M|NL)|Q[0-8]_(?:K_S|K_M|Q4_0|Q4_1|Q5_0|Q5_1|Q8_0)|F16|F32|BF16)(?:[._-]|$)/i;
 
 function parseQuant(filename: string): string {
@@ -142,12 +294,12 @@ function parseQuant(filename: string): string {
   return match ? match[1].toUpperCase().replace('_', '-') : 'unknown';
 }
 
+function formatBytes2(bytes: number | undefined | null): string {
+  return formatBytes(bytes);
+}
+
 // ============================================================================
-// RPC Slaves tab state
-//
-// TODO Phase 11 Step 4: read these from user-settings.sshConnections
-// filtered by tag 'cluster-worker'. For Step 3 we mirror cluster.vue's
-// hardcoded BLACK so the Launch button is wired end-to-end.
+// RPC Slaves tab state — populated from user-settings.sshConnections.
 // ============================================================================
 interface SlaveRow {
   name: string;
@@ -158,10 +310,120 @@ interface SlaveRow {
   role: string;
 }
 
-// No JC-specific default: slaves are populated from userSettingsStore.meridian
-// connections in the next pass; we keep the ref empty here so a fresh install
-// shows the empty state instead of a fake BLACK row.
-const slaves = ref<SlaveRow[]>([]);
+interface SshConnection {
+  name?: string;
+  host: string;
+  port: number;
+  username: string;
+  keyPath?: string;
+  tags?: string[];
+}
+
+function mapSshToSlave(conn: SshConnection, _index: number): SlaveRow {
+  return {
+    name: conn.name || `${conn.username}@${conn.host}`,
+    host: conn.host,
+    port: conn.port,
+    username: conn.username,
+    keyPath: conn.keyPath || '',
+    role: conn.tags?.includes('cluster-worker') ? 'llama.cpp RPC slave (worker)' : 'SSH worker',
+  };
+}
+
+const slaves = computed<SlaveRow[]>(() => {
+  const list = userSettingsStore.userSettings.meridian?.sshConnections;
+  return Array.isArray(list) ? list.map(mapSshToSlave) : [];
+});
+
+// ============================================================================
+// Omnix Models tab state — bundled catalog + HF cache scan.
+// Mirrors src-tauri/src/omnix.rs::InstalledHfModel.
+// ============================================================================
+interface InstalledHfModel {
+  repoId: string;
+  path: string;
+}
+
+// Hide internal routing helpers (`use-text-model`) from the user-facing list
+// while still allowing them in the bundled JSON so the catalog stays in
+// lockstep with upstream modelList.ts.
+const omnixCatalog = computed<OmnixCatalogEntry[]>(() =>
+  omnixCatalogRaw.filter((m) => !m.internal)
+);
+
+const omnixInstalled = ref<InstalledHfModel[]>([]);
+const omnixInstalledSet = computed(() => new Set(omnixInstalled.value.map((m) => m.repoId)));
+const omnixBusy = ref(false);
+const omnixNote = ref('');
+
+async function refreshOmnix(): Promise<void> {
+  omnixBusy.value = true;
+  omnixNote.value = '';
+  try {
+    omnixInstalled.value = await invoke<InstalledHfModel[]>('scan_huggingface_cache');
+  }
+  catch (error) {
+    omnixInstalled.value = [];
+    omnixNote.value = `Could not scan HuggingFace cache: ${error}`;
+  }
+  finally {
+    omnixBusy.value = false;
+  }
+}
+
+// RAM gate only — Omnix runs on WebGPU/WASM so every GPU vendor (NVIDIA /
+// AMD / Intel / integrated) works. This function intentionally ignores GPU
+// vendor; the heavier 8B/12B entries still warn so users on small machines
+// know what they are getting into. Rename later if a real GPU gate lands.
+function omnixRamGate(entry: OmnixCatalogEntry): 'fits' | 'heavy' {
+  const ramRequired = entry.minRam ?? 0;
+  return ramRequired > 8 ? 'heavy' : 'fits';
+}
+
+async function downloadOmnixModel(entry: OmnixCatalogEntry): Promise<void> {
+  omnixBusy.value = true;
+  omnixNote.value = `Resolving ${entry.name} (${entry.size ?? 'unknown size'})…`;
+  try {
+    // Synthetic router entry — the catalog marks these with `internal: true`
+    // and the UI filter strips them, but guard here too in case a future
+    // catalog leaves one in. Nothing to download; the local router handles it.
+    if (entry.modelID === 'use-text-model' || entry.internal) {
+      omnixNote.value = `${entry.name} is a routing helper, not a downloadable model.`;
+      return;
+    }
+    // Ask the Rust side to enumerate the repo's actual model files
+    // (.onnx / .gguf / .bin / .safetensors / .pt), ranked quantized-first.
+    // The pre-fix code queued `https://huggingface.co/<repo>` which is an
+    // HTML page — the downloader fetched the README instead of a model.
+    const files = await invoke<HfModelFile[]>('hf_resolve_model_files', {
+      repoId: entry.modelID,
+    });
+    if (files.length === 0) {
+      omnixNote.value = `No downloadable model files found in ${entry.modelID}. Use the HF page link to pick one manually.`;
+      return;
+    }
+    const file = files[0];
+    // Hand the file URL to the existing downloader queue so it lands in
+    // the configured auto-save folder (typically E:\ai\Models\).
+    await invoke('downloader_enqueue', {
+      url: file.url,
+      file_name: file.filename,
+      format_id: null,
+      auto_save_folder: userSettingsStore.userSettings.meridian?.modelsFolder ?? '',
+      chunk_count: null,
+    });
+    const total = files.length;
+    omnixNote.value = total > 1
+      ? `Queued ${file.filename} from ${entry.modelID} (1 of ${total} files — others available on the HF page).`
+      : `Queued ${file.filename} from ${entry.modelID}.`;
+  }
+  catch (error) {
+    omnixNote.value = `Failed to queue ${entry.name}: ${error}`;
+  }
+  finally {
+    omnixBusy.value = false;
+  }
+}
 
 // ============================================================================
 // Tauri command wrappers
@@ -170,8 +432,12 @@ async function refreshBackends(): Promise<void> {
   try {
     detected.value = await invoke<GpuVendorInfo>('detect_local_gpu_vendor');
   }
-  catch {
+  catch (error) {
     detected.value = null;
+    note.value.__global__ = `Could not detect GPU vendor: ${error}`;
+  }
+  finally {
+    detectedLoading.value = false;
   }
   try {
     const arr = await invoke<BackendRuntimeStatus[]>('get_backend_status', {
@@ -179,38 +445,42 @@ async function refreshBackends(): Promise<void> {
     });
     const next: Partial<Record<string, BackendRuntimeStatus>> = {};
     for (const entry of arr) {
-      // `entry.kind` from Rust is the literal "llama.cpp" | "llamafile" | "koboldcpp";
-      // index into string-keyed map so it lines up with `BackendEntry.id` from the catalog.
       next[entry.kind] = entry;
     }
     statuses.value = next;
   }
-  catch {
+  catch (error) {
     statuses.value = {};
   }
 }
 
 async function downloadBackend(entry: BackendEntry): Promise<void> {
   busy.value[entry.id] = true;
-  note.value[entry.id] = 'Downloading...';
+  const variant = getActiveVariant(entry);
+  note.value[entry.id] = `Downloading ${variant.label} (${formatBytes(variant.sizeBytes)})...`;
   try {
     const installDir = await invoke<string>('download_backend', {
       backendKind: entry.id,
+      variantId: variant.id,
       targetDir: null,
     });
-    note.value[entry.id] = `Installed to ${installDir}`;
+    note.value[entry.id] = `Installed → ${installDir}`;
     await refreshBackends();
   }
   catch (error) {
     note.value[entry.id] = `Download failed: ${error}`;
+    if (typeof error === 'string' && error.includes('No download entry')) {
+      note.value[entry.id] +=
+        ' — Try clicking a different variant (top of card) to override the auto-detected GPU.';
+    }
   }
   finally {
     busy.value[entry.id] = false;
   }
 }
 
-async function startStopBackend(entry: BackendEntry): Promise<void> {
-  const status = statuses.value[entry.id as RuntimeStatusKind];
+async function startStopBackend(entry: BackendEntry, opts?: { modelPathOverride?: string }): Promise<void> {
+  const status = statuses.value[entry.id];
   busy.value[entry.id] = true;
   try {
     if (status?.status === 'running' && typeof status.pid === 'number') {
@@ -218,12 +488,16 @@ async function startStopBackend(entry: BackendEntry): Promise<void> {
       note.value[entry.id] = 'Stopped';
     }
     else {
+      const port = getPort(entry.id);
+      const modelPath = opts?.modelPathOverride?.trim() || getModelPath(entry.id) || null;
       const pid = await invoke<number>('start_backend', {
         backendKind: entry.id,
-        modelPath: null,
+        modelPath,
         extraArgs: null,
+        port,
       });
-      note.value[entry.id] = `Started pid=${pid}`;
+      const modelNote = modelPath ? `with ${modelPath.split(/[\\/]/).pop()}` : '(no model loaded)';
+      note.value[entry.id] = `Started pid=${pid} on port ${port} ${modelNote}`;
     }
     await refreshBackends();
   }
@@ -235,26 +509,76 @@ async function startStopBackend(entry: BackendEntry): Promise<void> {
   }
 }
 
+async function loadModel(entry: BackendEntry, modelPath: string) {
+  if (!modelPath) {
+    note.value[entry.id] = 'Pick a model from the Models tab first.';
+    return;
+  }
+  setConfig(entry.id, { modelPath });
+  // Loading a model means (re)starting the backend with --model <path>.
+  await startStopBackend(entry, { modelPathOverride: modelPath });
+}
+
+async function probeBackend(entry: BackendEntry) {
+  busy.value[entry.id] = true;
+  note.value[entry.id] = `Probing http://localhost:${getPort(entry.id)}/health ...`;
+  try {
+    const result = await invoke<BackendApiStatus>('probe_backend_api', {
+      backendKind: entry.id,
+    });
+    apiProbes.value[entry.id] = result;
+    if (result.ok) {
+      note.value[entry.id] = `API OK — ${result.urlTested} (HTTP ${result.httpStatus}, ${result.elapsedMs} ms)`;
+    }
+    else {
+      note.value[entry.id] = `API not responding: ${result.error ?? 'no 2xx response'} (probed ${result.urlTested})`;
+    }
+    // Persist last-check timestamp so the UI can show a "checked at HH:MM" hint.
+    setConfig(entry.id, {
+      lastApiCheckAt: Date.now(),
+      lastApiCheckOk: result.ok,
+    });
+  }
+  catch (error) {
+    note.value[entry.id] = `Probe failed: ${error}`;
+  }
+  finally {
+    busy.value[entry.id] = false;
+  }
+}
+
 async function refreshModels(): Promise<void> {
   modelsBusy.value = true;
   modelsNote.value = '';
   try {
-    const dir = await invoke<DirContents>('list_directory', { path: modelsDir.value });
-    models.value = dir.entries
-      .filter((entry) => entry.is_file && /\.gguf$/i.test(entry.name))
+    if (!modelsDir.value) {
+      modelsNote.value = 'Models folder is not configured. Set it in Settings → Meridian → Files.';
+      models.value = [];
+      return;
+    }
+    // Recursive `list_gguf_models` walks up to 6 levels deep by default —
+    // covers the typical `models/<vendor>/<size>/<file>.gguf` layout.
+    // Replaces the previous single-level `read_dir` scan, which missed
+    // everything JC had in subfolders (e.g. `E:\ai\Models\Qwen\7B\...`).
+    const entries = await invoke<RawModelEntry[]>('list_gguf_models', {
+      path: modelsDir.value,
+      maxDepth: 6,
+    });
+    models.value = entries
       .map((entry) => ({
         filename: entry.name,
         path: entry.path,
-        sizeBytes: entry.size,
+        sizeBytes: entry.sizeBytes,
         quant: parseQuant(entry.name),
+        modifiedAt: entry.modifiedAt,
       }))
       .sort((a, b) => b.sizeBytes - a.sizeBytes);
     if (models.value.length === 0) {
-      modelsNote.value = `No .gguf files found in ${modelsDir.value}`;
+      modelsNote.value = `No .gguf files found under ${modelsDir.value} (depth 6). Point the path at your model root — e.g. E:\\ai\\Models\\.`;
     }
   }
   catch (error) {
-    modelsNote.value = `Could not read ${modelsDir.value}: ${error}`;
+    modelsNote.value = `Could not scan ${modelsDir.value}: ${error}`;
     models.value = [];
   }
   finally {
@@ -264,7 +588,7 @@ async function refreshModels(): Promise<void> {
 
 async function launchSlave(slave: SlaveRow): Promise<void> {
   busy.value[slave.name] = true;
-  note.value[slave.name] = 'Launching...';
+  note.value[slave.name] = 'Launching RPC slave...';
   try {
     const out = await invoke<string>('launch_rpc_slave', {
       creds: {
@@ -275,7 +599,7 @@ async function launchSlave(slave: SlaveRow): Promise<void> {
       },
       rpcCommand: 'llama-server --rpc 0.0.0.0:50052',
     });
-    note.value[slave.name] = out || 'RPC slave launch sent';
+    note.value[slave.name] = out || 'RPC slave launch sent.';
   }
   catch (error) {
     note.value[slave.name] = `Launch failed: ${error}`;
@@ -285,9 +609,36 @@ async function launchSlave(slave: SlaveRow): Promise<void> {
   }
 }
 
+function loadModelInto(entry: BackendEntry) {
+  activeTab.value = 'models';
+  modelsNote.value = `Pick a .gguf file below, then click "Load into ${entry.name}".`;
+}
+
+async function loadIntoBackend(entry: BackendEntry, model: ModelRow) {
+  activeTab.value = 'backends';
+  await loadModel(entry, model.path);
+}
+
+// Resolve a backend by MeridianBackendKind with a fallback to the catalog's
+// first entry. Strict indexing (`Partial<Record>` + `noUncheckedIndexedAccess`)
+// makes `catalog.backends[0]` `BackendEntry | undefined`, so we use a
+// non-null assertion here — the catalog ships at least three entries and
+// any reachable code path has the JS object in memory already.
+function pickBackend(id: MeridianBackendKind | undefined): BackendEntry {
+  const target: MeridianBackendKind = id ?? 'llama.cpp';
+  return catalog.backends.find((b) => b.id === target) ?? catalog.backends[0]!;
+}
+
+watch(detected, (val) => {
+  if (val) {
+    note.value.__global__ = `Detected GPU: ${val.vendor} (${val.gpuName ?? 'unknown'}, source=${val.source}). Override the variant per backend below if needed.`;
+  }
+});
+
 onMounted(() => {
   void refreshBackends();
   void refreshModels();
+  void refreshOmnix();
 });
 </script>
 
@@ -297,11 +648,20 @@ onMounted(() => {
       <h1 class="bm__title">Backend Manager</h1>
       <div class="bm__detected">
         Detected GPU:
-        <strong v-if="detected">{{ detected.vendor }}</strong>
+        <strong v-if="detectedLoading">detecting…</strong>
+        <strong v-else-if="detected">{{ detected.vendor }}</strong>
         <strong v-else>unknown</strong>
         <span v-if="detected?.gpuName"> · {{ detected.gpuName }}</span>
       </div>
     </header>
+
+    <p v-if="note.__global__" class="bm__global-note">{{ note.__global__ }}</p>
+
+    <div v-if="tierRecommendation" class="bm__tier-banner" role="note">
+      <span class="bm__tier-badge">{{ tierRecommendation.tier }}</span>
+      <strong class="bm__tier-copy">{{ tierRecommendation.copy }}</strong>
+      <span class="bm__tier-detail">{{ tierRecommendation.detail }}</span>
+    </div>
 
     <nav class="bm__tabs" role="tablist">
       <button
@@ -315,6 +675,12 @@ onMounted(() => {
         {{ tab.label }}
         <span v-if="tab.id === 'models' && models.length" class="bm__tab-count">
           ({{ models.length }})
+        </span>
+        <span v-else-if="tab.id === 'slaves' && slaves.length" class="bm__tab-count">
+          ({{ slaves.length }})
+        </span>
+        <span v-else-if="tab.id === 'omnix-models' && omnixInstalledSet.size" class="bm__tab-count">
+          ({{ omnixInstalledSet.size }}/{{ omnixCatalog.length }})
         </span>
       </button>
     </nav>
@@ -331,37 +697,97 @@ onMounted(() => {
             <h2 class="bm__backend-name">{{ entry.name }}</h2>
             <span class="bm__backend-homepage">{{ entry.homepage }}</span>
           </div>
-          <span :class="['bm__status', `bm__status--${statuses[entry.id]?.status ?? 'notInstalled'}`]">
-            {{ statuses[entry.id]?.status ?? 'notInstalled' }}
-          </span>
+          <div class="bm__status-row">
+            <span v-if="apiProbes[entry.id]" :class="['bm__api-badge', apiProbes[entry.id]?.ok ? 'bm__api-badge--ok' : 'bm__api-badge--bad']">
+              {{ apiProbes[entry.id]?.ok ? `API live · ${apiProbes[entry.id]?.elapsedMs}ms` : 'API down' }}
+            </span>
+            <span :class="['bm__status', `bm__status--${statuses[entry.id]?.status ?? 'notInstalled'}`]">
+              {{ statuses[entry.id]?.status ?? 'notInstalled' }}
+            </span>
+          </div>
         </header>
 
         <p class="bm__backend-desc">{{ entry.description }}</p>
 
+        <div class="bm__variants-label">Choose a runtime:</div>
         <ul class="bm__variants">
           <li
             v-for="variant in entry.variants"
             :key="variant.id"
-            :class="['bm__variant', { 'bm__variant--recommended': matchVariant(entry).id === variant.id }]"
+            :class="[
+              'bm__variant',
+              {
+                'bm__variant--selected': getActiveVariant(entry).id === variant.id,
+              },
+            ]"
           >
-            <span class="bm__variant-label">{{ variant.label }}</span>
-            <span class="bm__variant-hw">{{ variant.hardware.toUpperCase() }}</span>
-            <span class="bm__variant-size">{{ formatBytes(variant.sizeBytes) }}</span>
+            <button
+              type="button"
+              class="bm__variant-btn"
+              :disabled="busy[entry.id]"
+              :title="variant.notes"
+              @click="selectVariant(entry, variant.id)"
+            >
+              <span class="bm__variant-radio" />
+              <span class="bm__variant-label">{{ variant.label }}</span>
+              <span class="bm__variant-hw">{{ variant.hardware.toUpperCase() }}</span>
+              <span class="bm__variant-size">{{ formatBytes(variant.sizeBytes) }}</span>
+            </button>
           </li>
         </ul>
 
+        <div class="bm__config">
+          <label class="bm__config-row">
+            <span class="bm__config-label">Port</span>
+            <input
+              type="number"
+              min="1"
+              max="65535"
+              class="bm__input bm__input--port"
+              :value="getPort(entry.id)"
+              :disabled="busy[entry.id]"
+              @change="setConfig(entry.id, { port: Number(($event.target as HTMLInputElement).value) || DEFAULT_PORTS[entry.id] })"
+            />
+          </label>
+          <label class="bm__config-row">
+            <span class="bm__config-label">Model</span>
+            <div class="bm__model-row">
+              <input
+                type="text"
+                class="bm__input"
+                placeholder="Path to .gguf or pick from Models tab"
+                :value="getModelPath(entry.id)"
+                :disabled="busy[entry.id] || statuses[entry.id]?.status === 'running'"
+                @change="setConfig(entry.id, { modelPath: ($event.target as HTMLInputElement).value })"
+              />
+              <button
+                type="button"
+                class="bm__btn bm__btn--ghost"
+                :disabled="busy[entry.id] || statuses[entry.id]?.status === 'running'"
+                @click="loadModelInto(entry)"
+              >
+                Pick…
+              </button>
+            </div>
+          </label>
+        </div>
+
         <div class="bm__backend-meta">
+          <span v-if="statuses[entry.id]?.port">
+            <span class="bm__meta-label">Listening on:</span>
+            <code class="bm__meta-value">http://localhost:{{ statuses[entry.id]?.port }}/v1</code>
+          </span>
           <span v-if="statuses[entry.id]?.installPath">
             <span class="bm__meta-label">Installed at:</span>
             <code class="bm__meta-value">{{ statuses[entry.id]?.installPath }}</code>
           </span>
-          <span v-if="statuses[entry.id]?.sizeBytes">
-            <span class="bm__meta-label">Binary size:</span>
-            <span>{{ formatBytes(statuses[entry.id]?.sizeBytes) }}</span>
-          </span>
           <span v-if="statuses[entry.id]?.pid">
             <span class="bm__meta-label">PID:</span>
             <span>{{ statuses[entry.id]?.pid }}</span>
+          </span>
+          <span v-if="apiProbes[entry.id]?.urlTested">
+            <span class="bm__meta-label">Last probe:</span>
+            <code class="bm__meta-value">{{ apiProbes[entry.id]?.urlTested }}</code>
           </span>
         </div>
 
@@ -375,7 +801,7 @@ onMounted(() => {
             "
             @click="downloadBackend(entry)"
           >
-            {{ statuses[entry.id]?.status === 'notInstalled' ? 'Download' : 'Re-Download' }}
+            {{ statuses[entry.id]?.status === 'notInstalled' ? 'Download selected runtime' : 'Re-Download selected runtime' }}
           </button>
           <button
             class="bm__btn bm__btn--primary"
@@ -387,6 +813,13 @@ onMounted(() => {
           >
             {{ statuses[entry.id]?.status === 'running' ? 'Stop' : 'Start' }}
           </button>
+          <button
+            class="bm__btn"
+            :disabled="busy[entry.id] || statuses[entry.id]?.status !== 'running'"
+            @click="probeBackend(entry)"
+          >
+            Test API
+          </button>
           <span v-if="note[entry.id]" class="bm__note">{{ note[entry.id] }}</span>
         </footer>
       </article>
@@ -397,7 +830,7 @@ onMounted(() => {
       <header class="bm__section-head">
         <div>
           <h2 class="bm__section-title">Local models</h2>
-          <p class="bm__section-sub">{{ modelsDir }}</p>
+          <p class="bm__section-sub">{{ modelsDir || '(not configured)' }}</p>
         </div>
         <button class="bm__btn" :disabled="modelsBusy" @click="refreshModels">
           {{ modelsBusy ? 'Scanning...' : 'Refresh' }}
@@ -410,21 +843,39 @@ onMounted(() => {
         <li v-for="model in models" :key="model.path" class="bm__model">
           <div class="bm__model-info">
             <div class="bm__model-name">{{ model.filename }}</div>
-            <div class="bm__model-meta">{{ formatBytes(model.sizeBytes) }} · quant: {{ model.quant }}</div>
+            <div class="bm__model-meta">{{ formatBytes2(model.sizeBytes) }} · quant: {{ model.quant }}</div>
           </div>
-          <button
-            class="bm__btn"
-            disabled
-            title="Loading a model is wired in Phase 11 Step 4 (Rain agent tool call)."
-          >
-            Load
-          </button>
+          <div class="bm__model-actions">
+            <select
+              class="bm__select"
+              :disabled="busy[model.path]"
+              :value="loadTargetFor[model.path] ?? 'llama.cpp'"
+              @change="loadTargetFor[model.path] = ($event.target as HTMLSelectElement).value as MeridianBackendKind"
+            >
+              <option value="llama.cpp">Load into llama.cpp</option>
+              <option value="llamafile">Load into llamafile</option>
+              <option value="koboldcpp">Load into koboldcpp</option>
+              <option value="turboquant">Load into TurboQuant</option>
+            </select>
+            <button
+              class="bm__btn bm__btn--primary"
+              :disabled="busy[model.path]"
+              @click="loadIntoBackend(pickBackend(loadTargetFor[model.path]), model)"
+            >
+              Load into selected
+            </button>
+          </div>
         </li>
       </ul>
     </section>
 
     <!-- ============================ RPC Slaves tab ========================== -->
     <section v-show="activeTab === 'slaves'" class="bm__section" role="tabpanel">
+      <p v-if="!slaves.length" class="bm__note bm__note--empty">
+        No SSH connections configured.
+        Add one in <strong>Settings → Meridian → SSH</strong>.
+      </p>
+
       <article v-for="slave in slaves" :key="slave.name" class="bm__slave">
         <header class="bm__slave-head">
           <span class="bm__dot bm__dot--off" />
@@ -447,6 +898,63 @@ onMounted(() => {
         </footer>
       </article>
     </section>
+
+    <!-- ============================ Omnix Models tab ======================= -->
+    <section v-show="activeTab === 'omnix-models'" class="bm__section" role="tabpanel">
+      <header class="bm__section-head">
+        <div>
+          <h2 class="bm__section-title">Omnix Models</h2>
+          <p class="bm__section-sub">
+            {{ omnixInstalledSet.size }} of {{ omnixCatalog.length }} installed ·
+            Tier 1 — zero-config, runs on any GPU
+          </p>
+        </div>
+        <button class="bm__btn" :disabled="omnixBusy" @click="refreshOmnix">
+          {{ omnixBusy ? 'Scanning…' : 'Refresh' }}
+        </button>
+      </header>
+
+      <p v-if="omnixNote" class="bm__note">{{ omnixNote }}</p>
+
+      <ul class="bm__models">
+        <li v-for="entry in omnixCatalog" :key="entry.id" class="bm__model">
+          <div class="bm__model-info">
+            <div class="bm__model-name-row">
+              <span class="bm__model-name">{{ entry.name }}</span>
+              <span class="bm__badge bm__badge--tier">Omnix</span>
+              <span :class="['bm__badge', 'bm__badge--cat', `bm__badge--cat-${entry.category}`]">{{ entry.category }}</span>
+              <span v-if="entry.verifiedWorking" class="bm__badge bm__badge--verified" title="Verified working in our test setup">✓ tested</span>
+              <span v-if="omnixInstalledSet.has(entry.modelID)" class="bm__badge bm__badge--installed">installed</span>
+              <span :class="['bm__badge', omnixRamGate(entry) === 'fits' ? 'bm__badge--compat' : 'bm__badge--heavy']">
+                {{ omnixRamGate(entry) === 'fits' ? 'tier-1 ready' : 'needs 8GB+ RAM' }}
+              </span>
+            </div>
+            <div class="bm__model-meta">
+              {{ entry.size ?? '~unknown' }} · min RAM {{ entry.minRam ?? 0 }} GB · {{ entry.make ?? 'Community' }}
+            </div>
+            <div class="bm__model-desc">{{ entry.description }}</div>
+          </div>
+          <div class="bm__model-actions">
+            <a
+              class="bm__btn"
+              :href="`https://huggingface.co/${entry.modelID}`"
+              target="_blank"
+              rel="noreferrer noopener"
+              :title="`Open ${entry.modelID} on HuggingFace`"
+            >
+              HF page
+            </a>
+            <button
+              class="bm__btn bm__btn--primary"
+              :disabled="omnixBusy || omnixInstalledSet.has(entry.modelID)"
+              @click="downloadOmnixModel(entry)"
+            >
+              {{ omnixInstalledSet.has(entry.modelID) ? 'Installed' : 'Get on HF' }}
+            </button>
+          </div>
+        </li>
+      </ul>
+    </section>
   </div>
 </template>
 
@@ -456,8 +964,16 @@ onMounted(() => {
   flex-direction: column;
   gap: 1rem;
   padding: 1.5rem;
-  height: 100%;
-  overflow-y: auto;
+  /* `flex: 1` (replacing the previous `height: 100%`) lets .bm claim
+     every pixel of the router-view-wrapper without bleeding past it.
+     `min-height: 0` is the canonical companion to `flex: 1` in a
+     column flex parent — without it, .bm refuses to shrink below its
+     intrinsic content size and the page overflows the viewport. */
+  flex: 1;
+  min-height: 0;
+  /* No scroll on .bm itself. The page is the viewport clip; the active
+     .bm__section is the only scroll region. */
+  overflow: hidden;
   color: hsl(var(--foreground));
 }
 
@@ -477,6 +993,62 @@ onMounted(() => {
   font-size: 0.85rem;
   color: hsl(var(--muted-foreground));
 }
+
+.bm__global-note {
+  margin: 0;
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--background-2));
+  padding: 0.5rem 0.7rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid hsl(var(--border));
+}
+
+/* ---- Hardware-tier recommendation banner ---- */
+.bm__tier-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(
+    90deg,
+    hsl(var(--primary) / 12%) 0%,
+    hsl(var(--background-3)) 100%
+  );
+  border: 1px solid hsl(var(--primary) / 30%);
+  font-size: 0.85rem;
+  color: hsl(var(--foreground));
+}
+
+.bm__tier-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  background: hsl(var(--primary));
+  color: hsl(0 0% 100%);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.bm__tier-copy {
+  font-weight: 600;
+}
+
+.bm__tier-detail {
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+/* Fix 3 scroll rules live on the original .bm__section and .bm__models
+   declarations above to keep CSS discoverable. Do not redeclare here. */
 
 .bm__tabs {
   display: flex;
@@ -517,6 +1089,21 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  /* The ONLY scroll container for the active tab.
+     `flex: 1; min-height: 0` claims exactly the leftover vertical space
+     inside .bm (the page wrapper). No `max-height` cap here — a previous
+     `max-height: calc(100vh - 220px)` was the actual bug: `100vh`
+     measures the full WebView2 viewport (ignoring the window title bar,
+     app toolbar, .bm padding, header, tier banner, and tabs), so the
+     calculated cap was usually LARGER than the space .bm actually
+     offered. .bm's `overflow: hidden` then clipped the section's
+     overflow before `overflow-y: auto` could engage, leaving users
+     staring at the top of Lemonade with no way to reach its settings.
+     Drop the cap; let flex do the sizing. */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .bm__backend,
@@ -558,8 +1145,14 @@ onMounted(() => {
   line-height: 1.4;
 }
 
-.bm__status {
+.bm__status-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   margin-left: auto;
+}
+
+.bm__status {
   padding: 0.15rem 0.6rem;
   border-radius: 999px;
   border: 1px solid hsl(var(--border));
@@ -582,34 +1175,101 @@ onMounted(() => {
   background: hsl(150 60% 50% / 8%);
 }
 
+.bm__api-badge {
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.bm__api-badge--ok {
+  background: hsl(150 60% 50% / 15%);
+  color: hsl(150 60% 55%);
+  border: 1px solid hsl(150 60% 50% / 40%);
+}
+
+.bm__api-badge--bad {
+  background: hsl(0 70% 60% / 15%);
+  color: hsl(0 70% 60%);
+  border: 1px solid hsl(0 70% 60% / 40%);
+}
+
+.bm__variants-label {
+  font-size: 0.7rem;
+  color: hsl(var(--muted-foreground));
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
 .bm__variants {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
+  flex-direction: column;
+  gap: 0.35rem;
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
 .bm__variant {
-  display: flex;
-  gap: 0.4rem;
-  align-items: baseline;
-  padding: 0.25rem 0.6rem;
   border-radius: var(--radius-sm);
   background: hsl(var(--background-3));
   border: 1px solid transparent;
-  font-size: 0.75rem;
-  color: hsl(var(--muted-foreground));
 }
 
-.bm__variant--recommended {
+.bm__variant--selected {
   border-color: hsl(var(--primary));
-  color: hsl(var(--foreground));
+}
+
+.bm__variant-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  font-size: 0.85rem;
+  color: inherit;
+}
+
+.bm__variant-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.bm__variant-btn:hover:not(:disabled) {
+  background: hsl(var(--foreground) / 4%);
+}
+
+.bm__variant-radio {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1.5px solid hsl(var(--muted-foreground));
+  flex-shrink: 0;
+  position: relative;
+}
+
+.bm__variant--selected .bm__variant-radio {
+  border-color: hsl(var(--primary));
+}
+
+.bm__variant--selected .bm__variant-radio::after {
+  content: '';
+  position: absolute;
+  inset: 2.5px;
+  border-radius: 50%;
+  background: hsl(var(--primary));
 }
 
 .bm__variant-label {
   font-weight: 500;
+  flex: 1;
 }
 
 .bm__variant-hw {
@@ -621,6 +1281,72 @@ onMounted(() => {
 
 .bm__variant-size {
   font-variant-numeric: tabular-nums;
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.bm__config {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 0.5rem 0.75rem;
+  align-items: center;
+  background: hsl(var(--background-3));
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.75rem;
+  border: 1px solid hsl(var(--border));
+}
+
+.bm__config-row {
+  display: contents;
+}
+
+.bm__config-label {
+  font-size: 0.7rem;
+  color: hsl(var(--muted-foreground));
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.bm__input {
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.8rem;
+  outline: none;
+}
+
+.bm__input:focus {
+  border-color: hsl(var(--ring));
+}
+
+.bm__input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.bm__input--port {
+  max-width: 110px;
+}
+
+.bm__model-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.bm__select {
+  padding: 0.35rem 0.5rem;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  outline: none;
 }
 
 .bm__backend-meta {
@@ -677,9 +1403,21 @@ onMounted(() => {
   background: hsl(var(--primary) / 20%);
 }
 
+.bm__btn--ghost {
+  background: transparent;
+}
+
 .bm__note {
   font-size: 0.75rem;
   color: hsl(var(--muted-foreground));
+}
+
+.bm__note--empty {
+  font-style: italic;
+  padding: 0.6rem 0.8rem;
+  background: hsl(var(--background-2));
+  border-radius: var(--radius-sm);
+  border: 1px dashed hsl(var(--border));
 }
 
 .bm__section-head {
@@ -708,6 +1446,10 @@ onMounted(() => {
   list-style: none;
   padding: 0;
   margin: 0;
+  /* Lists inside a tab section. Scrolling is now handled by the parent
+     .bm__section (it's the only scroll container in this component);
+     the list grows naturally to its content size and the section's
+     overflow takes over when the total exceeds the section's height. */
 }
 
 .bm__model {
@@ -723,18 +1465,28 @@ onMounted(() => {
 .bm__model-info {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  flex: 1;
 }
 
 .bm__model-name {
   font-weight: 500;
   font-family: var(--font-mono, monospace);
   font-size: 0.85rem;
+  word-break: break-all;
 }
 
 .bm__model-meta {
   font-size: 0.7rem;
   color: hsl(var(--muted-foreground));
   margin-top: 0.15rem;
+}
+
+.bm__model-actions {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  flex-shrink: 0;
 }
 
 .bm__dot {
@@ -762,4 +1514,81 @@ onMounted(() => {
   font-family: var(--font-mono, monospace);
   white-space: nowrap;
 }
+
+/* ---- Omnix Models tab ---- */
+.bm__model-name-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.bm__model-desc {
+  font-size: 0.7rem;
+  color: hsl(var(--muted-foreground));
+  margin-top: 0.25rem;
+  font-style: italic;
+  line-height: 1.35;
+  max-width: 60ch;
+}
+
+.bm__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  border: 1px solid hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--background-3));
+  white-space: nowrap;
+  text-transform: uppercase;
+}
+
+.bm__badge--tier {
+  border-color: hsl(var(--primary));
+  color: hsl(var(--primary));
+  background: hsl(var(--primary) / 10%);
+}
+
+.bm__badge--verified {
+  border-color: hsl(150 60% 50% / 50%);
+  color: hsl(150 60% 60%);
+  background: hsl(150 60% 50% / 12%);
+}
+
+.bm__badge--installed {
+  border-color: hsl(210 80% 60% / 50%);
+  color: hsl(210 80% 70%);
+  background: hsl(210 80% 60% / 12%);
+}
+
+.bm__badge--compat {
+  border-color: hsl(140 50% 50% / 40%);
+  color: hsl(140 50% 60%);
+  background: hsl(140 50% 50% / 10%);
+}
+
+.bm__badge--heavy {
+  border-color: hsl(40 90% 55% / 40%);
+  color: hsl(40 90% 60%);
+  background: hsl(40 90% 50% / 10%);
+}
+
+.bm__badge--cat {
+  font-family: var(--font-mono, monospace);
+  text-transform: lowercase;
+}
+
+.bm__badge--cat-text { color: hsl(220 70% 70%); border-color: hsl(220 70% 60% / 40%); }
+.bm__badge--cat-vision { color: hsl(280 70% 75%); border-color: hsl(280 70% 60% / 40%); }
+.bm__badge--cat-tts { color: hsl(330 70% 75%); border-color: hsl(330 70% 60% / 40%); }
+.bm__badge--cat-stt { color: hsl(180 60% 65%); border-color: hsl(180 60% 50% / 40%); }
+.bm__badge--cat-image-gen { color: hsl(20 80% 70%); border-color: hsl(20 80% 60% / 40%); }
+.bm__badge--cat-music-gen { color: hsl(50 80% 70%); border-color: hsl(50 80% 60% / 40%); }
+.bm__badge--cat-coder { color: hsl(120 60% 65%); border-color: hsl(120 60% 50% / 40%); }
+.bm__badge--cat-embedding { color: hsl(60 60% 65%); border-color: hsl(60 60% 50% / 40%); }
+.bm__badge--cat-director { color: hsl(0 60% 70%); border-color: hsl(0 60% 50% / 40%); }
 </style>

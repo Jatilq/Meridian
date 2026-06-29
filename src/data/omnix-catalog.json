@@ -1,0 +1,233 @@
+[
+  {
+    "id": "qwen-2.5-coder-3b-q4",
+    "modelID": "onnx-community/Qwen2.5-Coder-3B-Instruct",
+    "name": "Qwen 2.5 Coder 3B",
+    "description": "Specialized for coding tasks. Great balance of speed and accuracy.",
+    "size": "~2GB",
+    "category": "coder",
+    "make": "QWEN",
+    "minRam": 3,
+    "verifiedWorking": false
+  },
+  {
+    "id": "Qwen2.5-Coder-7B",
+    "modelID": "LemOneLabs/Qwen2.5-Coder-7B",
+    "name": "Qwen 2.5 Coder 7B",
+    "description": "Specialized for coding tasks. Large coding assistant.",
+    "size": "~7GB",
+    "category": "coder",
+    "make": "QWEN",
+    "minRam": 10,
+    "verifiedWorking": false
+  },
+  {
+    "id": "use-text-model",
+    "modelID": "use-text-model",
+    "name": "[Use Text Model]",
+    "description": "Bypasses dedicated director inference; routes using the selected general text model.",
+    "category": "director",
+    "make": "DYNAMIC",
+    "minRam": 0,
+    "internal": true,
+    "verifiedWorking": false
+  },
+  {
+    "id": "qwen-2.5-instruct-abliterated-0.5b-q4",
+    "modelID": "LemOneLabs/Qwen2.5-0.5B-Instruct-abliterated-ONNX",
+    "name": "Qwen 2.5 Instruct 0.5B",
+    "description": "Lightweight abliterated Qwen 2.5 for routing.",
+    "size": "~0.5GB",
+    "category": "director",
+    "make": "QWEN",
+    "minRam": 1,
+    "verifiedWorking": false
+  },
+  {
+    "id": "qwen-3-0.6b-q4",
+    "modelID": "LemOneLabs/Qwen3-0.6B-ONNX",
+    "name": "Qwen 3 0.6B",
+    "description": "Next-generation ultra-lightweight Qwen with great reasoning for routing and text.",
+    "size": "~0.6GB",
+    "category": "director",
+    "make": "QWEN",
+    "minRam": 1,
+    "verifiedWorking": false
+  },
+  {
+    "id": "tiny-llm-10m",
+    "modelID": "onnx-community/Tiny-LLM-ONNX",
+    "name": "Tiny-LLM 10M",
+    "description": "Ultra-compact 10M parameter language model. Extremely fast.",
+    "size": "~25MB",
+    "category": "director",
+    "make": "Tiny-LLM",
+    "minRam": 0.5,
+    "verifiedWorking": false
+  },
+  {
+    "id": "qwen-3-0.6b-q4-text",
+    "modelID": "LemOneLabs/Qwen3-0.6B-ONNX",
+    "name": "Qwen 3 0.6B",
+    "description": "Next-generation ultra-lightweight Qwen with great reasoning for chat.",
+    "size": "~0.6GB",
+    "category": "text",
+    "make": "QWEN",
+    "minRam": 1,
+    "verifiedWorking": true
+  },
+  {
+    "id": "llama-3.2-1b",
+    "modelID": "LemOneLabs/Llama-3.2-1B-Instruct-ONNX",
+    "name": "Llama 3.2 1B",
+    "description": "Meta's lightweight 1B model. Fast and highly optimized for on-device assistant tasks.",
+    "size": "~1.2GB",
+    "category": "text",
+    "make": "META",
+    "minRam": 2,
+    "verifiedWorking": false
+  },
+  {
+    "id": "gemma-3-1b",
+    "modelID": "onnx-community/gemma-3-1b-it-ONNX",
+    "name": "gemma-3 1B",
+    "description": "Gemma 3, 1B. Excellent reasoning and instruction following.",
+    "size": "~0.8GB",
+    "category": "text",
+    "make": "Google",
+    "minRam": 2,
+    "verifiedWorking": false
+  },
+  {
+    "id": "llama-3.2-3b-q4",
+    "modelID": "onnx-community/Llama-3.2-3B-Instruct",
+    "name": "Llama 3.2 3B",
+    "description": "Meta's flagship small model. Excellent reasoning and instruction following.",
+    "size": "~2.2GB",
+    "category": "text",
+    "make": "META",
+    "minRam": 4,
+    "verifiedWorking": false
+  },
+  {
+    "id": "llama-3.1-8b-instruct",
+    "modelID": "LemOneLabs/Llama-3.1-8B-Instruct-ONNX",
+    "name": "Llama 3.1 8B Instruct",
+    "description": "Meta's flagship small model. Excellent reasoning and instruction following.",
+    "size": "~4.8GB",
+    "category": "text",
+    "make": "META",
+    "minRam": 6,
+    "verifiedWorking": false
+  },
+  {
+    "id": "gemma-4-e2b-q4",
+    "modelID": "LemOneLabs/gemma-4-E2B-it-ONNX",
+    "name": "Gemma 4 E2B",
+    "description": "Uses Per-Layer Embeddings (PLE) to provide 5B-level intelligence at a 2.3B size.",
+    "size": "~1.5GB",
+    "category": "text",
+    "make": "GOOGLE",
+    "minRam": 2,
+    "verifiedWorking": false
+  },
+  {
+    "id": "gemma-4-e4b-q4",
+    "modelID": "LemOneLabs/gemma-4-E4B-it-ONNX",
+    "name": "Gemma 4 E4B",
+    "description": "Uses Per-Layer Embeddings (PLE) to provide 5B-level intelligence at a 4B size.",
+    "size": "~4GB",
+    "category": "text",
+    "make": "GOOGLE",
+    "minRam": 6,
+    "verifiedWorking": false
+  },
+  {
+    "id": "phi-4-mini-q4",
+    "modelID": "onnx-community/Phi-4-mini-instruct",
+    "name": "Phi-4 Mini",
+    "description": "Microsoft's high-reasoning model optimized for complex logic in a small footprint.",
+    "size": "~2.3GB",
+    "category": "text",
+    "make": "MICROSOFT",
+    "minRam": 4,
+    "verifiedWorking": false
+  },
+  {
+    "id": "mistral-nemo-12b-q4",
+    "modelID": "LemOneLabs/Mistral-Nemo-12B-Instruct-ONNX-INT4",
+    "name": "Mistral NeMo 12B",
+    "description": "Top-tier 12B model for high-end edge devices. Best-in-class multilingual.",
+    "size": "~7.5GB",
+    "category": "text",
+    "make": "MISTRAL",
+    "minRam": 12,
+    "verifiedWorking": false
+  },
+  {
+    "id": "FastVLM",
+    "modelID": "onnx-community/FastVLM-0.5B-ONNX",
+    "name": "FastVLM",
+    "description": "Tiny but powerful vision-language model. Can describe images and answer questions.",
+    "size": "~1.6GB",
+    "category": "vision",
+    "make": "FastVLM",
+    "minRam": 2,
+    "verifiedWorking": true
+  },
+  {
+    "id": "kokoro-82m",
+    "modelID": "onnx-community/Kokoro-82M-v1.0-ONNX",
+    "name": "Kokoro 82M",
+    "description": "State-of-the-art small TTS model. High quality, very fast.",
+    "size": "~350MB",
+    "category": "tts",
+    "make": "KOKORO",
+    "minRam": 1,
+    "verifiedWorking": true
+  },
+  {
+    "id": "Janus-Pro-1B-ONNX",
+    "modelID": "onnx-community/Janus-Pro-1B-ONNX",
+    "name": "Janus-Pro 1B",
+    "description": "Latent Consistency Model for fast inference. Good for lower-end hardware.",
+    "size": "~2GB",
+    "category": "image-gen",
+    "make": "LATENT-CONSISTENCY",
+    "minRam": 4,
+    "verifiedWorking": false
+  },
+  {
+    "id": "nomic-embed-text-v1.5",
+    "modelID": "nomic-ai/nomic-embed-text-v1.5",
+    "name": "nomic-embed-text-v1.5",
+    "description": "Fast and accurate embeddings for RAG and long-term memory.",
+    "size": "~90MB",
+    "category": "embedding",
+    "make": "Nomic",
+    "minRam": 0.5,
+    "verifiedWorking": false
+  },
+  {
+    "id": "whisper-tiny-en",
+    "modelID": "onnx-community/whisper-tiny.en",
+    "name": "Whisper Tiny EN",
+    "description": "Fast and efficient speech-to-text model for English.",
+    "size": "~150MB",
+    "category": "stt",
+    "make": "OPENAI",
+    "minRam": 1,
+    "verifiedWorking": false
+  },
+  {
+    "id": "musicgen-small",
+    "modelID": "Xenova/musicgen-small",
+    "name": "MusicGen Small",
+    "description": "Meta's MusicGen model for high-quality music generation from text.",
+    "size": "~600MB",
+    "category": "music-gen",
+    "make": "META",
+    "minRam": 2,
+    "verifiedWorking": false
+  }
+]
