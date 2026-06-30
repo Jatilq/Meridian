@@ -173,6 +173,20 @@ const lastSearchKind = ref<string>('');
 // `models.value`, `lastSearchKind`, `searchError` from being clobbered
 // by an out-of-order older HF response when JC types fast + hits enter.
 const searchSeq = ref<number>(0);
+// Pagination state: full result set stays in `models.value`; the v-for
+// renders only the top `visibleCount` cards so a "Load More" button can
+// reveal more without a fresh HF round-trip. PAGE_STEP is the increment
+// granularity. `hasMoreModels` is true when the rendered slice is shorter
+// than the loaded array — drives the visibility of the "Load More"
+// button. Kept as a computed so it stays in sync with both
+// `visibleCount.value` increments and `models.value` replacements
+// without manual recompute glue in `loadMoreModels` / `clearFilters` /
+// `searchModels`. `models.length` is the source of truth for total
+// count — we deliberately do NOT keep a parallel `totalModelsRaw` ref
+// because that would be a duplicate of state that can drift.
+const visibleCount = ref<number>(30);
+const PAGE_STEP = 30;
+const hasMoreModels = computed(() => visibleCount.value < models.value.length);
 
 // ============================================================================
 // Filter <-> Set helpers (drop-in for chip click handlers)
@@ -207,7 +221,12 @@ async function searchModels() {
     const params: HardwareSearchParams = {
       query: q,
       sortBy: sortBy.value,
-      limit: 30,
+      // Fetch the full top-100 page so a single round-trip covers most
+      // users' first glance; the v-for renders the top `visibleCount`
+      // and a "Load More" button reveals more locally. Loosening this to
+      // the cap=100 ceiling costs the same HF quota as a 30-only page
+      // would; the difference is purely client-side UX.
+      limit: 100,
       architectures: Array.from(selectedArchitectures.value),
       sizeBuckets: Array.from(selectedSizes.value),
       quantAllowlist: Array.from(selectedQuants.value),
@@ -223,6 +242,10 @@ async function searchModels() {
     // call will resolve and own the models/lastSearchKind updates.
     if (mySeq !== searchSeq.value) return;
     models.value = result;
+    // Reset pagination to the first page on every fresh search — the
+    // user just asked a new question, so showing the LATER half of the
+    // previous result set would be misleading.
+    visibleCount.value = PAGE_STEP;
     // Backend `kind` stamp on each row is the truth source for non-empty
     // results (so bare-stars inputs correctly downgrade to "exact" after
     // the Rust guard). For empty results the backend can't classify — we
@@ -275,7 +298,21 @@ function clearFilters() {
   onlyFit.value = combinedVramGb.value > 0;
   includeIq.value = false;
   models.value = [];
+  visibleCount.value = PAGE_STEP;
   searchError.value = '';
+}
+
+/**
+ * Reveal the next batch of cards locally. No HF round-trip fires —
+ * `models.value` holds up to 100 entries from the last search, so we
+ * just expand the rendered window by PAGE_STEP. Cheap to call many
+ * times; the `hasMoreModels` computed protects against running off the
+ * end of the array. Re-clicking after the array is exhausted is a no-op
+ * because the comparison is strict-less-than.
+ */
+function loadMoreModels() {
+  if (!hasMoreModels.value) return;
+  visibleCount.value = Math.min(visibleCount.value + PAGE_STEP, models.value.length);
 }
 
 function quantColorClass(quant: string): string {
@@ -496,7 +533,18 @@ onUnmounted(() => {
     <main class="hardware__results">
       <div class="hardware__results-header">
         <h2 class="hardware__results-title">
-          {{ models.length }} {{ models.length === 1 ? 'model' : 'models' }}
+          <!-- Pagination message: when fewer than `models.length` cards are
+               rendered, show "Showing X of Y" so the user knows there's
+               more to see (and the Load More button is the path to it).
+               When everything fits, fall back to the plain count for
+               parity with the previous render. -->
+          <template v-if="hasMoreModels">
+            Showing {{ Math.min(visibleCount, models.length) }} of {{ models.length }}
+            {{ models.length === 1 ? 'model' : 'models' }}
+          </template>
+          <template v-else>
+            {{ models.length }} {{ models.length === 1 ? 'model' : 'models' }}
+          </template>
         </h2>
         <div class="hardware__results-sub">
           Local: <strong>{{ localCpuName }}</strong>
@@ -522,7 +570,7 @@ onUnmounted(() => {
 
       <div v-else-if="models.length > 0" class="hardware__results-list">
         <article
-          v-for="model in models"
+          v-for="model in models.slice(0, visibleCount)"
           :key="model.id + ':' + model.ggufFilename"
           class="hardware__result"
           :class="{ 'hardware__result--no-fit': !model.fitsHardware }"
@@ -563,6 +611,26 @@ onUnmounted(() => {
             @click="downloadModel(model)"
           >Download</button>
         </article>
+      </div>
+
+      <!-- Local pagination footer. Sits OUTSIDE `hardware__results-list`
+           (the vertical scroll container) so the button stays anchored
+           below the scrollable cards. Hoisting matters: when JC scrolls
+           to card 30 with the button inside the scroll div, the button
+           scrolls off with the last card and the user has to scroll back
+           up to find it again. The original todo for Fix 4 explicitly
+           called out "scroll-cutoff fix" — moving the button below the
+           scroll container IS the cutoff fix. Re-clicking after the
+           array is exhausted is a no-op because `v-if` hides the whole
+           wrap when `hasMoreModels` is false. -->
+      <div v-if="hasMoreModels" class="hardware__load-more-wrap">
+        <button
+          class="hardware__load-more-btn"
+          @click="loadMoreModels"
+        >
+          Load next {{ Math.min(PAGE_STEP, models.length - visibleCount) }}
+          ({{ models.length - visibleCount }} more total)
+        </button>
       </div>
 
       <div v-else-if="!searchError" class="hardware__empty">
@@ -914,6 +982,32 @@ onUnmounted(() => {
   font-size: 0.85rem;
   font-style: italic;
 }
+.hardware__load-more-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 0.75rem 0 0.25rem;
+}
+.hardware__load-more-btn {
+  padding: 0.55rem 1.25rem;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 1px solid hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: all 120ms ease;
+}
+.hardware__load-more-btn:hover:not(:disabled) {
+  border-color: hsl(var(--primary));
+  color: hsl(var(--foreground));
+  background: hsl(var(--primary) / 0.08);
+}
+.hardware__load-more-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .hardware__skeleton-list {
   display: flex;
   flex-direction: column;

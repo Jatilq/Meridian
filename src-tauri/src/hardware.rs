@@ -84,7 +84,13 @@ pub struct HardwareSearchParams {
     #[serde(default)]
     pub sort_by: Option<String>,
 
-    /// HF list-page limit. 30 default; cap at 100 to stay polite to HF.
+    /// HF list-page limit. 100 default; cap at 100 to stay polite to HF.
+    /// The Vue UI does *local* pagination on top of this: it passes 100,
+    /// renders the top 30 by default, and progressively reveals the next
+    /// batch via a "Load More" button. Filtering 100 entries locally is
+    /// instant and avoids the round-trip-overhead of offset-based
+    /// pagination. A future move to "page through 1000s of hits" would
+    /// add an `offset` field here rather than raising this cap.
     #[serde(default)]
     pub limit: Option<u32>,
 
@@ -241,7 +247,7 @@ pub async fn hardware_search_gguf_models(
     // from Meridian never trips it. The helper also classifies the query
     // as `"wildcard"` (1-4 char, prefix-match via `q*`) or `"exact"` so the
     // UI can hint when results came from a fuzzy short-query match.
-    let limit = params.limit.unwrap_or(30).clamp(1, 100);
+    let limit = params.limit.unwrap_or(100).clamp(1, 100);
     let (url, kind) = build_hf_search_url(query, params.sort_by.as_deref(), limit);
 
     // 2. Fetch.
