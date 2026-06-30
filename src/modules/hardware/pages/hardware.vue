@@ -13,10 +13,11 @@
  * from one HF `full=true` round-trip — no client-side HF calls anymore,
  * so chip toggles no longer feel like a no-op until results land.
  */
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { useRoute } from 'vue-router';
 import { useUserSettingsStore } from '@/stores/storage/user-settings';
+import { useHardwarePool } from '@/composables/use-hardware-pool';
 
 const userSettingsStore = useUserSettingsStore();
 const modelsFolder = computed(() => userSettingsStore.userSettings.meridian?.modelsFolder ?? '');
@@ -71,42 +72,34 @@ interface RankedGgufModel {
   tags: string[];
 }
 
-interface HardwareSnapshot {
-  cpu?: { name: string; cores: number };
-  ram?: { totalMb: number };
-  gpus: Array<{ name: string; memoryTotal: number }>;
-}
-
 // ============================================================================
 // Hardware pane data
+//
+// Replaced the inline `loadHardware()` with the shared `useHardwarePool`
+// composable so the "fit-only" VRAM budget includes remote RPC workers
+// getting their GPU memory added into the pool (was previously local-only,
+// so combined VRAM read as 36 GB even with BLACK online contributing 16).
 // ============================================================================
 
-const nodes = ref<HardwareSnapshot[]>([]);
+const {
+  entries: hardwareNodes,
+  combinedVramMb,
+  combinedVramGb,
+  combinedGpuCount,
+} = useHardwarePool();
 
-async function loadHardware() {
-  try {
-    const local = await invoke<HardwareSnapshot>('get_local_hardware');
-    nodes.value = [local];
-    // Hardware loaded — flip the fit-filter to ON by default. The ref
-    // starts OFF so the brief window before this resolves doesn't hit
-    // the 0-byte threshold deadlock.
-    if (combinedVramMb.value > 0) {
-      onlyFit.value = true;
-    }
-  } catch {
-    nodes.value = [];
-  }
-}
+const localNode = computed(() => hardwareNodes.value.find((n) => n.isLocal) ?? null);
+const localCpuName = computed(() => localNode.value?.cpu?.name?.trim() || 'Unknown CPU');
 
-// Sum every GPU's memoryTotal across local + RPC workers (per
-// AGENTS.md Phase 10: a single inference is joint across the pool).
-const combinedVramMb = computed(() =>
-  nodes.value
-    .flatMap((n) => n.gpus)
-    .reduce((sum, g) => sum + (g.memoryTotal || 0), 0)
-);
-const combinedVramGb = computed(() =>
-  combinedVramMb.value > 0 ? Math.floor(combinedVramMb.value / 1024) : 0
+// Flip the fit-filter to ON the moment we have real VRAM data (reactive —
+// fires when the composable's first poll resolves, not gated by hand-rolled
+// `loadHardware()` callbacks that fire before pool entries land).
+watch(
+  combinedVramGb,
+  (vram) => {
+    if (vram > 0 && !onlyFit.value) onlyFit.value = true;
+  },
+  { immediate: true },
 );
 
 // ============================================================================
@@ -272,20 +265,56 @@ function relativeTime(iso: string | undefined): string {
   return `${Math.floor(days / 365)}y ago`;
 }
 
+// Pin the safety timer in module scope so React-key style "nav away before
+// poll resolves" doesn't leak a still-running setTimeout. Vue's lifecycle
+// doesn't auto-cancel setTimeout on unmount, so `onUnmounted` clears it
+// explicitly. Without this guard, rapid navigation between Hardware
+// Scanner and other panels leaks a closure-referenced timer per visit.
+let deepLinkSafetyTimer: ReturnType<typeof setTimeout> | null = null;
+
 onMounted(() => {
   // Deep-link entry: if we were pushed here with a `searchHuggingface`
-  // query param, pre-fill the input and kick off the search after the
-  // hardware probe so the fit-toggle flips on with the right threshold
-  // (otherwise the initial results all read "TOO BIG"). For users without
-  // a deep-link, just resolve the hardware data so the sidebar can show
-  // the VRAM pill.
+  // query param, pre-fill the input and kick off the search. The
+  // `useHardwarePool` composable auto-polls on mount; we just gate the
+  // search on the pool being populated so the fit-toggle has the right
+  // threshold (otherwise initial results all read "TOO BIG").
   void (async () => {
-    await loadHardware();
-    if (incomingQuery.value) {
-      query.value = incomingQuery.value;
-      await searchModels();
-    }
+    if (!incomingQuery.value) return;
+    await new Promise<void>((resolve) => {
+      const stop = watch(combinedVramGb, (v) => {
+        if (v <= 0) return;
+        if (deepLinkSafetyTimer) {
+          clearTimeout(deepLinkSafetyTimer);
+          deepLinkSafetyTimer = null;
+        }
+        stop();
+        resolve();
+      });
+      deepLinkSafetyTimer = setTimeout(() => {
+        // Belt-and-suspenders: when the watch callback already cleared
+        // the timer + resolved the Promise, the timer fires anyway. The
+        // ref-null check short-circuits the no-op fallback path. Without
+        // it, a future agent adding side effects to this branch gets a
+        // spurious second invocation on slow systems where watch + timer
+        // race on the same microtask.
+        if (!deepLinkSafetyTimer) return;
+        deepLinkSafetyTimer = null;
+        stop();
+        resolve();
+      }, 1500);
+    });
+    query.value = incomingQuery.value;
+    await searchModels();
   })();
+});
+
+onUnmounted(() => {
+  // Cancel any in-flight deep-link wait so the closure references the
+  // resolved promise's anchor (not the long-gone component scope).
+  if (deepLinkSafetyTimer) {
+    clearTimeout(deepLinkSafetyTimer);
+    deepLinkSafetyTimer = null;
+  }
 });
 </script>
 
@@ -422,8 +451,8 @@ onMounted(() => {
           {{ models.length }} {{ models.length === 1 ? 'model' : 'models' }}
         </h2>
         <div class="hardware__results-sub">
-          Local: <strong>{{ nodes[0]?.cpu?.name ?? 'Unknown CPU' }}</strong>
-          · {{ nodes.flatMap(n => n.gpus).length }} GPU{{ nodes.flatMap(n => n.gpus).length === 1 ? '' : 's' }}
+          Local: <strong>{{ localCpuName }}</strong>
+          · {{ combinedGpuCount }} GPU{{ combinedGpuCount === 1 ? '' : 's' }}
           · <strong>{{ combinedVramGb }} GB</strong> combined VRAM
         </div>
       </div>

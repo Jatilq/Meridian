@@ -11,6 +11,7 @@ import { PlusIcon, XIcon, KeyRoundIcon, LockIcon, PlugZapIcon } from '@lucide/vu
 import { useUserSettingsStore } from '@/stores/storage/user-settings';
 import { storeSshPassword, clearSshPassword } from '@/utils/ssh-connections';
 import type { SshConnectionSetting, SshAuthMethod } from '@/types/user-settings';
+import { useHardwarePool, type HardwarePoolEntry } from '@/composables/use-hardware-pool';
 
 const { t } = useI18n();
 const userSettingsStore = useUserSettingsStore();
@@ -20,43 +21,31 @@ const userSettingsStore = useUserSettingsStore();
 // reserved for the file-browser remote-pane routing only.
 const clusterWorkers = computed(() => userSettingsStore.userSettings.meridian?.clusterWorkers ?? []);
 
-interface GpuStat {
-  index: number;
-  name: string;
-  utilization: number; // percent
-  memoryUsed: number;   // MB
-  memoryTotal: number;  // MB
-  temperature: number;  // celsius
-}
-
-interface CpuInfo {
-  name: string;
-  cores: number;
-  utilization: number; // percent
-}
-
-interface RamInfo {
-  totalMb: number;
-  usedMb: number;
-  freeMb: number;
-  utilization: number; // percent
-}
-
-interface HardwareSnapshot {
-  online: boolean;
-  cpu: CpuInfo | null;
-  ram: RamInfo | null;
-  gpus: GpuStat[];
-  error: string | null;
-}
-
-interface NodeView extends HardwareSnapshot {
+// View type is kept: the template still iterates rows of `NodeView` shape.
+// The per-source `HardwareSnapshot` sub-shapes (GpuStat, CpuInfo, RamInfo)
+// were removed along with the now-deleted `refreshNodeViews()` — those
+// types are owned by the shared `useHardwarePool` composable.
+interface NodeView {
   name: string;
   host: string;
   role: string;
+  online: boolean;
+  cpu: { name: string; cores: number; utilization: number } | null;
+  ram: { totalMb: number; usedMb: number; freeMb: number; utilization: number } | null;
+  gpus: Array<{
+    index: number;
+    name: string;
+    utilization: number;
+    memoryUsed: number;
+    memoryTotal: number;
+    temperature: number;
+  }>;
+  error: string | null;
 }
 
-// Node definition for the topology map
+// Node definition for the topology map — drives role/label metadata that
+// the composable doesn't carry (it only knows isLocal + author/host).
+// MAMBA is the local Meridian node; everything else is a worker.
 interface NodeDef {
   id: string;
   name: string;
@@ -96,10 +85,38 @@ const nodeDefs = computed<NodeDef[]>(() => {
   return nodes;
 });
 
-const nodeViews = ref<NodeView[]>([]);
+// Shared hardware pool — single source of truth for the local Meridian box
+// plus every clusterWorker. The polling cadence and React-key stability are
+// owned by the composable so hardware.vue and cluster.vue never disagree
+// about "what's the latest VRAM/cache snapshot?".
+const { entries: hardwareEntries, refresh } = useHardwarePool();
+
+// Cluster View = nodeDef (without polling) × hardwareEntry-by-host join.
+// The composable's `local` placeholder (host === 'local') won't match any
+// clusterWorkers hostname — that's intentional; Cluster Control routes MAMBA
+// through `nodeDefs.local = true` and the composable fetches it via its own
+// non-MAMBA-spec entry. Joining instead of refetching removes the poller
+// dedup and the stale-while-refetch race.
+const nodeViews = computed<NodeView[]>(() => {
+  const byHost = new Map<string, HardwarePoolEntry>();
+  for (const e of hardwareEntries.value) byHost.set(e.host, e);
+  return nodeDefs.value.map<NodeView>((def) => {
+    const snap = byHost.get(def.host);
+    return {
+      name: def.name,
+      host: def.host,
+      role: def.role,
+      online: snap?.online ?? false,
+      cpu: snap?.cpu ?? null,
+      ram: snap?.ram ?? null,
+      gpus: snap?.gpus ?? [],
+      error: snap?.error ?? null,
+    };
+  });
+});
+
 const rpcLaunching = ref(false);
 const rpcMessage = ref('');
-let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 /** Build an SshCredentials-shaped object for one stored connection. References
  *  the password by secure key only — the backend fetches plaintext from the
@@ -113,42 +130,6 @@ function credsFromConn(conn: SshConnectionSetting | undefined) {
     passwordSecureKey: conn?.passwordSecureKey ?? '',
     authMethod: conn?.authMethod ?? 'key',
   };
-}
-
-async function refreshNodeViews() {
-  const views: NodeView[] = [];
-  for (const def of nodeDefs.value) {
-    // Use stored credentials from the cluster worker entry.
-    const conn = clusterWorkers.value?.find(c => c.host === def.host);
-
-    try {
-      const snap = def.local
-        ? await invoke<HardwareSnapshot>('get_local_hardware')
-        : await invoke<HardwareSnapshot>('get_remote_hardware', { creds: credsFromConn(conn) });
-      views.push({
-        name: def.name,
-        host: def.host,
-        role: def.role,
-        ...snap,
-      });
-    } catch (error) {
-      views.push({
-        name: def.name,
-        host: def.host,
-        role: def.role,
-        online: false,
-        cpu: null,
-        ram: null,
-        gpus: [],
-        error: String(error),
-      });
-    }
-  }
-  nodeViews.value = views;
-}
-
-async function refreshAll() {
-  await refreshNodeViews();
 }
 
 // Generic RPC slave launcher. Targets the first connected worker. A
@@ -287,7 +268,7 @@ async function saveWorker() {
       userSettingsStore.userSettings.meridian.clusterWorkers,
     );
     showAddWorker.value = false;
-    await refreshAll();
+    await refresh();
   } catch (error) {
     console.error('Failed to save worker connection:', error);
   } finally {
@@ -314,13 +295,10 @@ function gb(mb: number): string {
 }
 
 onMounted(() => {
-  void refreshAll();
-  pollTimer = setInterval(() => void refreshAll(), 30000);
   window.addEventListener('keydown', onDialogKeydown);
 });
 
 onUnmounted(() => {
-  if (pollTimer) clearInterval(pollTimer);
   window.removeEventListener('keydown', onDialogKeydown);
 });
 </script>
@@ -439,7 +417,7 @@ onUnmounted(() => {
           <span class="cluster__node-name">{{ node.name }}</span>
           <span class="cluster__node-host">{{ node.host }}</span>
           <span class="cluster__node-role">{{ node.role }}</span>
-          <button class="cluster__refresh" @click="refreshAll()">Refresh</button>
+          <button class="cluster__refresh" @click="refresh()">Refresh</button>
         </div>
 
         <template v-if="node.online">
