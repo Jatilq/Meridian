@@ -6,6 +6,7 @@ Copyright © 2021 - present Aleksey Hoffman. All rights reserved.
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+import { useRouter } from 'vue-router';
 import { useUserSettingsStore } from '@/stores/storage/user-settings';
 import type { MeridianBackendKind, MeridianBackendConfig, SshConnectionSetting } from '@/types/user-settings';
 import catalogData from '@/data/backends.json';
@@ -137,6 +138,16 @@ const tabs: { id: TabId; label: string }[] = [
 ];
 
 const activeTab = ref<TabId>('backends');
+const router = useRouter();
+// The rich HuggingFace search panel lives at /hardware (see
+// src/modules/hardware/pages/hardware.vue) — the only place with real
+// filters, sort, VRAM-fit, and a Download affordance that lands in the
+// existing downloader queue. The Models tab is local-model management,
+// so it deep-links into Hardware Scanner for any "find me a model on HF"
+// intent rather than duplicating search UX here.
+function openHuggingFaceSearch() {
+  router.push('/hardware');
+}
 
 // ============================================================================
 // Per-backend config (read from user-settings, written on change).
@@ -856,10 +867,35 @@ onMounted(() => {
           <h2 class="bm__section-title">Local models</h2>
           <p class="bm__section-sub">{{ modelsDir || '(not configured)' }}</p>
         </div>
-        <button class="bm__btn" :disabled="modelsBusy" @click="refreshModels">
-          {{ modelsBusy ? 'Scanning...' : 'Refresh' }}
-        </button>
+        <div class="bm__section-head-actions">
+          <button
+            class="bm__btn"
+            :disabled="modelsBusy"
+            @click="refreshModels"
+          >
+            {{ modelsBusy ? 'Scanning...' : 'Refresh' }}
+          </button>
+          <!-- Deep-link into the Hardware Scanner so users have ONE canonical
+               place to search HuggingFace with real filters + download. -->
+          <button
+            class="bm__btn bm__btn--primary"
+            title="Open the HuggingFace GGUF search panel"
+            @click="openHuggingFaceSearch"
+          >
+            Search HuggingFace
+          </button>
+        </div>
       </header>
+
+      <div class="bm__models-hf-hint" role="note">
+        <span>Need a specific model from HuggingFace?</span>
+        <button
+          class="bm__link-btn"
+          @click="openHuggingFaceSearch"
+        >
+          Open the search panel →
+        </button>
+      </div>
 
       <p v-if="modelsNote" class="bm__note">{{ modelsNote }}</p>
 
@@ -1472,6 +1508,40 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   gap: 1rem;
+}
+
+.bm__section-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.bm__models-hf-hint {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: hsl(var(--background-2));
+  border: 1px dashed hsl(var(--border));
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.bm__link-btn {
+  background: transparent;
+  border: none;
+  color: hsl(var(--primary));
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.bm__link-btn:hover {
+  color: hsl(var(--primary) / 0.85);
 }
 
 .bm__section-title {

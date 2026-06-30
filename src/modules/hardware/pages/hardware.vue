@@ -15,10 +15,24 @@
  */
 import { ref, computed, onMounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+import { useRoute } from 'vue-router';
 import { useUserSettingsStore } from '@/stores/storage/user-settings';
 
 const userSettingsStore = useUserSettingsStore();
 const modelsFolder = computed(() => userSettingsStore.userSettings.meridian?.modelsFolder ?? '');
+
+// ============================================================================
+// Deep-link entrypoint: the Backend Manager → Models tab (and quick-actions
+// in the future) push to /hardware?searchHuggingface=<query>. Pre-fill the
+// search box, then auto-run the search so the user lands on real results
+// rather than an empty panel with a populated query.
+// ============================================================================
+
+const route = useRoute();
+const incomingQuery = computed(() => {
+  const raw = route.query.searchHuggingface;
+  return typeof raw === 'string' && raw.trim() ? raw.trim() : '';
+});
 
 // ============================================================================
 // IPC types (must mirror src-tauri/src/hardware.rs)
@@ -259,7 +273,19 @@ function relativeTime(iso: string | undefined): string {
 }
 
 onMounted(() => {
-  void loadHardware();
+  // Deep-link entry: if we were pushed here with a `searchHuggingface`
+  // query param, pre-fill the input and kick off the search after the
+  // hardware probe so the fit-toggle flips on with the right threshold
+  // (otherwise the initial results all read "TOO BIG"). For users without
+  // a deep-link, just resolve the hardware data so the sidebar can show
+  // the VRAM pill.
+  void (async () => {
+    await loadHardware();
+    if (incomingQuery.value) {
+      query.value = incomingQuery.value;
+      await searchModels();
+    }
+  })();
 });
 </script>
 
