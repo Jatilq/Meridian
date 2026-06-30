@@ -203,7 +203,36 @@ struct DownloadEntry {
     /// Target vendor: "nvidia" / "amd" / "cpu" — or "all" for any GPU.
     /// Also shows up as `variant.hardware` in the JSON.
     vendor: &'static str,
-    url: &'static str,
+    /// Static URL for downloads where the asset path is stable across
+    /// releases (TurboQuant pinned to d86eb0b, Lemonade pinned to v10.8.1).
+    /// When set, this URL is used directly and `gh_repo` is ignored.
+    /// None means the URL is resolved at download time via GitHub API —
+    /// see `gh_repo` / `gh_repo_match` / `gh_repo_match_alt`.
+    url: Option<&'static str>,
+    /// GitHub repo slug for runtime asset discovery ("ggml-org/llama.cpp").
+    /// When `Some`, the actual asset URL is resolved at download time via
+    /// `GET https://api.github.com/repos/<gh_repo>/releases/latest` and
+    /// asset-name substring matching. Eliminates the version-drift bug
+    /// where pinning `/releases/b<NNN>/...` becomes orphaned when
+    /// upstream bumps version. None means `url` is used directly.
+    gh_repo: Option<&'static str>,
+    /// Substring matched (case-insensitive) against asset names in the
+    /// GitHub release `assets[]` array. First matching asset's
+    /// `browser_download_url` is used as the download URL.
+    gh_repo_match: Option<&'static str>,
+    /// Fallback substring if `gh_repo_match` doesn't appear in any
+    /// asset name (e.g. upstream changes its CUDA suffix convention).
+    gh_repo_match_alt: Option<&'static str>,
+    /// Required prefix on the matched asset name (case-insensitive).
+    /// When the GitHub release ships MULTIPLE assets that all match
+    /// `gh_repo_match` substring (e.g. llama.cpp publishes both
+    /// `cudart-llama-bin-win-cuda-12.4-x64.zip` AND `llama-b9842-bin-win-cuda-12.4-x64.zip`
+    /// — cudart is the CUDA runtime bundle, NOT the llama-server),
+    /// the asset-preference filter rejects any name that does NOT start
+    /// with this prefix. Set to `Some("llama-")` for llama.cpp variants;
+    /// None falls back to "first substring match wins" which is wrong
+    /// the moment upstream publishes multiple sibling assets.
+    gh_repo_pref_prefix: Option<&'static str>,
     binary_windows: &'static str,
     binary_linux: &'static str,
     /// "zip" | "zip-flat" | "tar.gz" | "binary"
@@ -212,58 +241,140 @@ struct DownloadEntry {
 
 /// Static catalog for Step 1. Step 2 will read this from a bundled JSON file
 /// (`resources/backend_catalog.json`) loaded by Tauri at startup.
+///
+/// Resolves the chronic 404 problem on llama.cpp / llamafile / koboldcpp by
+/// using the GitHub Releases API for assets whose filenames include the
+/// release tag (e.g. `llama-b9842-bin-win-cuda-12.4-x64.zip`). Static URLs
+/// would 404 the moment upstream bumps the version — the API lookup is
+/// version-drift-proof. TurboQuant (each variant has its own tag in
+/// AtomicBot-AI's repo, so `/releases/latest/` only ever resolves one of
+/// them) and Lemonade (pinned to v10.8.1) stay on static URLs by design.
 const DOWNLOAD_TABLE: &[DownloadEntry] = &[
-    // NVIDIA — llama.cpp CUDA build for Windows.
+    // === llama.cpp — asset name includes the version tag (e.g. b9842), so
+    // === we resolve via GitHub API at download time to track upstream.
+    // CPU build — small zip, plain CPU runtime, no GPU required.
+    DownloadEntry {
+        kind: BackendKind::LlamaCpp,
+        id: "llama.cpp.cpu",
+        vendor: "cpu",
+        url: None,
+        gh_repo: Some("ggml-org/llama.cpp"),
+        gh_repo_match: Some("bin-win-cpu-x64"),
+        gh_repo_match_alt: Some("bin-win-cpu"),
+        gh_repo_pref_prefix: Some("llama-"),
+        binary_windows: "llama-server.exe",
+        binary_linux: "llama-server",
+        archive_format: "zip",
+    },
+    // NVIDIA build — CUDA-12.4 preferred over CUDA-13.3 because broad driver
+    // compatibility wins over bleeding-edge features for most installs.
+    // Falls back to the older `bin-win-cuda-x64` suffix convention if needed.
     DownloadEntry {
         kind: BackendKind::LlamaCpp,
         id: "llama.cpp.nvidia",
         vendor: "nvidia",
-        url: "https://github.com/ggerganov/llama.cpp/releases/latest/download/llama-bin-win-cuda-x64.zip",
+        url: None,
+        gh_repo: Some("ggml-org/llama.cpp"),
+        gh_repo_match: Some("bin-win-cuda-12.4-x64"),
+        gh_repo_match_alt: Some("bin-win-cuda-x64"),
+        gh_repo_pref_prefix: Some("llama-"),
         binary_windows: "llama-server.exe",
         binary_linux: "llama-server",
         archive_format: "zip",
     },
-    // AMD — llama.cpp ROCm build for Windows.
+    // AMD build — Windows uses HIP/Radeon naming, NOT ROCm (no separate
+    // ROCm-for-Windows archive ships upstream). Fallback matches the older
+    // `bin-win-rocm-x64` suffix used before the HIP rename if a
+    // pre-rename release is going through the API at request time.
     DownloadEntry {
         kind: BackendKind::LlamaCpp,
         id: "llama.cpp.amd",
         vendor: "amd",
-        url: "https://github.com/ggerganov/llama.cpp/releases/latest/download/llama-bin-win-rocm-x64.zip",
+        url: None,
+        gh_repo: Some("ggml-org/llama.cpp"),
+        gh_repo_match: Some("bin-win-hip-radeon-x64"),
+        gh_repo_match_alt: Some("bin-win-rocm-x64"),
+        gh_repo_pref_prefix: Some("llama-"),
         binary_windows: "llama-server.exe",
         binary_linux: "llama-server",
         archive_format: "zip",
     },
-    // CPU — llamafile single binary (no GPU required).
+    // === llamafile — versioned binary, we want the bare `llamafile-<ver>`
+    // === (no .zip wrapper) so the 'binary' archive_format can rename it to
+    // === `llamafile.exe` on install. Mozilla-Ocho redirects to mozilla-ai;
+    // === use the live org slug.
     DownloadEntry {
         kind: BackendKind::Llamafile,
         id: "llamafile.universal",
         vendor: "all",
-        url: "https://github.com/Mozilla-Ocho/llamafile/releases/latest/download/llamafile",
+        url: None,
+        gh_repo: Some("mozilla-ai/llamafile"),
+        gh_repo_match: Some("llamafile-"),
+        // Bare `llamafile` (no -<ver> suffix) on older releases — fallback
+        // path before llamafile adopted versioning around 0.9.x.
+        gh_repo_match_alt: Some(".zip"),
+        // Required prefix on the matched asset name. With the bare
+        // `llamafile-` matcher we could otherwise pick `.sha256`
+        // checksum files first if upstream starts shipping those;
+        // require the name to actually start with `llamafile`.
+        gh_repo_pref_prefix: Some("llamafile"),
         binary_windows: "llamafile.exe",
         binary_linux: "llamafile",
         archive_format: "binary",
     },
-    // CPU — koboldcpp zip with Windows binary.
+    // === koboldcpp — single-exe releases, no zip wrapper since v1.85 or so.
+    // === CPU fallback (`nocuda`) also supports Vulkan for AMD GPUs per
+    // === upstream README; `koboldcpp` (with CUDA) is the NVIDIA path.
     DownloadEntry {
         kind: BackendKind::KoboldCpp,
         id: "koboldcpp.cpu",
         vendor: "cpu",
-        url: "https://github.com/LostRuins/koboldcpp/releases/latest/download/koboldcpp-win-x64.zip",
-        binary_windows: "koboldcpp.exe",
-        binary_linux: "koboldcpp",
-        archive_format: "zip",
+        url: None,
+        gh_repo: Some("LostRuins/koboldcpp"),
+        gh_repo_match: Some("koboldcpp-nocuda"),
+        // Older releases shipped `koboldcpp-nocuda-X.Y.Z.exe` versioned.
+        gh_repo_match_alt: Some("nocuda"),
+        // Required prefix: `koboldcpp-nocuda.exe` AND
+        // `koboldcpp-nocuda.exe.sha256` would both match the substring
+        // above; the prefix picker rejects the .sha256 sibling.
+        gh_repo_pref_prefix: Some("koboldcpp"),
+        binary_windows: "koboldcpp-nocuda.exe",
+        // Linux release ships as `koboldcpp-linux-x64-nocuda` per the
+        // upstream README — matches the resolve-path naming convention.
+        binary_linux: "koboldcpp-linux-x64-nocuda",
+        archive_format: "binary",
     },
-    // TurboQuant — AtomicBot-AI fork of llama.cpp with TriAttention pruning.
-    // All Windows tags share the same `d86eb0b` commit prefix and ship as
-    // FLAT zips (no top-level parent directory), so `archive_format` is
-    // `zip-flat` to bypass `strip_top_dir` during extraction. Linux variants
-    // not listed here — Meridian currently targets Windows for inference.
+    DownloadEntry {
+        kind: BackendKind::KoboldCpp,
+        id: "koboldcpp.nvidia",
+        vendor: "nvidia",
+        url: None,
+        gh_repo: Some("LostRuins/koboldcpp"),
+        gh_repo_match: Some("koboldcpp.exe"),
+        // Stable backup if upstream renames the bulk-CUDA binary; older
+        // names include `koboldcpp_cuda.exe` and `koboldcpp-rocm.exe`.
+        gh_repo_match_alt: Some("koboldcpp_cuda"),
+        // See the sibling note above — required to disambiguate from
+        // `.sha256` checksum files upstream may ship in the future.
+        gh_repo_pref_prefix: Some("koboldcpp"),
+        binary_windows: "koboldcpp.exe",
+        binary_linux: "koboldcpp-linux-x64",
+        archive_format: "binary",
+    },
+    // === TurboQuant — AtomicBot-AI publishes a separate tag per variant
+    // === (`turboquant-windows-x64-{cuda-13.3,cuda-12.4,cpu,vulkan}-<sha>`),
+    // === so /releases/latest/ resolves to ONE variant and the rest 404.
+    // === Pin each variant to its specific tag with a static URL.
     // turboquant CUDA 13.3 — primary NVIDIA path.
     DownloadEntry {
         kind: BackendKind::TurboQuant,
         id: "turboquant.cuda-13.3",
         vendor: "nvidia",
-        url: "https://github.com/AtomicBot-ai/atomic-llama-cpp-turboquant/releases/download/turboquant-windows-x64-cuda-13.3-d86eb0b/llama-turboquant-windows-x64-cuda-13.3.zip",
+        url: Some("https://github.com/AtomicBot-ai/atomic-llama-cpp-turboquant/releases/download/turboquant-windows-x64-cuda-13.3-d86eb0b/llama-turboquant-windows-x64-cuda-13.3.zip"),
+        gh_repo: None,
+        gh_repo_match: None,
+        gh_repo_match_alt: None,
+        gh_repo_pref_prefix: None,
         binary_windows: "llama-server.exe",
         binary_linux: "llama-server",
         archive_format: "zip-flat",
@@ -273,7 +384,11 @@ const DOWNLOAD_TABLE: &[DownloadEntry] = &[
         kind: BackendKind::TurboQuant,
         id: "turboquant.cuda-12.4",
         vendor: "nvidia-cuda12",
-        url: "https://github.com/AtomicBot-ai/atomic-llama-cpp-turboquant/releases/download/turboquant-windows-x64-cuda-12.4-d86eb0b/llama-turboquant-windows-x64-cuda-12.4.zip",
+        url: Some("https://github.com/AtomicBot-ai/atomic-llama-cpp-turboquant/releases/download/turboquant-windows-x64-cuda-12.4-d86eb0b/llama-turboquant-windows-x64-cuda-12.4.zip"),
+        gh_repo: None,
+        gh_repo_match: None,
+        gh_repo_match_alt: None,
+        gh_repo_pref_prefix: None,
         binary_windows: "llama-server.exe",
         binary_linux: "llama-server",
         archive_format: "zip-flat",
@@ -283,7 +398,11 @@ const DOWNLOAD_TABLE: &[DownloadEntry] = &[
         kind: BackendKind::TurboQuant,
         id: "turboquant.cpu",
         vendor: "cpu",
-        url: "https://github.com/AtomicBot-ai/atomic-llama-cpp-turboquant/releases/download/turboquant-windows-x64-cpu-d86eb0b/llama-turboquant-windows-x64-cpu.zip",
+        url: Some("https://github.com/AtomicBot-ai/atomic-llama-cpp-turboquant/releases/download/turboquant-windows-x64-cpu-d86eb0b/llama-turboquant-windows-x64-cpu.zip"),
+        gh_repo: None,
+        gh_repo_match: None,
+        gh_repo_match_alt: None,
+        gh_repo_pref_prefix: None,
         binary_windows: "llama-server.exe",
         binary_linux: "llama-server",
         archive_format: "zip-flat",
@@ -293,7 +412,11 @@ const DOWNLOAD_TABLE: &[DownloadEntry] = &[
         kind: BackendKind::TurboQuant,
         id: "turboquant.vulkan",
         vendor: "amd",
-        url: "https://github.com/AtomicBot-ai/atomic-llama-cpp-turboquant/releases/download/turboquant-windows-x64-vulkan-d86eb0b/llama-turboquant-windows-x64-vulkan.zip",
+        url: Some("https://github.com/AtomicBot-ai/atomic-llama-cpp-turboquant/releases/download/turboquant-windows-x64-vulkan-d86eb0b/llama-turboquant-windows-x64-vulkan.zip"),
+        gh_repo: None,
+        gh_repo_match: None,
+        gh_repo_match_alt: None,
+        gh_repo_pref_prefix: None,
         binary_windows: "llama-server.exe",
         binary_linux: "llama-server",
         archive_format: "zip-flat",
@@ -308,7 +431,11 @@ const DOWNLOAD_TABLE: &[DownloadEntry] = &[
         kind: BackendKind::Lemonade,
         id: "lemonade.embeddable.windows-x64",
         vendor: "all",
-        url: "https://github.com/lemonade-sdk/lemonade/releases/download/v10.8.1/lemonade-embeddable-10.8.1-windows-x64.zip",
+        url: Some("https://github.com/lemonade-sdk/lemonade/releases/download/v10.8.1/lemonade-embeddable-10.8.1-windows-x64.zip"),
+        gh_repo: None,
+        gh_repo_match: None,
+        gh_repo_match_alt: None,
+        gh_repo_pref_prefix: None,
         binary_windows: "lemonade-server.exe",
         binary_linux: "lemonade-server",
         archive_format: "zip",
@@ -442,14 +569,39 @@ pub async fn download_backend(
         format!("Failed to create install dir {}: {}", install_root.display(), e)
     })?;
 
-    let response = reqwest::get(entry.url)
+    // Resolve the actual download URL. Pinning `/releases/b<NNN>/...` to
+    // today's release tag works at install time but becomes orphaned the
+    // moment upstream bumps the version (we hit this bug with llama.cpp
+    // b9835 -> b9842 and `Mozilla-Ocho/llamafile` -> `mozilla-ai/llamafile`).
+    // When `gh_repo` is set, query the GitHub Releases API and locate the
+    // asset whose name matches `gh_repo_match` — version-drift-proof.
+    let resolved_url = match entry.url {
+        Some(url) => url.to_string(),
+        None => {
+            let repo = entry.gh_repo.unwrap_or("");
+            let primary = entry.gh_repo_match.unwrap_or("");
+            if repo.is_empty() || primary.is_empty() {
+                return Err(format!(
+                    "Variant {} has neither a static URL nor a complete GitHub lookup config",
+                    entry.id
+                ));
+            }
+            log::info!(
+                "Resolving variant {} via GitHub Releases API: repo={} match={}",
+                entry.id, repo, primary
+            );
+            resolve_github_release_url(repo, primary, entry.gh_repo_match_alt, entry.gh_repo_pref_prefix).await?
+        }
+    };
+
+    let response = reqwest::get(&resolved_url)
         .await
-        .map_err(|e| format!("HTTP GET failed for {}: {}", entry.url, e))?;
+        .map_err(|e| format!("HTTP GET failed for {}: {}", resolved_url, e))?;
     if !response.status().is_success() {
         return Err(format!(
             "Download failed: HTTP {} for {}",
             response.status(),
-            entry.url
+            resolved_url
         ));
     }
     let bytes = response
@@ -1025,6 +1177,126 @@ pub fn reap_backends(registry: &BackendRegistry) -> Result<(), String> {
 }
 
 // ============================================================================
+// GitHub Releases API asset resolver
+// ============================================================================
+//
+// llama.cpp / llamafile / koboldcpp publish assets whose filenames embed
+// the version tag (e.g. `llama-b9842-bin-win-cuda-12.4-x64.zip`,
+// `llamafile-0.10.3`, `koboldcpp-nocuda.exe`). Pinning any URL with a
+// specific tag in a `const` is a maintenance footgun: the tag floats
+// forward every release cycle and a pinned URL 404s forever the moment
+// upstream moves on.
+//
+// `resolve_github_release_url` queries `GET /repos/<repo>/releases/latest`
+// and walks the `assets[]` array, picking the first asset whose
+// `name` contains the requested substring (case-insensitive). A second
+// optional `alt_match` lets a caller fall back to a different naming
+// convention if upstream changes its asset suffix between releases
+// (we hit exactly this with llama.cpp renaming ROCm -> HIP-Radeon).
+//
+// On success returns the asset's `browser_download_url` so a follow-up
+// `reqwest::get` works without further discovery round-trips. Mirrors
+// the asset-picking pattern in `app_updater.rs::pick_release_installer_asset`
+// (the upstream installer updater).
+async fn resolve_github_release_url(
+    repo: &str,
+    primary_match: &str,
+    alt_match: Option<&str>,
+    preferred_prefix: Option<&str>,
+) -> Result<String, String> {
+    let api_url = format!("https://api.github.com/repos/{}/releases/latest", repo);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client for GitHub lookup: {}", e))?;
+    let response = client
+        .get(&api_url)
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "Meridian-BackendManager")
+        .send()
+        .await
+        .map_err(|e| format!("GitHub API request failed for {}: {}", repo, e))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "GitHub Releases API for {} returned HTTP {}",
+            repo,
+            response.status()
+        ));
+    }
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse GitHub Releases JSON for {}: {}", repo, e))?;
+    let assets = body
+        .get("assets")
+        .and_then(|a| a.as_array())
+        .ok_or_else(|| {
+            format!(
+                "GitHub Releases response for {} missing `assets` array — release may be empty",
+                repo
+            )
+        })?;
+
+    let primary = pick_release_asset(&assets, primary_match, preferred_prefix);
+    if let Some(url) = primary {
+        return Ok(url);
+    }
+    if let Some(alt) = alt_match {
+        if let Some(url) = pick_release_asset(&assets, alt, preferred_prefix) {
+            return Ok(url);
+        }
+    }
+    Err(format!(
+        "GitHub release for {} has no asset matching '{}'{} (with preferred prefix {:?})",
+        repo,
+        primary_match,
+        alt_match
+            .map(|a| format!(" or '{}'", a))
+            .unwrap_or_default(),
+        preferred_prefix
+    ))
+}
+
+/// Pick the first asset whose `name` matches `needle` (case-insensitive
+/// substring) AND whose lowercased name starts with `preferred_prefix` when
+/// that prefix is `Some`.
+///
+/// Extracted from `resolve_github_release_url` so the picker is unit-testable
+/// without a real HTTP round-trip — synthetic JSON asset lists can pin down
+/// edge cases (the cudart-vs-llama-server disambiguation) without relying on
+/// the live GitHub release keeping that exact ordering.
+fn pick_release_asset(
+    assets: &[serde_json::Value],
+    needle: &str,
+    preferred_prefix: Option<&str>,
+) -> Option<String> {
+    let needle_lower = needle.to_lowercase();
+    let prefix_lower = preferred_prefix.map(|p| p.to_lowercase());
+    assets.iter().find_map(|a| {
+        let name = a.get("name").and_then(|n| n.as_str())?;
+        let lower = name.to_lowercase();
+        if !lower.contains(&needle_lower) {
+            return None;
+        }
+        if let Some(ref p) = prefix_lower {
+            // WITHOUT this guard, llama.cpp's GitHub release returns
+            // `cudart-llama-bin-win-cuda-12.4-x64.zip` (the CUDA runtime
+            // bundle) BEFORE `llama-b<ver>-bin-win-cuda-12.4-x64.zip`,
+            // and `find_map` picks the cudart sibling. Extracting that
+            // archive yields NO llama-server.exe — install "succeeds"
+            // structurally but `start_backend` then errors with "binary
+            // not found". Set `gh_repo_pref_prefix = Some("llama-")` to
+            // disambiguate.
+            if !lower.starts_with(p) {
+                return None;
+            }
+        }
+        let url = a.get("browser_download_url").and_then(|u| u.as_str())?;
+        Some(url.to_string())
+    })
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 
@@ -1072,18 +1344,31 @@ fn kind_dir_name(kind: &BackendKind) -> &'static str {
     }
 }
 
-fn platform_binary_name(kind: &BackendKind) -> &'static str {
-    DOWNLOAD_TABLE
+fn platform_binary_name(kind: &BackendKind) -> String {
+    // Multiple DOWNLOAD_TABLE rows can share a kind (koboldcpp.cpu +
+    // koboldcpp.nvidia, llama.cpp.cpu + llama.cpp.nvidia + llama.cpp.amd).
+    // Each carries a different binary_name target so the actual install
+    // reveals which variant the user picked. Walk candidate binaries in
+    // declaration order and return the first one that EXISTS on disk;
+    // fall back to the first candidate when none are installed yet so a
+    // pre-install status query (e.g. `disk_status_for_kind` from the
+    // `get_backend_status` command) still surfaces a sensible default.
+    let candidates: Vec<&'static str> = DOWNLOAD_TABLE
         .iter()
-        .find(|e| &e.kind == kind)
-        .map(|e| {
-            if cfg!(windows) {
-                e.binary_windows
-            } else {
-                e.binary_linux
+        .filter(|e| &e.kind == kind)
+        .map(|e| if cfg!(windows) { e.binary_windows } else { e.binary_linux })
+        .collect();
+    if candidates.is_empty() {
+        return "unknown".to_string();
+    }
+    if let Ok(install_root) = backend_install_root(kind, None) {
+        for c in &candidates {
+            if install_root.join(c).exists() {
+                return (*c).to_string();
             }
-        })
-        .unwrap_or("unknown")
+        }
+    }
+    candidates[0].to_string()
 }
 
 fn backend_install_root(
@@ -1330,14 +1615,42 @@ mod tests {
     #[test]
     fn lookup_download_finds_cuda_for_nvidia() {
         let entry = lookup_download(&BackendKind::LlamaCpp, "nvidia").unwrap();
-        assert!(entry.url.contains("cuda"), "expected CUDA URL, got {}", entry.url);
+        // URL is now resolved at download time via the GitHub Releases API,
+        // not embedded in a const. What we CAN assert is the resolver
+        // config that will locate the CUDA asset at download time —
+        // both the substring matcher AND the required preferred prefix
+        // that disambiguates `cudart-llama-...` from `llama-b<ver>-...`.
+        let matcher = entry.gh_repo_match.unwrap_or("");
+        let prefix = entry.gh_repo_pref_prefix.unwrap_or("");
+        assert!(
+            matcher.contains("cuda"),
+            "expected CUDA substring in gh_repo_match, got '{}'",
+            matcher
+        );
+        assert_eq!(
+            prefix, "llama-",
+            "expected 'llama-' preferred prefix to reject the cudart bundle"
+        );
         assert_eq!(entry.archive_format, "zip");
     }
 
     #[test]
-    fn lookup_download_finds_rocm_for_amd() {
+    fn lookup_download_finds_hip_or_rocm_for_amd() {
         let entry = lookup_download(&BackendKind::LlamaCpp, "amd").unwrap();
-        assert!(entry.url.contains("rocm"), "expected ROCm URL, got {}", entry.url);
+        // ROCm was renamed to HIP/Radeon upstream — the resolver tries the
+        // newer suffix first, falls back to the older one. The URL is
+        // resolved at download time via GitHub API, so a hardcoded
+        // substring check would be brittle across releases; assert that
+        // BOTH names are wired into the resolver as primary / fallback.
+        let primary = entry.gh_repo_match.unwrap_or("");
+        let alt = entry.gh_repo_match_alt.unwrap_or("");
+        let combined = format!("{} {}", primary, alt);
+        assert!(
+            combined.contains("hip") || combined.contains("rocm"),
+            "expected HIP/Radeon hint in lookup matchers, got primary='{}' alt='{}'",
+            primary, alt
+        );
+        assert_eq!(entry.archive_format, "zip");
     }
 
     #[test]
@@ -1350,26 +1663,37 @@ mod tests {
     #[test]
     fn lookup_download_finds_koboldcpp_for_cpu() {
         let entry = lookup_download(&BackendKind::KoboldCpp, "cpu").unwrap();
-        assert!(!entry.url.is_empty());
-        assert_eq!(entry.archive_format, "zip");
+        // URL is now resolved at runtime via the GitHub Releases API,
+        // not embedded in the const; what we CAN assert is the asset
+        // matcher hint that the resolver will use to locate the
+        // nocuda variant. The matcher must contain 'nocuda' so the
+        // no-CUDA bulk-build asset is picked over the regular
+        // CUDA-enabled exe.
+        let matcher = entry.gh_repo_match.unwrap_or("");
+        assert!(
+            matcher.contains("nocuda"),
+            "expected 'nocuda' substring in gh_repo_match, got '{}'",
+            matcher
+        );
+        assert_eq!(entry.archive_format, "binary");
     }
 
     #[test]
     fn lookup_download_finds_turboquant_for_each_vendor() {
         let cuda13 = lookup_download(&BackendKind::TurboQuant, "nvidia").unwrap();
-        assert!(cuda13.url.contains("cuda-13.3"));
+        assert!(cuda13.url.unwrap_or_default().contains("cuda-13.3"));
         assert_eq!(cuda13.archive_format, "zip-flat");
 
         let cuda12 = lookup_download(&BackendKind::TurboQuant, "nvidia-cuda12").unwrap();
-        assert!(cuda12.url.contains("cuda-12.4"));
+        assert!(cuda12.url.unwrap_or_default().contains("cuda-12.4"));
         assert_eq!(cuda12.archive_format, "zip-flat");
 
         let cpu = lookup_download(&BackendKind::TurboQuant, "cpu").unwrap();
-        assert!(cpu.url.contains("-cpu"));
+        assert!(cpu.url.unwrap_or_default().contains("-cpu"));
         assert_eq!(cpu.archive_format, "zip-flat");
 
         let amd = lookup_download(&BackendKind::TurboQuant, "amd").unwrap();
-        assert!(amd.url.contains("-vulkan"));
+        assert!(amd.url.unwrap_or_default().contains("-vulkan"));
         assert_eq!(amd.archive_format, "zip-flat");
     }
 
@@ -1378,12 +1702,13 @@ mod tests {
         // AtomicBot-AI publishes a different tag per variant; using
         // `/releases/latest/...` would only ever resolve to one of them.
         let entry = lookup_download(&BackendKind::TurboQuant, "nvidia").unwrap();
+        let url = entry.url.unwrap_or_default();
         assert!(
-            !entry.url.contains("/releases/latest/"),
+            !url.contains("/releases/latest/"),
             "turboquant URL must pin a specific tag (got {})",
-            entry.url
+            url
         );
-        assert!(entry.url.contains("-d86eb0b"));
+        assert!(url.contains("-d86eb0b"));
     }
 
     #[test]
@@ -1450,10 +1775,115 @@ mod tests {
             let entry = lookup_download(&BackendKind::Lemonade, vendor)
                 .expect("Lemonade lookup should always resolve");
             assert_eq!(entry.vendor, "all");
-            assert!(entry.url.contains("lemonade-embeddable-10.8.1-windows-x64.zip"));
+            assert!(entry
+                .url
+                .unwrap_or_default()
+                .contains("lemonade-embeddable-10.8.1-windows-x64.zip"));
             assert_eq!(entry.binary_windows, "lemonade-server.exe");
             assert_eq!(entry.archive_format, "zip");
         }
+    }
+
+    /// llama.cpp's GitHub release ships BOTH `cudart-llama-bin-win-cuda-12.4-x64.zip`
+    /// (the CUDA runtime helper — NOT a llama-server build) AND
+    /// `llama-b<ver>-bin-win-cuda-12.4-x64.zip` (the actual llama-server build).
+    /// Without `gh_repo_pref_prefix = Some("llama-")`, naive substring matching
+    /// picks the cudart sibling first → install "succeeds" but the install
+    /// root contains NO `llama-server.exe` and `start_backend` then errors
+    /// with "binary not found". This test pins down that the prefix guard
+    /// actually rejects the cudart sibling and selects the llama-server build.
+    /// Without it, a future refactor that accidentally drops the prefix check
+    /// ships silently.
+    #[test]
+    fn pick_release_asset_rejects_cudart_bundle_for_llama_cpp() {
+        // Real asset names as observed on ggml-org/llama.cpp release `b9842`,
+        // preserved verbatim so a future accidental rename inside our
+        // substring matcher fails this test loud.
+        let assets = vec![
+            serde_json::json!({
+                "name": "cudart-llama-bin-win-cuda-12.4-x64.zip",
+                "browser_download_url": "https://github.com/ggml-org/llama.cpp/releases/download/b9842/cudart-llama-bin-win-cuda-12.4-x64.zip",
+            }),
+            serde_json::json!({
+                "name": "llama-b9842-bin-win-cuda-12.4-x64.zip",
+                "browser_download_url": "https://github.com/ggml-org/llama.cpp/releases/download/b9842/llama-b9842-bin-win-cuda-12.4-x64.zip",
+            }),
+            // Sibling that doesn't match the cuda-12.4 substring at all
+            // (a .sha256 checksum or LICENSE file) — must never surface.
+            serde_json::json!({
+                "name": "SHA256SUMS",
+                "browser_download_url": "https://github.com/ggml-org/llama.cpp/releases/download/b9842/SHA256SUMS",
+            }),
+        ];
+        let url = pick_release_asset(
+            &assets,
+            "bin-win-cuda-12.4-x64",
+            Some("llama-"),
+        )
+        .expect("llama-server build must be selected over cudart bundle");
+        assert!(
+            url.contains("llama-b9842-bin-win-cuda-12.4-x64.zip"),
+            "selected asset must be the llama-server zip, got: {}",
+            url
+        );
+        assert!(
+            !url.contains("cudart-"),
+            "cudart bundle must NEVER be selected — got {}",
+            url
+        );
+    }
+
+    /// Ordering invariant: even when the cudart bundle is listed FIRST in
+    /// the array (the order GitHub returns), the prefix guard still rejects
+    /// it. `find_map` is stable, so this test specifically catches any code
+    /// that scans forward and returns on first hit without applying the
+    /// prefix filter (the bug we are guarding against).
+    #[test]
+    fn pick_release_asset_rejects_cudart_even_when_listed_first() {
+        let assets = vec![
+            serde_json::json!({
+                "name": "cudart-llama-bin-win-cuda-12.4-x64.zip",
+                "browser_download_url": "https://cdn.example/cudart.zip",
+            }),
+            // Sandwich a non-matching file in the middle to prove the picker
+            // walks past it.
+            serde_json::json!({
+                "name": "llama-b9842-bin-win-cuda-12.4-x64.zip",
+                "browser_download_url": "https://cdn.example/llama-server.zip",
+            }),
+        ];
+        assert_eq!(
+            assets[0]["name"].as_str(),
+            Some("cudart-llama-bin-win-cuda-12.4-x64.zip"),
+            "precondition: cudart sibling must be at index 0 for this test"
+        );
+        let url = pick_release_asset(
+            &assets,
+            "bin-win-cuda-12.4-x64",
+            Some("llama-"),
+        )
+        .expect("must skip cudart at index 0 and pick llama-server at index 1");
+        assert!(url.ends_with("llama-server.zip"));
+    }
+
+    /// Negative-control: when `gh_repo_pref_prefix` is `None`, the picker
+    /// falls back to "first substring match wins" — which is wrong for
+    /// llama.cpp but correct for cases where upstream ships only one asset
+    /// per substring (e.g. koboldcpp's `koboldcpp-nocuda` matcher). This
+    /// test pins down that the `None` branch still works so a future
+    /// "always require a prefix" refactor doesn't break koboldcpp / llamafile.
+    #[test]
+    fn pick_release_asset_accepts_first_match_when_no_prefix_required() {
+        let assets = vec![
+            // First matching asset with no prefix constraint — wins.
+            serde_json::json!({
+                "name": "koboldcpp-nocuda.exe",
+                "browser_download_url": "https://cdn.example/koboldcpp-nocuda.exe",
+            }),
+        ];
+        let url = pick_release_asset(&assets, "koboldcpp-nocuda", None)
+            .expect("no prefix constraint, first match wins");
+        assert!(url.ends_with("koboldcpp-nocuda.exe"));
     }
 
     // ----- Fix 1: list_gguf_models scanner tests -----
