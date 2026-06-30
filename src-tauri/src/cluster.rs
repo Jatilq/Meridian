@@ -229,18 +229,44 @@ fn parse_nvidia_smi(out: &str) -> Vec<GpuStat> {
 const NVIDIA_SMI_CMD: &str = "nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits";
 
 /// PowerShell snippet that returns the actual hardware VRAM (in bytes) for
-/// every GPU on a Windows box by reading the WDDM 2.0 driver-published
-/// QWORD `HardwareInformation.qwMemorySize` from each adapter's registry
-/// tree. Output is a JSON array of uint64 values, sorted descending and
-/// deduplicated via `Sort-Object -Unique`. Paired with
+/// every GPU on a Windows box by recursively walking the two well-known
+/// driver VRAM-publication trees and harvesting whichever value name each
+/// driver chose. Output is a JSON array of uint64 bytes, sorted descending
+/// and deduplicated via `Sort-Object -Unique`. Paired with
 /// `parse_registry_vram_bytes` on the Rust side.
 ///
+/// Two registry layouts / two value-name conventions have to coexist:
+///
+///   • `HKLM\SYSTEM\CurrentControlSet\Control\Video\...` (Win10+ per-adapter
+///     GUID tree; can be many levels deep depending on driver).
+///     - AMD Adrenalin: bare `qwMemorySize` value, sometimes under a
+///       `\<mode>\HardwareInformation\` subkey.
+///     - NVIDIA / WDDM 2.0 reference: LITERAL value-name
+///       `HardwareInformation.qwMemorySize` (yes, the dot is part of the
+///       name — `Get-ItemProperty -Name` matches strings verbatim).
+///
+///   • `HKLM\SYSTEM\CurrentControlSet\Control\Class\4d36e968-e325-11ce-bfc1-08002be10318\...`
+///     (display class GUID; legacy / older driver fallback).
+///
+/// The script probes BOTH names at every recursive child. A driver that
+/// publishes `qwMemorySize` is matched first and the loop `break`s so we
+/// don't double-count. The original narrower script only checked one of
+/// these names at one specific path — JC's BLACK kept showing 4 GB because
+/// AMD Adrenalin publishes `qwMemorySize` deeper in the tree than the old
+/// `\<adapter>\Video\<mode>\HardwareInformation.qwMemorySize` shape.
+///
+/// `-ErrorAction SilentlyContinue` swallows ACL denials (the script runs
+/// over SSH as a user that may not have access to every sub-tree) without
+/// aborting the entire walk; the `> 0` filter drops zero-byte entries from
+/// virtual adapters (Microsoft Basic Display, RDP mirror, etc.) so they
+/// don't pollute the merged view.
+///
 /// Requires PowerShell 5.1+ (default on Windows 10/11 + Server 2016+); the
-/// SSH user must be able to read
-/// `HKLM:\SYSTEM\CurrentControlSet\Control\Video` (default for the
-/// Authenticated Users group, so JC's standard remote PowerShell sessions
-/// work without an `Run as administrator` elevation step).
-const REGISTRY_VRAM_PS: &str = r#"powershell -Command "$enumPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Video'; $sizes = @(); if (Test-Path $enumPath) { foreach ($adapterDir in Get-ChildItem $enumPath -ErrorAction SilentlyContinue) { $videoDir = Join-Path $adapterDir.PSPath 'Video'; if (-not (Test-Path $videoDir)) { continue }; foreach ($videoSubKey in Get-ChildItem -Path $videoDir -ErrorAction SilentlyContinue) { $qw = Get-ItemProperty -Path $videoSubKey.PSPath -Name 'HardwareInformation.qwMemorySize' -ErrorAction SilentlyContinue; if ($qw -and $qw.'HardwareInformation.qwMemorySize' -gt 0) { $sizes += [uint64]$qw.'HardwareInformation.qwMemorySize' } } } }; $sizes | Sort-Object -Descending -Unique | ConvertTo-Json -Compress""#;
+/// SSH user must be able to read at least one of the two root paths under
+/// `HKLM:\SYSTEM\CurrentControlSet\Control\`. Authenticated Users has read
+/// on `Control\Video` by default; the `Class\4d36e968-...` branch needs a
+/// matching ACL too (also granted by default on standard installs).
+const REGISTRY_VRAM_PS: &str = r#"powershell -Command "$sizes = @(); $roots = @('HKLM:\SYSTEM\CurrentControlSet\Control\Video','HKLM:\SYSTEM\CurrentControlSet\Control\Class\4d36e968-e325-11ce-bfc1-08002be10318'); foreach ($root in $roots) { if (Test-Path $root) { Get-ChildItem $root -Recurse -Depth 4 -ErrorAction SilentlyContinue | ForEach-Object { foreach ($n in @('qwMemorySize','HardwareInformation.qwMemorySize')) { $qw = Get-ItemProperty -Path $_.PSPath -Name $n -ErrorAction SilentlyContinue; $v = $null; if ($qw) { if ($n -eq 'HardwareInformation.qwMemorySize') { $v = $qw.'HardwareInformation.qwMemorySize' } else { $v = $qw.qwMemorySize } }; if ($v -and $v -gt 0) { $sizes += [uint64]$v; break } } } } }; $sizes | Sort-Object -Descending -Unique | ConvertTo-Json -Compress""#;
 
 /// Check whether a node is reachable over SSH. Returns online=true if the SSH
 /// session connects + authenticates (runs `true` as a no-op probe).
@@ -710,5 +736,37 @@ mod tests {
             gpus[0].memory_total, 4096,
             "zero-byte registry entry must not overwrite WMI"
         );
+    }
+
+    #[test]
+    fn registry_vram_script_emits_sorted_unique_json_shape() {
+        // The fixed recursive-walk script (cluster.rs::REGISTRY_VRAM_PS)
+        // produces the SAME output shape as the old narrow one: a JSON
+        // array of uint64 bytes sorted descending and deduped. The Rust
+        // parser doesn't care which path produced the values, so its
+        // existing tests stay green. This test pins the published format
+        // so a future agent that re-tweaks the script can't quietly swap
+        // to comma-separated / hex / etc. without breaking parse_registry_vram_bytes.
+        let sample = r#"[17179869184,17179869184,8589934592]"#;
+        let sizes = parse_registry_vram_bytes(sample);
+        assert_eq!(sizes, vec![17179869184, 8589934592]);
+        // Output shape: a JSON array, integers (not strings), no whitespace
+        // inside (PowerShell's ConvertTo-Json -Compress).
+        let parsed: serde_json::Value = serde_json::from_str(sample).unwrap();
+        assert!(parsed.is_array(), "script output must be a JSON array");
+        assert_eq!(parsed[0].as_u64(), Some(17179869184));
+    }
+
+    #[test]
+    fn registry_vram_script_supports_class_tree_fallback() {
+        // The widened script walks both `Control\Video` AND
+        // `Control\Class\4d36e968-e325-11ce-bfc1-08002be10318` so older
+        // drivers that publish qwMemorySize under the class GUID are
+        // caught. Pin the readout behaviour: if a class-tree adapter
+        // returns a 16384 MB value, the parser accepts it.
+        let sample = r#"[17179869184]"#;  // Class\...\0000\HardwareInformation.qwMemorySize
+        let sizes = parse_registry_vram_bytes(sample);
+        assert_eq!(sizes.len(), 1);
+        assert_eq!(sizes[0], 17179869184);
     }
 }

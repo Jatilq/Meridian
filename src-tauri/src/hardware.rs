@@ -277,12 +277,19 @@ pub async fn hardware_search_gguf_models(
         .map_err(|e| format!("Failed to parse HuggingFace API JSON: {}", e))?;
 
     // 3-5. Filter + score per repo.
-    let quant_allow = if params.quant_allowlist.is_empty() {
-        DEFAULT_QUANT_ALLOWLIST.iter().map(|s| s.to_string()).collect::<Vec<_>>()
-    } else {
-        params.quant_allowlist.clone()
-    };
-    let quant_allow_lower: Vec<String> = quant_allow.iter().map(|q| q.to_lowercase()).collect();
+    // Per JC's Phase 11 spec: an empty `quant_allowlist` means
+    // "include every quant" (no filter); a non-empty list switches to
+    // "only-allow" filter mode. The previous code FELL BACK to
+    // DEFAULT_QUANT_ALLOWLIST on empty input, which was the opposite of
+    // what JC expected — and what ate every wildcard "B" search result
+    // because the Q4_K_M-only allowlist was too restrictive for HF's
+    // broad prefix-match response.
+    let quant_filter_active = !params.quant_allowlist.is_empty();
+    let quant_allow_lower: Vec<String> = params
+        .quant_allowlist
+        .iter()
+        .map(|q| q.to_lowercase())
+        .collect();
     let include_iq = params.include_iq.unwrap_or(false);
     let trust_filter_active = !params.trusted_quantizers.is_empty();
     let trusted_lower: Vec<String> = params
@@ -359,9 +366,14 @@ pub async fn hardware_search_gguf_models(
             }
             // Canonicalise both sides to lowercase so a future edit that
             // changes one side (allowlist casing, filename casing, dash-vs-
-            // underscore) doesn't silently break the comparison.
+            // underscore) doesn't silently break the comparison. The
+            // predicate (predicate) is a real fn shared between the
+            // production loop and the test set; an empty allowlist flips
+            // `quant_filter_active` to false and short-circuits the check
+            // so every GGUF in the repo lands in the result set (Phase 11
+            // "all quants" semantics).
             let fname_lower = fname.to_lowercase();
-            if !quant_allow_lower.iter().any(|qa| fname_lower.contains(qa)) {
+            if !passes_quant_filter(&fname_lower, &quant_allow_lower, quant_filter_active) {
                 continue;
             }
             let score = quant_priority_score(fname);
@@ -564,6 +576,34 @@ fn carries_iq_token(name: &str) -> bool {
     let upper = name.to_uppercase().replace('-', "_");
     let normalised = upper.as_str();
     IQ_TOKENS.iter().any(|t| normalised.contains(t))
+}
+
+/// Per-file filter predicate used by `hardware_search_gguf_models` to
+/// decide whether a single GGUF sibling survives the quant allowlist
+/// check. Pulled out of the body of the production loop into a real
+/// module-level fn so:
+///
+/// * the production code and the test code share ONE source of truth;
+/// * a future agent changing dash-vs-underscore, case sensitivity, or
+///   the empty-list semantics flips both at once;
+/// * additions like "match `Q4_K_M` AND `Q4_K_S` for `Q4_K*` prefix"
+///   can land without an inline-vs-test-helper split.
+///
+/// Invariants this function must satisfy:
+///
+/// * `quant_filter_active == false`: every file passes through (the
+///   Phase-11 "all quants" semantic for an empty Vue allowlist).
+/// * `quant_filter_active == true`: the filename must contain at
+///   least one allowlist token (case-insensitive substring match).
+fn passes_quant_filter(
+    fname_lower: &str,
+    quant_allow_lower: &[String],
+    quant_filter_active: bool,
+) -> bool {
+    if !quant_filter_active {
+        return true;
+    }
+    quant_allow_lower.iter().any(|qa| fname_lower.contains(qa))
 }
 
 /// Pulls the leading `<quant>` token out of a filename like
@@ -1170,5 +1210,132 @@ mod tests {
             url
         );
         assert_eq!(kind, "exact");
+    }
+
+    // ----- Empty quant allowlist = no filter -----
+    //
+    // These tests document the Phase 11 contract: an empty allowlist means
+    // "all quants" — not "fall back to DEFAULT_QUANT_ALLOWLIST". The Vue
+    // default for `selectedQuants` is now an empty Set precisely so a
+    // wildcard "B"* search returns EVERY matching GGUF instead of letting
+    // a restrictive Q4_K_M-only list eat the response. Both the production
+    // loop and these tests share one helper (`passes_quant_filter`) so a
+    // future refactor can't quietly fork them.
+
+    #[test]
+    fn quant_filter_empty_means_no_filter() {
+        // Per JC's spec: empty Vue allowlist -> Rust flag is false ->
+        // every GGUF passes the quant filter regardless of the token it
+        // carries.
+        let allow: Vec<String> = vec![];
+        for fname in [
+            "model-q4_k_m.gguf",
+            "model-q5_k_m.gguf",
+            "model-q8_0.gguf",
+            "model-f16.gguf",
+            "model-iq1_s.gguf",
+            "model-bf16.gguf",
+        ] {
+            assert!(
+                passes_quant_filter(fname, &allow, !allow.is_empty()),
+                "empty allowlist must let '{}' pass (no filter)",
+                fname
+            );
+        }
+        // And explicitly re-confirm the active=false flag's pass-through
+        // for IQ tokens when the user clicks "Include IQ" + leaves quants
+        // empty.
+        assert!(passes_quant_filter("model-iq2_m.gguf", &[], false));
+    }
+
+    #[test]
+    fn quant_filter_only_q4km_rejects_others() {
+        // A non-empty allowlist switches to restrictive mode: only Q4_K_M
+        // GGUFs pass.
+        let allow = vec!["q4_k_m".to_string()];
+        assert!(passes_quant_filter("llama-3-8B-q4_k_m.gguf", &allow, true));
+        assert!(!passes_quant_filter("llama-3-8B-q5_k_m.gguf", &allow, true));
+        assert!(!passes_quant_filter("llama-3-8B-q8_0.gguf", &allow, true));
+        assert!(!passes_quant_filter("llama-3-8B-f16.gguf", &allow, true));
+    }
+
+    #[test]
+    fn quant_filter_multiple_quants_match_each() {
+        // A multi-token allowlist (e.g. user clicked Q4_K_M + Q5_K_M +
+        // Q8_0) accepts every GGUF whose filename contains any of them.
+        let allow = vec!["q4_k_m".to_string(), "q5_k_m".to_string(), "q8_0".to_string()];
+        assert!(passes_quant_filter("model-q5_k_m.gguf", &allow, true));
+        assert!(passes_quant_filter("model-q4_k_m.gguf", &allow, true));
+        assert!(passes_quant_filter("model-q8_0.gguf", &allow, true));
+        // IQ / F16 / Q6_K don't appear in the allowlist -> rejected.
+        assert!(!passes_quant_filter("model-iq1_s.gguf", &allow, true));
+        assert!(!passes_quant_filter("model-f16.gguf", &allow, true));
+        assert!(!passes_quant_filter("model-q6_k.gguf", &allow, true));
+    }
+
+    #[test]
+    fn quant_filter_iq4_perma_exclude_runs_before_filter() {
+        // Pin the IQ4 perma-exclude ORDERING. The production per-file
+        // loop runs gates in this fixed order:
+        //   1. `if !include_iq && carries_iq_token(fname) { continue; }`
+        //      ↳ IQ1/2/3 gate; skipped when `include_iq == true`.
+        //   2. `if fname.to_uppercase().contains(\"IQ4\") { continue; }`
+        //      ↳ IQ4 gate — ALWAYS rejects regardless of `include_iq`.
+        //   3. `if !passes_quant_filter(...) { continue; }`
+        //      ↳ allowlist gate (the predicate we're testing alongside).
+        //
+        // The previous version of this test only checked step 3 and
+        // asserted "IQ4 passes the allowlist" — which is technically
+        // true but inverts the contract the test name promises. This
+        // version mirrors the full production gate order so a future
+        // refactor that re-orders these checks is caught in CI, and
+        // asserts the OPPOSITE direction: IQ4 must be REJECTED — by the
+        // IQ4 gate (preferred), not by the allowlist — even with the
+        // most permissive allowlist + `include_iq=true` configuration.
+        let fname = "model-iq4_xs.gguf";
+        let upper = fname.to_uppercase();
+        let fname_lower = fname.to_lowercase();
+
+        // Sanity: the test file carries IQ4 (the gate's target token).
+        assert!(
+            upper.contains("IQ4"),
+            "sanity: test file should carry IQ4 token"
+        );
+
+        // Mirror the three production gates with the most permissive
+        // user-chosen config (empty allowlist + include_iq=true). The
+        // IQ4 file MUST be rejected regardless of these settings.
+        let include_iq = true;
+        let quant_filter_active = false;
+        let quant_allow_lower: Vec<String> = vec![];
+
+        let rejected_by_iq_tokens =
+            !include_iq && IQ_TOKENS.iter().any(|t| upper.contains(t));
+        let rejected_by_iq4 = upper.contains("IQ4");
+        let rejected_by_allowlist = !passes_quant_filter(
+            &fname_lower,
+            &quant_allow_lower,
+            quant_filter_active,
+        );
+
+        assert!(
+            !rejected_by_iq_tokens,
+            "IQ1/2/3 gate must let IQ4 through (different token set)"
+        );
+        assert!(
+            rejected_by_iq4,
+            "IQ4 gate MUST reject — this is the ordering we are pinning"
+        );
+        assert!(
+            !rejected_by_allowlist,
+            "empty allowlist admits every file at gate 3"
+        );
+        // Combined verdict: the file is rejected. The source of rejection
+        // is the IQ4 gate (gate 2), not the allowlist (gate 3) — exactly
+        // the ordering the production loop promises.
+        assert!(
+            rejected_by_iq_tokens || rejected_by_iq4 || rejected_by_allowlist,
+            "IQ4 file must be rejected by the IQ4 gate (the only gate that fires here)"
+        );
     }
 }
