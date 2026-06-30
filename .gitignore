@@ -41,3 +41,6 @@ flatpak/output/
 .ssh/
 *.pem
 *.key
+
+# Windows device-name junk (artifacts from `> nul` redirection mistakes)
+/nul

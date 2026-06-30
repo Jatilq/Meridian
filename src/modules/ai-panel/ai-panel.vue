@@ -142,10 +142,10 @@ async function maybeSpeak(text: string) {
     // TTS is best-effort; ignore failures
   }
 }
-// Rain agent loop: POST to 9Router with tool schemas; while the model returns
-// tool_calls, execute them (read-only/create immediately, destructive ones via
-// confirmation) and feed results back. Caps at 10 iterations. Returns the final
-// assistant text. `pendingDestructive` collects tool calls needing confirmation.
+// Rain agent loop: POST to the local AI server (OpenAI-compatible) with tool
+// schemas; while the model returns tool_calls, execute them (read-only/create
+// immediately, destructive ones via confirmation) and feed results back. Caps
+// at 10 iterations. Returns the final assistant text.
 async function runAgentLoop(
   routerBase: string,
   model: string | undefined,
@@ -440,8 +440,9 @@ async function handleSend() {
 
   try {
     // Revised architecture: Omnix handles ONLY vision (+ TTS/Director).
-    // ALL text inference goes to 9Router (OpenAI-compatible). Vision is used
-    // when an image is selected and Omnix is online; everything else is text.
+    // ALL text inference goes to the local AI server (OpenAI-compatible).
+    // Vision is used when an image is selected and Omnix is online;
+    // everything else is text.
     const omnixVisionReady = aiPanelStore.useOmnix && aiPanelStore.omnixOnline;
     const routerBase = (aiPanelStore.routerEndpoint || '').replace(/\/+$/, '');
     const model = aiPanelStore.selectedModel || undefined;
@@ -495,7 +496,7 @@ async function handleSend() {
       return;
     }
     else {
-      // Text inference -> 9Router via the Rain agent loop (tool calling).
+      // Text inference -> Local AI server via the Rain agent loop (tool calling).
       if (!routerBase) {
         throw new Error('Local AI server endpoint not configured. Set it in Settings.');
       }

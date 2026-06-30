@@ -423,6 +423,7 @@ pub fn run() {
             backend_manager::get_backend_status,
             backend_manager::probe_backend_api,
             backend_manager::list_gguf_models,
+            backend_manager::scan_models_recursive,
             backend_manager::hf_resolve_model_files,
             sftp::sftp_read_dir,
             rain_memory::rain_load_memory,

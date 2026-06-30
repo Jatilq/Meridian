@@ -804,6 +804,22 @@ pub fn list_gguf_models(
     Ok(out)
 }
 
+/// Recursively walks a directory tree, returning every `.gguf` file found.
+///
+/// Sibling to `list_gguf_models` but with NO depth cap (`usize::MAX`).
+/// Users with deeply-nested layouts — e.g. the typical
+/// `E:\ai\Models\bartowski\<repo>\<size>\<file>.gguf` going 4-5 levels
+/// deep, or any custom organisation that nests more than 6 levels —
+/// can hit "No .gguf files found" with the depth-capped walker. The
+/// Models tab wires this command through so the scan can never miss a
+/// file for any reasonable on-disk arrangement.
+#[tauri::command]
+pub fn scan_models_recursive(
+    path: String,
+) -> Result<Vec<GgufModelEntry>, String> {
+    list_gguf_models(path, Some(usize::MAX))
+}
+
 // ============================================================================
 // HuggingFace repo → concrete file resolution
 // ============================================================================
@@ -964,6 +980,26 @@ fn hf_quant_score(filename: &str) -> i32 {
     }
     if lower.contains("fp32") || lower.contains("f32") {
         score += 10;
+    }
+    // IQ-quants ("IQ1_XSS", "IQ2_XS", "IQ3_S", "IQ4_NL", etc.) ship
+    // MUCH smaller files at the cost of significantly lower quality
+    // than Q4_K_M. The HF resolution must not default to them.
+    //
+    // IQ1 / IQ2 / IQ3: heavy penalty so they fall BELOW plain
+    // `model.bin` (score < 0). The hashrate / quality tradeoff is
+    // severe enough that we want the user to explicitly opt-in.
+    //
+    // IQ4: lighter penalty — borderline acceptable when a repo ships
+    // only IQ4 + larger quants; still below Q4_K_M but doesn't bleed
+    // past fp32 in pathological sorting cases.
+    if lower.contains("iq1_") || lower.contains("iq1-")
+        || lower.contains("iq2_") || lower.contains("iq2-")
+        || lower.contains("iq3_") || lower.contains("iq3-")
+    {
+        score -= 200;
+    }
+    else if lower.contains("iq4_") || lower.contains("iq4-") {
+        score -= 50;
     }
     score
 }
@@ -1610,5 +1646,119 @@ mod tests {
     async fn hf_resolve_model_files_rejects_empty_repo() {
         let result = hf_resolve_model_files("".to_string()).await;
         assert!(result.is_err(), "empty repo id should error");
+    }
+
+    /// IQ-quants must score BELOW Q4_K_M (the user-requested minimum)
+    /// and BELOW plain `model.bin`. The strong penalty means `files[0]`
+    /// is never an IQ-quant by accident — the user has to explicitly
+    /// want the smallest possible size.
+    #[test]
+    fn hf_quant_score_penalizes_iq_quants_below_q4_k_m() {
+        let q4 = hf_quant_score("model-Q4_K_M.gguf");
+        let plain = hf_quant_score("model.bin");
+        assert!(q4 > 0, "precondition: Q4_K_M must score > 0 (got {})", q4);
+        for name in [
+            // Trimmed to real llama.cpp variants only:
+            //   IQ1: _S, _M                            (no IQ1_XSS / IQ1_XXS)
+            //   IQ2: _XXS, _XSS, _S, _M                (no IQ2_XS — that's an IQ3 variant)
+            //   IQ3: _XXS, _XS, _S, _M, _NL
+            // Synthetic names get the same rule applied as real ones (the
+            // penalty scoring is token-based), but the fixture should mirror
+            // what a model repo actually ships.
+            "model-IQ1_S.gguf",
+            "model-IQ1_M.gguf",
+            "model-IQ2_XXS.gguf",
+            "model-IQ2_XSS.gguf",
+            "model-IQ2_S.gguf",
+            "model-IQ2_M.gguf",
+            "model-IQ3_XXS.gguf",
+            "model-IQ3_XS.gguf",
+            "model-IQ3_S.gguf",
+            "model-IQ3_M.gguf",
+            "model-IQ3_NL.gguf",
+        ] {
+            let s = hf_quant_score(name);
+            assert!(
+                s < q4,
+                "{} (score={}) must score below Q4_K_M (score={})",
+                name, s, q4
+            );
+            assert!(
+                s < plain,
+                "{} (score={}) must score below plain (score={})",
+                name, s, plain
+            );
+        }
+    }
+
+    /// IQ4 (borderline quant) gets a milder penalty than IQ1/2/3 —
+    /// validates the two-tier IQ scoring rule independently so a
+    /// regression on the heavy-but-not-light axis is caught.
+    #[test]
+    fn hf_quant_score_penalizes_iq4_mildly_but_below_q4() {
+        let iq4 = hf_quant_score("model-IQ4_XS.gguf");
+        let q4 = hf_quant_score("model-Q4_K_M.gguf");
+        let plain = hf_quant_score("model.bin");
+        assert!(
+            iq4 < q4,
+            "IQ4 (score={}) must score below Q4_K_M (score={})",
+            iq4, q4
+        );
+        // IQ4 still beats plain — borderline but not unusable.
+        assert!(
+            iq4 > plain,
+            "IQ4 (score={}) must score above plain (score={})",
+            iq4, plain
+        );
+    }
+
+    /// scan_models_recursive must walk past the 6-level cap of the
+    /// default `list_gguf_models`. Build an 8-deep nesting with a .gguf
+    /// at the bottom — the test is differential (proves the depth cap
+    /// is the reason, not just that one command happens to find it).
+    #[test]
+    fn scan_models_recursive_walks_past_default_depth_cap() {
+        let root = std::env::temp_dir().join("meridian-test-deep-gguf");
+        let _ = std::fs::remove_dir_all(&root);
+        let mut deep = root.clone();
+        for level in 0..8 {
+            deep = deep.join(format!("level-{}", level));
+            std::fs::create_dir_all(&deep).expect("create deep dir");
+        }
+        std::fs::write(deep.join("deep-q4_k_m.gguf"), b"x")
+            .expect("write leaf");
+
+        // Negative proof: list_gguf_models(max_depth=6) must NOT find
+        // the leaf at depth 8 (root = depth 0, levels 0..7 are 8-fold
+        // nested folders, so the file sits at depth 8). If this ever
+        // starts passing, the depth cap is broken — neither command
+        // is doing the right thing yet we'd still find 1 file.
+        let capped = list_gguf_models(
+            root.to_string_lossy().to_string(),
+            Some(6),
+        )
+        .expect("capped scan should succeed");
+        assert!(
+            capped.is_empty(),
+            "list_gguf_models(max_depth=6) must NOT find the leaf at depth 8, got {:?}",
+            capped
+        );
+
+        // Positive proof: scan_models_recursive (usize::MAX) FINDS it.
+        let result =
+            scan_models_recursive(root.to_string_lossy().to_string())
+                .expect("recursive scan should succeed");
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(
+            result.len(),
+            1,
+            "deep recursive scan must find the leaf, got {:?}",
+            result
+        );
+        assert!(
+            result[0].path.contains("deep-q4_k_m.gguf"),
+            "found path was {:?}",
+            result[0].path
+        );
     }
 }

@@ -12,6 +12,7 @@ import { installModuleLoadRecovery } from '@/utils/module-load-recovery';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { useDownloaderStore } from '@/stores/runtime/downloader';
+import { disableWebViewFeatures } from '@/utils/disable-web-view-features';
 
 import './styles/index.css';
 
@@ -26,6 +27,7 @@ app.use(VWave, {
   cancellationPeriod: 0,
   color: 'hsl(var(--primary))',
 });
+disableWebViewFeatures();
 app.mount('#app');
 
 listen<{

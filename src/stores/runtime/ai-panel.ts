@@ -57,13 +57,13 @@ const isLoading = ref(false);
 const messages = ref<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
 const input = ref('');
 const endpoint = ref(userSettingsStore.userSettings.meridian?.aiPanel?.endpointUrl || persisted.endpoint || 'http://localhost:9777/api/text');
-const selectedModel = ref(userSettingsStore.userSettings.meridian?.aiPanel?.model || persisted.selectedModel || 'openrouter/openrouter/free');
+const selectedModel = ref(userSettingsStore.userSettings.meridian?.aiPanel?.model || persisted.selectedModel || '');
 const models = ref<Array<{ id: string }>>([]);
 const modelsLoaded = ref(false);
 const useOmnix = ref(userSettingsStore.userSettings.meridian?.aiPanel?.omnixEnabled ?? persisted.useOmnix ?? false);
 const omnixOnline = ref(false);
 const omnixPath = ref(userSettingsStore.userSettings.meridian?.aiPanel?.omnixPath || 'E:\\ai\\Apps\\Omnix');
-const routerEndpoint = ref(userSettingsStore.userSettings.meridian?.aiPanel?.routerEndpoint || 'http://localhost:20128/v1');
+const routerEndpoint = ref(userSettingsStore.userSettings.meridian?.aiPanel?.routerEndpoint || 'http://localhost:11434/v1');
 const ttsEnabled = ref(userSettingsStore.userSettings.meridian?.aiPanel?.ttsEnabled ?? false);
 const routerOnline = ref(false);
 const systemPrompt = ref(userSettingsStore.userSettings.meridian?.aiPanel?.systemPrompt || 'You are Rain, a sharp, warm companion built into Meridian, a file manager. You help the user navigate, organize, search, and manage their files. Current directory: {current_path}. Selected files: {selected_files}. Speak like a real person, not a help desk. Be concise and practical, dry or witty when it fits, and have opinions (e.g. offer to clean up a messy folder name). CRITICAL: You are Rain. Never break character. Never say you are an AI, an assistant, a language model, or a bot. Never say "As an AI", "I am just an AI", "the assistant", "Certainly!", "Of course!", "Absolutely!", or "Great question!". Just talk like Rain. Format your responses clearly. Use bullet points for lists. Use short paragraphs not walls of text. Bold important terms. Keep responses scannable.');
@@ -83,7 +83,7 @@ const favoritesText = ref('');
 const onboardingComplete = ref(userSettingsStore.userSettings.meridian?.aiPanel?.onboardingComplete ?? false);
 const onboardingStep = ref(userSettingsStore.userSettings.meridian?.aiPanel?.onboardingStep ?? 'intro');
 const connectionMode = ref<AiPanelConnectionMode>(userSettingsStore.userSettings.meridian?.aiPanel?.connectionMode ?? 'basic');
-const apiProvider = ref<AiPanelProviderId>(userSettingsStore.userSettings.meridian?.aiPanel?.apiProvider ?? 'openrouter');
+const apiProvider = ref<AiPanelProviderId>(userSettingsStore.userSettings.meridian?.aiPanel?.apiProvider ?? 'custom');
 const localEndpointUrl = ref(userSettingsStore.userSettings.meridian?.aiPanel?.localEndpointUrl ?? 'http://localhost:11434/v1');
 const apiKeyTemp = ref(userSettingsStore.userSettings.meridian?.aiPanel?.apiKeyTemp ?? '');
 let onboardingSkipped = false;
@@ -136,7 +136,7 @@ let hasGreetedThisSession = false;
 
   const ONBOARDING_STEPS = [
     'Set your download folder',
-    'Configure the 9Router endpoint',
+    'Configure the Local AI server endpoint',
     'Add SSH connections',
     'Done!',
   ];

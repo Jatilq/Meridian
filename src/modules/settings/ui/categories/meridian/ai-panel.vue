@@ -143,16 +143,16 @@ const modelSupportsTools = computed(() => {
     :icon="BotIcon"
   >
     <div class="ai-panel-settings">
-      <!-- Primary AI: local AI server (handles all text inference) -->
-      <div class="ai-panel-settings__section-title">Primary AI (local AI server)</div>
+      <!-- Primary AI: Local AI server (handles all text inference) -->
+      <div class="ai-panel-settings__section-title">Primary AI (Local AI server)</div>
       <div class="ai-panel-settings__field">
         <label class="ai-panel-settings__label" for="ai-panel-router">
-          Endpoint URL
+          Local AI server URL
         </label>
         <Input
           id="ai-panel-router"
           v-model="routerEndpoint"
-          placeholder="http://localhost:20128/v1"
+          placeholder="http://localhost:11434/v1"
           class="ai-panel-settings__input"
         />
         <span class="ai-panel-settings__hint">

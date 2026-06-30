@@ -221,7 +221,7 @@ pub async fn omnix_tts(text: String, voice_id: Option<String>) -> Result<String,
 }
 
 /// Classify intent via Omnix Director. Returns the raw JSON routing decision
-/// (simple vs complex) so the caller can pick the 9Router target model.
+/// (simple vs complex) so the caller can pick the local AI server target model.
 #[tauri::command]
 pub async fn omnix_director(prompt: String) -> Result<String, String> {
     let body = serde_json::json!({ "prompt": prompt }).to_string();
@@ -240,4 +240,61 @@ pub async fn omnix_director(prompt: String) -> Result<String, String> {
         .text()
         .await
         .map_err(|e| format!("Failed to read Omnix Director response: {}", e))
+}
+
+/// One row of the HF cache: a single `models--<repo>` directory with at least
+/// one snapshotted blob. Returned to the Vue "Omnix Models" tab so it can mark
+/// already-installed entries with an Installed badge.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct InstalledHfModel {
+    pub repo_id: String,
+    pub path: String,
+}
+
+/// Resolve the local HuggingFace cache directory (`%USERPROFILE%\.cache\huggingface\hub`
+/// on Windows, `$HOME/.cache/huggingface/hub` elsewhere). Returns Ok(None) when the
+/// directory does not yet exist — the user has not downloaded anything via HF yet.
+fn huggingface_cache_dir() -> Result<Option<PathBuf>, String> {
+    let base = std::env::var_os("USERPROFILE")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
+        .ok_or_else(|| "Cannot resolve USERPROFILE or HOME for HF cache".to_string())?;
+    let hub = base.join(".cache").join("huggingface").join("hub");
+    if !hub.exists() {
+        return Ok(None);
+    }
+    Ok(Some(hub))
+}
+
+/// Scan the local HuggingFace cache and return one entry per installed model
+/// repository. The HF Transformers convention stores repos as `models--<org>/<name>`
+/// directories (the `/` in the repo ID becomes `--`); this strips that prefix so
+/// the Vue tab can match it against `modelID` and show an Installed badge.
+#[tauri::command]
+pub fn scan_huggingface_cache() -> Result<Vec<InstalledHfModel>, String> {
+    let hub = match huggingface_cache_dir()? {
+        Some(p) => p,
+        None => return Ok(Vec::new()),
+    };
+    let mut out: Vec<InstalledHfModel> = Vec::new();
+    let entries = fs::read_dir(&hub)
+        .map_err(|e| format!("Failed to read HF cache {}: {}", hub.display(), e))?;
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if !p.is_dir() {
+            continue;
+        }
+        let Some(name_str) = p.file_name().and_then(|n| n.to_str()) else { continue };
+        let Some(rest) = name_str.strip_prefix("models--") else { continue };
+        // Repo IDs contain '/'; restore from the storage form (only the first
+        // `--` is the org/model separator — later ones belong to model names).
+        let repo_id = rest.replacen("--", "/", 1);
+        out.push(InstalledHfModel {
+            repo_id,
+            path: p.to_string_lossy().to_string(),
+        });
+    }
+    out.sort_by(|a, b| a.repo_id.cmp(&b.repo_id));
+    Ok(out)
 }

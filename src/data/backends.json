@@ -95,6 +95,79 @@
           "notes": "CUDA-enabled build for NVIDIA GPUs (largest Windows asset in this catalog)."
         }
       ]
+    },
+    {
+      "id": "turboquant",
+      "name": "TurboQuant",
+      "description": "Drop-in fork of llama.cpp maintained by AtomicBot-AI, bundling the TurboQuant quantization pass and TriAttention KV-cache pruning. Same CLI interface as llama.cpp plus --triattention-* flags. Windows tags ship as flat zips (no parent dir) so Meridian uses zip-flat extraction.",
+      "homepage": "https://github.com/AtomicBot-ai/atomic-llama-cpp-turboquant",
+      "binaryNameHint": "llama-server.exe",
+      "variants": [
+        {
+          "id": "turboquant.cuda-13.3",
+          "label": "CUDA 13.3 (NVIDIA)",
+          "hardware": "nvidia",
+          "downloadUrl": "https://github.com/AtomicBot-ai/atomic-llama-cpp-turboquant/releases/download/turboquant-windows-x64-cuda-13.3-d86eb0b/llama-turboquant-windows-x64-cuda-13.3.zip",
+          "binaryName": "llama-server.exe",
+          "sizeBytes": 280992877,
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "archiveFormat": "zip-flat",
+          "notes": "Primary NVIDIA path. Requires CUDA 13.x runtime on the host. Pinned to tag d86eb0b (cannot use /releases/latest/ — AtomicBot-AI publishes a different tag per variant)."
+        },
+        {
+          "id": "turboquant.cuda-12.4",
+          "label": "CUDA 12.4 (NVIDIA legacy)",
+          "hardware": "nvidia-cuda12",
+          "downloadUrl": "https://github.com/AtomicBot-ai/atomic-llama-cpp-turboquant/releases/download/turboquant-windows-x64-cuda-12.4-d86eb0b/llama-turboquant-windows-x64-cuda-12.4.zip",
+          "binaryName": "llama-server.exe",
+          "sizeBytes": 715410075,
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "archiveFormat": "zip-flat",
+          "notes": "Older CUDA 12.4 build for hosts that have not yet upgraded to CUDA 13.x. Largest of the four variants (~682 MB)."
+        },
+        {
+          "id": "turboquant.cpu",
+          "label": "CPU",
+          "hardware": "cpu",
+          "downloadUrl": "https://github.com/AtomicBot-ai/atomic-llama-cpp-turboquant/releases/download/turboquant-windows-x64-cpu-d86eb0b/llama-turboquant-windows-x64-cpu.zip",
+          "binaryName": "llama-server.exe",
+          "sizeBytes": 11541616,
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "archiveFormat": "zip-flat",
+          "notes": "Plain CPU build — no GPU required. Smallest turboquant Windows download (~11 MB)."
+        },
+        {
+          "id": "turboquant.vulkan",
+          "label": "Vulkan (AMD / fallback)",
+          "hardware": "amd",
+          "downloadUrl": "https://github.com/AtomicBot-ai/atomic-llama-cpp-turboquant/releases/download/turboquant-windows-x64-vulkan-d86eb0b/llama-turboquant-windows-x64-vulkan.zip",
+          "binaryName": "llama-server.exe",
+          "sizeBytes": 34035125,
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "archiveFormat": "zip-flat",
+          "notes": "Vulkan build for AMD GPUs on Windows. Also used as a generic fallback when nvidia runtime missing."
+        }
+      ]
+    },
+    {
+      "id": "lemonade",
+      "name": "Lemonade",
+      "description": "Embeddable ONNX runtime from lemonade-sdk. Single binary auto-detects NVIDIA CUDA / AMD ROCm / Intel NPU / CPU at startup; exposes an OpenAI-compatible API at localhost:13305. Tier 2 — brings medium-sized GGUF + ONNX + FLM model support with AMD NPU acceleration. Apache-2.0 licensed so Meridian can bundle it freely.",
+      "homepage": "https://github.com/lemonade-sdk/lemonade",
+      "binaryNameHint": "lemonade-server.exe",
+      "variants": [
+        {
+          "id": "lemonade.embeddable.windows-x64",
+          "label": "Embeddable (Windows x64)",
+          "hardware": "cpu",
+          "downloadUrl": "https://github.com/lemonade-sdk/lemonade/releases/download/v10.8.1/lemonade-embeddable-10.8.1-windows-x64.zip",
+          "binaryName": "lemonade-server.exe",
+          "sizeBytes": 3634093,
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "archiveFormat": "zip",
+          "notes": "v10.8.1 pinned. Single-binary embeddable runtime — the same binary auto-detects NVIDIA / AMD / Intel-NPU / CPU at startup, so one row covers every host. Hardware marker is 'cpu' so the auto-picker keeps this as fallback when no vendor-specific match exists. SHA-256 placeholder; replace after the bundle is verified."
+        }
+      ]
     }
   ]
 }

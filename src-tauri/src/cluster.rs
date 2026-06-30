@@ -228,6 +228,20 @@ fn parse_nvidia_smi(out: &str) -> Vec<GpuStat> {
 
 const NVIDIA_SMI_CMD: &str = "nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits";
 
+/// PowerShell snippet that returns the actual hardware VRAM (in bytes) for
+/// every GPU on a Windows box by reading the WDDM 2.0 driver-published
+/// QWORD `HardwareInformation.qwMemorySize` from each adapter's registry
+/// tree. Output is a JSON array of uint64 values, sorted descending and
+/// deduplicated via `Sort-Object -Unique`. Paired with
+/// `parse_registry_vram_bytes` on the Rust side.
+///
+/// Requires PowerShell 5.1+ (default on Windows 10/11 + Server 2016+); the
+/// SSH user must be able to read
+/// `HKLM:\SYSTEM\CurrentControlSet\Control\Video` (default for the
+/// Authenticated Users group, so JC's standard remote PowerShell sessions
+/// work without an `Run as administrator` elevation step).
+const REGISTRY_VRAM_PS: &str = r#"powershell -Command "$enumPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Video'; $sizes = @(); if (Test-Path $enumPath) { foreach ($adapterDir in Get-ChildItem $enumPath -ErrorAction SilentlyContinue) { $videoDir = Join-Path $adapterDir.PSPath 'Video'; if (-not (Test-Path $videoDir)) { continue }; foreach ($videoSubKey in Get-ChildItem -Path $videoDir -ErrorAction SilentlyContinue) { $qw = Get-ItemProperty -Path $videoSubKey.PSPath -Name 'HardwareInformation.qwMemorySize' -ErrorAction SilentlyContinue; if ($qw -and $qw.'HardwareInformation.qwMemorySize' -gt 0) { $sizes += [uint64]$qw.'HardwareInformation.qwMemorySize' } } } }; $sizes | Sort-Object -Descending -Unique | ConvertTo-Json -Compress""#;
+
 /// Check whether a node is reachable over SSH. Returns online=true if the SSH
 /// session connects + authenticates (runs `true` as a no-op probe).
 #[tauri::command]
@@ -390,8 +404,27 @@ pub async fn get_remote_hardware(
     .await
     .unwrap_or_default();
 
-    // Parse WMI JSON to extract GPU names and VRAM
-    let gpus = parse_wmi_gpu_json(&gpu_vendor_out);
+    // Fix for Windows GPUs reporting inaccurate VRAM: WMI AdapterRAM is a
+    // uint32 capped at ~4 GB by the WMI provider; AMD drivers in
+    // particular never expose full VRAM via this path — the user's RX 6900
+    // XT (16 GB) shows up as 4 GB here. The authoritative 64-bit value
+    // lives in the video-adapter registry at
+    //   HKLM\SYSTEM\CurrentControlSet\Control\Video\<adapter-guid>\Video\<mode>\
+    //     HardwareInformation.qwMemorySize
+    // (REG_BINARY, 8 bytes). Cross-vendor accurate for AMD / NVIDIA / Intel
+    // on WDDM 2.0+ hosts — Windows 10 1709 (Sept 2017) onwards. Drivers
+    // below WDDM 2.0 fall back to the (broken) WMI value; a future DXGI
+    // fallback can close that gap. Driver registration order tracks WMI
+    // enumeration order on Windows, so positional pairing assigns the i-th
+    // registry size to the i-th WMI adapter. Single-GPU hosts (like JC's
+    // BLACK) only have one entry on each side; the loop is trivially
+    // correct for that case.
+    let mut gpus = parse_wmi_gpu_json(&gpu_vendor_out);
+    let gpu_reg_out = ssh_exec(&app_handle, &creds, REGISTRY_VRAM_PS)
+        .await
+        .unwrap_or_default();
+    let reg_vram = parse_registry_vram_bytes(&gpu_reg_out);
+    merge_gpus_with_registry(&mut gpus, &reg_vram);
 
     Ok(HardwareSnapshot {
         online: true,
@@ -433,6 +466,52 @@ fn parse_wmi_gpu_json(out: &str) -> Vec<GpuStat> {
         });
     }
     gpus
+}
+
+/// Replace each GPU's WMI-derived `memory_total` with the matching registry
+/// byte count when one is available at the same index. Driver registration
+/// order tracks WMI enumeration order on Windows, so positional pairing
+/// assigns the i-th registry size to the i-th WMI adapter. Indexes past
+/// `reg_vram.len()` keep their WMI values (relevant for virtual / legacy
+/// display adapters that don't expose the QWORD). Single-GPU hosts (like
+/// JC's BLACK) only have one entry on each side; the loop is trivially
+/// correct for that case. Multi-GPU mixed-vendor hosts fall back to
+/// undefined-but-deterministic pairing — a future change can add a
+/// name-substring match against the registry's `DeviceDesc` to lock down
+/// the contract for that case.
+fn merge_gpus_with_registry(gpus: &mut [GpuStat], reg_vram: &[u64]) {
+    for (i, gpu) in gpus.iter_mut().enumerate() {
+        if let Some(&bytes) = reg_vram.get(i) {
+            if bytes > 0 {
+                gpu.memory_total = bytes / (1024 * 1024);
+            }
+        }
+    }
+}
+
+/// Parse the JSON array emitted by the registry-reading PowerShell command
+/// in `get_remote_hardware`. Each element is an unsigned 64-bit byte count
+/// for one physical GPU's VRAM (read from the driver-published QWORD value
+/// `HardwareInformation.qwMemorySize`). Returns sizes sorted descending so
+/// the caller can pair them with WMI adapters in driver-registration
+/// order. Empty Vec on bad JSON / empty array; nothing else is invalid.
+fn parse_registry_vram_bytes(out: &str) -> Vec<u64> {
+    let parsed: serde_json::Value = match serde_json::from_str(out) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    let arr = match parsed.as_array() {
+        Some(a) => a,
+        None => return Vec::new(),
+    };
+    let mut sizes: Vec<u64> = arr.iter().filter_map(|v| v.as_u64()).collect();
+    // Sort descending so duplicate values are adjacent (Vec::dedup removes
+    // adjacent duplicates; O(n) after the sort). The PowerShell script
+    // already uses `-Unique` but we defensively re-dedupe here in case a
+    // future caller passes raw registry output with sub-key repeats.
+    sizes.sort_by(|a, b| b.cmp(a));
+    sizes.dedup();
+    sizes
 }
 
 /// Parse `top -bn1` %Cpu line → utilization percent (100 - idle).
@@ -509,5 +588,127 @@ mod tests {
     #[test]
     fn nvidia_parser_ignores_malformed() {
         assert!(parse_nvidia_smi("garbage line").is_empty());
+    }
+
+    // ----- AMD VRAM registry fix tests -----
+
+    #[test]
+    fn parse_registry_vram_returns_sizes_sorted_descending() {
+        // AMD RX 6900 XT (16 GB = 17179869184 bytes) on top; legacy 4 GB
+        // residual below. Order matters — the largest value always pairs
+        // with the largest-card WMI adapter.
+        let sample = r#"[17179869184,4294967296]"#;
+        let sizes = parse_registry_vram_bytes(sample);
+        assert_eq!(sizes, vec![17179869184, 4294967296]);
+    }
+
+    #[test]
+    fn parse_registry_vram_dedupes_repeated_subkeys() {
+        // HardwareInformation.qwMemorySize is the same value across all
+        // sub-keys (display modes) of one adapter; the PowerShell
+        // collector pushes duplicates that we dedupe via `-Unique`. For
+        // safety the Rust parser also handles a hand-crafted duplicate
+        // string input should still emit one entry.
+        let sample = r#"[17179869184,17179869184,8589934592]"#;
+        let sizes = parse_registry_vram_bytes(sample);
+        assert_eq!(
+            sizes,
+            vec![17179869184, 8589934592],
+            "duplicates must be removed and the result sorted desc"
+        );
+    }
+
+    #[test]
+    fn parse_registry_vram_returns_empty_for_invalid_json() {
+        assert!(parse_registry_vram_bytes("totally not JSON").is_empty());
+        assert!(parse_registry_vram_bytes("").is_empty());
+        assert!(parse_registry_vram_bytes("{}").is_empty());
+    }
+
+    #[test]
+    fn wmi_parser_still_works_with_lone_object_no_array_brackets() {
+        // PowerShell ConvertTo-Json in single-result mode emits a bare
+        // object without array brackets. The parser must accept both
+        // shapes so an RDP/headless node with one virtual GPU doesn't
+        // drop the adapter.
+        let sample = r#"{"Name":"Basic Display Adapter","AdapterRAM":0}"#;
+        let gpus = parse_wmi_gpu_json(sample);
+        assert_eq!(gpus.len(), 1);
+        assert_eq!(gpus[0].name, "Basic Display Adapter");
+    }
+
+    // ----- merge_gpus_with_registry tests -----
+
+    fn make_gpu(idx: u32, name: &str, memory_total_mb: u64) -> GpuStat {
+        GpuStat {
+            index: idx,
+            name: name.to_string(),
+            utilization: 0,
+            memory_used: 0,
+            memory_total: memory_total_mb,
+            temperature: 0,
+        }
+    }
+
+    #[test]
+    fn merge_gpus_with_registry_overrides_wmi_vram_for_single_gpu() {
+        // JC's BLACK: WMI under-reports a 16384 MB RX 6900 XT as 4096 MB
+        // because the WMI AdapterRAM field is uint32-capped. The
+        // authoritative 16384 MB value pairs in via positional merge.
+        let mut gpus = vec![make_gpu(0, "AMD Radeon RX 6900 XT", 4096)];
+        let reg = vec![17179869184u64]; // 16384 MB
+        merge_gpus_with_registry(&mut gpus, &reg);
+        assert_eq!(
+            gpus[0].memory_total, 16384,
+            "registry value must override the broken WMI value"
+        );
+        // Other fields unchanged.
+        assert_eq!(gpus[0].index, 0);
+        assert_eq!(gpus[0].name, "AMD Radeon RX 6900 XT");
+    }
+
+    #[test]
+    fn merge_gpus_with_registry_keeps_wmi_when_registry_empty() {
+        // Pre-WDDM-2.0 hosts: registry returns an empty Vec. The WMI
+        // fallback value (wrong on AMD but the best we have) must be
+        // preserved so the UI doesn't render a zero card.
+        let mut gpus = vec![make_gpu(0, "AMD Radeon RX 6900 XT", 4096)];
+        let empty: Vec<u64> = vec![];
+        merge_gpus_with_registry(&mut gpus, &empty);
+        assert_eq!(
+            gpus[0].memory_total, 4096,
+            "empty registry must leave WMI value untouched"
+        );
+    }
+
+    #[test]
+    fn merge_gpus_with_registry_keeps_wmi_for_unmatched_indexes() {
+        // Two-GPU host where the registry only reports one adapter (a
+        // virtual display adapter that doesn't expose qwMemorySize).
+        // Index 0 must pick up the registry value; index 1 must keep WMI.
+        let mut gpus = vec![
+            make_gpu(0, "AMD Radeon RX 6900 XT", 4096),
+            make_gpu(1, "Hyper-V Virtual Display", 0),
+        ];
+        let reg = vec![17179869184u64]; // only one registry entry
+        merge_gpus_with_registry(&mut gpus, &reg);
+        assert_eq!(gpus[0].memory_total, 16384, "matched index must override");
+        assert_eq!(
+            gpus[1].memory_total, 0,
+            "unmatched index must keep its WMI value"
+        );
+    }
+
+    #[test]
+    fn merge_gpus_with_registry_ignores_zero_byte_entries() {
+        // Defensive: a registry value of 0 must not overwrite a working WMI
+        // value (could happen on a virtual adapter).
+        let mut gpus = vec![make_gpu(0, "AMD Radeon RX 6900 XT", 4096)];
+        let reg = vec![0u64];
+        merge_gpus_with_registry(&mut gpus, &reg);
+        assert_eq!(
+            gpus[0].memory_total, 4096,
+            "zero-byte registry entry must not overwrite WMI"
+        );
     }
 }

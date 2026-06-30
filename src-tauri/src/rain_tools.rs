@@ -4,9 +4,11 @@
 
 //! Rain agent tools (Phase 8 step 2).
 //!
-//! Seven tools Rain can call via OpenAI-style function calling through 9Router.
-//! Each is a thin Tauri command that wraps an existing operation and returns a
-//! JSON string the agent loop feeds back to the model as the tool result.
+//! Seven tools Rain can call via OpenAI-style function calling through the
+//! local AI server (Ollama, LM Studio, Lemonade, or any OpenAI-compatible
+//! endpoint). Each is a thin Tauri command that wraps an existing operation
+//! and returns a JSON string the agent loop feeds back to the model as the
+//! tool result.
 //!
 //! Read-only + create_folder execute immediately. move/rename/delete are
 //! confirmation-gated in the FRONTEND (the panel shows a confirm card before
@@ -17,7 +19,7 @@ use serde_json::{json, Value};
 
 /// Returns the OpenAI `tools` array (function schemas) Rain advertises to the
 /// model. Returned as a JSON string so the frontend can splice it straight into
-/// the 9Router chat-completion request body.
+/// the local AI server's chat-completion request body.
 #[tauri::command]
 pub fn rain_tool_schemas() -> Result<String, String> {
     let tools = json!([
