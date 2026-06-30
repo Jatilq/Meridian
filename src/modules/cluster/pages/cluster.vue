@@ -507,13 +507,22 @@ onUnmounted(() => {
     <!-- Add Worker dialog -->
     <Teleport to="body">
       <Transition name="cluster-modal">
+        <!-- Add Worker dialog. Backdrop click does NOT close the dialog:
+             JC reported accidental data loss when clicking outside. The
+             previous `@click.self="closeAddWorker"` paired with
+             openAddWorker()'s on-every-open reset silently wiped typed-but-
+             not-saved input. Only the Cancel button (footer), the X button
+             (header), and the Escape key close the dialog. The form state
+             is reset every time the user opens the dialog (see
+             openAddWorker), so save+reopen / cancel+reopen both start
+             blank — but a mid-typing click-outside keeps the dialog open
+             AND preserves the partial input. -->
         <div
           v-if="showAddWorker"
           class="cluster-modal"
           role="dialog"
           aria-modal="true"
           aria-labelledby="cluster-modal-title"
-          @click.self="closeAddWorker"
         >
           <div class="cluster-modal__panel">
             <div class="cluster-modal__header">
