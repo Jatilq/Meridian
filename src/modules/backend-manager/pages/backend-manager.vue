@@ -7,7 +7,7 @@ Copyright © 2021 - present Aleksey Hoffman. All rights reserved.
 import { computed, onMounted, ref, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { useUserSettingsStore } from '@/stores/storage/user-settings';
-import type { MeridianBackendKind, MeridianBackendConfig } from '@/types/user-settings';
+import type { MeridianBackendKind, MeridianBackendConfig, SshConnectionSetting } from '@/types/user-settings';
 import catalogData from '@/data/backends.json';
 import omnixCatalogData from '@/data/omnix-catalog.json';
 
@@ -299,7 +299,11 @@ function formatBytes2(bytes: number | undefined | null): string {
 }
 
 // ============================================================================
-// RPC Slaves tab state — populated from user-settings.sshConnections.
+// RPC Slaves tab state — populated from user-settings.clusterWorkers.
+// Round-26 reset: previously this read `sshConnections` (same array the
+// file-browser remote panes used). Cluster infrastructure now has its own
+// dedicated `meridian.clusterWorkers` array; the file-browser-owned
+// `sshConnections` is no longer surfaced here.
 // ============================================================================
 interface SlaveRow {
   name: string;
@@ -310,29 +314,20 @@ interface SlaveRow {
   role: string;
 }
 
-interface SshConnection {
-  name?: string;
-  host: string;
-  port: number;
-  username: string;
-  keyPath?: string;
-  tags?: string[];
-}
-
-function mapSshToSlave(conn: SshConnection, _index: number): SlaveRow {
+function mapClusterWorkerToSlave(conn: SshConnectionSetting, _index: number): SlaveRow {
   return {
-    name: conn.name || `${conn.username}@${conn.host}`,
+    name: conn.label || `${conn.username}@${conn.host}`,
     host: conn.host,
     port: conn.port,
     username: conn.username,
     keyPath: conn.keyPath || '',
-    role: conn.tags?.includes('cluster-worker') ? 'llama.cpp RPC slave (worker)' : 'SSH worker',
+    role: 'llama.cpp RPC slave (worker)',
   };
 }
 
 const slaves = computed<SlaveRow[]>(() => {
-  const list = userSettingsStore.userSettings.meridian?.sshConnections;
-  return Array.isArray(list) ? list.map(mapSshToSlave) : [];
+  const list = userSettingsStore.userSettings.meridian?.clusterWorkers;
+  return Array.isArray(list) ? list.map(mapClusterWorkerToSlave) : [];
 });
 
 // ============================================================================
@@ -353,6 +348,33 @@ const omnixCatalog = computed<OmnixCatalogEntry[]>(() =>
 
 const omnixInstalled = ref<InstalledHfModel[]>([]);
 const omnixInstalledSet = computed(() => new Set(omnixInstalled.value.map((m) => m.repoId)));
+// The original badge code reported the wrong number: it computed
+// `omnixInstalledSet.size / omnixCatalog.length` directly, which can
+// produce bogus ratios like "32 of 20" because the two numbers were
+// surveying different universes — the HF cache scan returns repoIds
+// for EVERYTHING the user has downloaded across all projects (other
+// apps, manual downloads, etc.), while `omnixCatalog.length` counts
+// only the bundled model entries. The badge now reports the
+// intersection: how many catalog entries have a matching cached
+// download. UX-wise this is "X of Y installed" where X ≤ Y by
+// construction. The full HF cache count is reported separately as
+// "+N other in cache" so the user still sees their raw cache footprint.
+// All three derived values share one `catalogModelIds` Set under the
+// hood — the alternative (each computed rebuilding its own Set on every
+// reactive read) duplicated work for no gain at N≈30 entries.
+const omnixCatalogModelIds = computed(() => new Set(omnixCatalog.value.map((m) => m.modelID)));
+const omnixInstalledInCatalogSet = computed(() => {
+  const ids = omnixCatalogModelIds.value;
+  return new Set(
+    omnixInstalled.value
+      .map((m) => m.repoId)
+      .filter((id) => ids.has(id)),
+  );
+});
+const omnixOtherCacheCount = computed(() => {
+  const ids = omnixCatalogModelIds.value;
+  return omnixInstalled.value.filter((m) => !ids.has(m.repoId)).length;
+});
 const omnixBusy = ref(false);
 const omnixNote = ref('');
 
@@ -556,13 +578,15 @@ async function refreshModels(): Promise<void> {
       models.value = [];
       return;
     }
-    // Recursive `list_gguf_models` walks up to 6 levels deep by default —
-    // covers the typical `models/<vendor>/<size>/<file>.gguf` layout.
-    // Replaces the previous single-level `read_dir` scan, which missed
-    // everything JC had in subfolders (e.g. `E:\ai\Models\Qwen\7B\...`).
-    const entries = await invoke<RawModelEntry[]>('list_gguf_models', {
+    // `scan_models_recursive` walks the entire tree under modelsDir without
+    // any depth cap. The previous `list_gguf_models(maxDepth=6)` walker
+    // missed files on hosts with deeply-nested layouts
+    // (e.g. `E:\ai\Models\<vendor>\<size1>\<size2>\<file>.gguf`). Calling
+    // the recursive command means "No .gguf files found" is a genuine
+    // empty-result signal, not a depth-cap artefact. See
+    // `backend_manager::scan_models_recursive` for the walker details.
+    const entries = await invoke<RawModelEntry[]>('scan_models_recursive', {
       path: modelsDir.value,
-      maxDepth: 6,
     });
     models.value = entries
       .map((entry) => ({
@@ -574,7 +598,7 @@ async function refreshModels(): Promise<void> {
       }))
       .sort((a, b) => b.sizeBytes - a.sizeBytes);
     if (models.value.length === 0) {
-      modelsNote.value = `No .gguf files found under ${modelsDir.value} (depth 6). Point the path at your model root — e.g. E:\\ai\\Models\\.`;
+      modelsNote.value = `No .gguf files found under ${modelsDir.value} (recursive walk). Try a shallower or different model root — e.g. E:\\ai\\Models\\.`;
     }
   }
   catch (error) {
@@ -679,8 +703,8 @@ onMounted(() => {
         <span v-else-if="tab.id === 'slaves' && slaves.length" class="bm__tab-count">
           ({{ slaves.length }})
         </span>
-        <span v-else-if="tab.id === 'omnix-models' && omnixInstalledSet.size" class="bm__tab-count">
-          ({{ omnixInstalledSet.size }}/{{ omnixCatalog.length }})
+        <span v-else-if="tab.id === 'omnix-models' && omnixInstalledInCatalogSet.size" class="bm__tab-count">
+          ({{ omnixInstalledInCatalogSet.size }}/{{ omnixCatalog.length }})
         </span>
       </button>
     </nav>
@@ -905,8 +929,8 @@ onMounted(() => {
         <div>
           <h2 class="bm__section-title">Omnix Models</h2>
           <p class="bm__section-sub">
-            {{ omnixInstalledSet.size }} of {{ omnixCatalog.length }} installed ·
-            Tier 1 — zero-config, runs on any GPU
+            {{ omnixInstalledInCatalogSet.size }} of {{ omnixCatalog.length }} installed ·
+            Tier 1 — zero-config, runs on any GPU<span v-if="omnixOtherCacheCount"> · +{{ omnixOtherCacheCount }} other in cache</span>
           </p>
         </div>
         <button class="bm__btn" :disabled="omnixBusy" @click="refreshOmnix">
@@ -1102,6 +1126,29 @@ onMounted(() => {
      Drop the cap; let flex do the sizing. */
   flex: 1;
   min-height: 0;
+  /* `max-height` caps each tab section so the active tab scrolls when
+     its content overflows, even when the upstream sizing chain is
+     broken (router-view-wrapper → sidebar → .bm collapsing mid-render
+     is the historical bug pattern). The 100vh / 100dvh cascade is the
+     standard "modern wins last-decl" pattern — mobile webviews: dvh
+     actually constrains; Tauri desktop: both units evaluate
+     identically so the cascade is effectively a no-op there (safety
+     net for window resize).
+     220 cap is empirically set between the two banner extremes so the
+     section scrolls WITHOUT over-clipping in either state:
+       - No banners render (3 children of .bm: header, tabs, section):
+         chrome above ≈ window-toolbar 32 + padding-top 24 + header 40
+         + gap 16 + tabs 40 + gap 16 = 168 → available = 100vh - 168.
+         At 100vh=1080, available=912. Cap=860. Cap is 52px TIGHTER
+         than available → section caps at 860 and scrolls on overflow.
+       - Both tier + note render (5 children): chrome ≈ 168 + tier ~40
+         + note ~28 + 2 extra gaps 32 = 268 → available = 100vh - 268.
+         At 100vh=1080, available=812. Cap=860. Cap is 48px LOOSER
+         than available → section fills available parent space; cap is
+         a no-op and the scrollbar appears ONLY because of parent
+         overflow:hidden (which is the bug pattern this CSS prevents). */
+  max-height: calc(100vh - var(--window-toolbar-height, 48px) - 220px);
+  max-height: calc(100dvh - var(--window-toolbar-height, 48px) - 220px);
   overflow-y: auto;
   scrollbar-gutter: stable;
 }

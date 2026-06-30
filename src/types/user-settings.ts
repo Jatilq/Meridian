@@ -227,7 +227,22 @@ export type MeridianBackendConfig = {
 export type MeridianSettings = {
   aiPanel: AiPanelSettings;
   downloader: DownloaderSettings;
+  /// SSH/SFTP connections used by the file-browser remote panes only.
+  /// Owned and managed by `src/modules/settings/ui/categories/meridian/ssh-connections.vue`.
+  /// NOT to be consumed by Cluster Control or other infrastructure features —
+  /// see `clusterWorkers` below.
   sshConnections: SshConnectionSetting[];
+  /// Cluster worker entrypoints used by Cluster Control, the Backend
+  /// Manager's RPC Slaves tab, and the llama.cpp --rpc slave launch
+  /// path. Each entry is an addressable SSH host (key file or password
+  /// has its credentials stored here). Same shape as `SshConnectionSetting`
+  /// so the Add Worker dialog in cluster.vue can reuse the type but the
+  /// storage key is independent from `sshConnections` — they're two
+  /// distinct domains (infrastructure vs file-browser).
+  /// Owned and managed by `src/modules/settings/ui/categories/meridian/cluster-nodes.vue`
+  /// and edited in-place by `src/modules/cluster/pages/cluster.vue`'s
+  /// "Add Worker" modal.
+  clusterWorkers: SshConnectionSetting[];
   modelsFolder: string;
   /// Per-backend runtime config (keyed by `MeridianBackendKind`). Stored as
   /// a Record so adding new backends in future doesn't require schema

@@ -224,6 +224,7 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
         chunkCount: 8,
       },
       sshConnections: [],
+      clusterWorkers: [],
       modelsFolder: '',
       backend: {
         'llama.cpp': {},

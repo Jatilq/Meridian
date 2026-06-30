@@ -16,7 +16,7 @@ import {
 import { BUILTIN_NAVIGATOR_ICON_THEME_IDS } from '@/types/icon-theme';
 
 export const USER_SETTINGS_SCHEMA_VERSION_KEY = '__schemaVersion';
-export const USER_SETTINGS_SCHEMA_VERSION = 26;
+export const USER_SETTINGS_SCHEMA_VERSION = 27;
 
 export const DEFAULT_GLOBAL_SEARCH_IGNORED_PATHS = [
   '/node_modules',
@@ -481,7 +481,17 @@ async function migrateUserSettingsStep(storage: StorageAdapter, fromVersion: num
     // Match only on the exact (host, username) pair — a user named
     // "jatilq" on a different host, or the dev hosts with a different
     // username, are preserved. All other connections are preserved.
+    //
+    // NOTE: the dev-lab purge moves the affected entries OUT of
+    // `sshConnections`. Round 26→27 re-introduces them — not into
+    // `sshConnections` (which now belongs to the file-browser feature),
+    // but into the new dedicated `clusterWorkers` array. The 26→27
+    // migration consults `meridian.__purgedDevLab` (set below when
+    // anything was actually dropped) to gate re-seeding on installs
+    // that previously had these entries. Non-JC installs get the purge
+    // (no dev-lab entries to drop), no marker, and no phantom seed.
     const sshConnsValue = await storage.get<Array<Record<string, unknown>>>('meridian.sshConnections');
+    let droppedDevLabCount = 0;
     if (Array.isArray(sshConnsValue) && sshConnsValue.length > 0) {
       const DEV_HOSTS = new Set(['192.168.1.67', '192.168.1.64']);
       const DEV_USERS = new Set(['jatilq']);
@@ -492,6 +502,7 @@ async function migrateUserSettingsStep(storage: StorageAdapter, fromVersion: num
         const username = typeof entry.username === 'string' ? entry.username.trim() : '';
         if (DEV_HOSTS.has(host) && DEV_USERS.has(username)) {
           droppedHosts.push(host);
+          droppedDevLabCount += 1;
           return false;
         }
         return true;
@@ -507,6 +518,95 @@ async function migrateUserSettingsStep(storage: StorageAdapter, fromVersion: num
           );
         }
       }
+    }
+    // Marker for the round 26→27 migration to consult. We persist this
+    // whenever the round 25→26 step ran TRIGGERED the dev-lab drop. A
+    // pre-existing-at-v25 install that wasn't running dev-lab connections
+    // won't see this marker — and won't get the dev-lab seed on 26→27.
+    await storage.set('meridian.__purgedDevLab', droppedDevLabCount);
+  }
+
+  if (fromVersion === 26 && toVersion === 27) {
+    // Round 26→27 reset: separate cluster infrastructure from the
+    // file-browser SSH list. Cluster Control previously read its worker
+    // list from `meridian.sshConnections`; the 25→26 dev-lab purge wiped
+    // JC's MAMBA + BLACK out of that array, and because the two
+    // features shared the array, JC's Cluster Control lost all nodes.
+    // This migration introduces a dedicated `meridian.clusterWorkers`
+    // array and, ONLY for installs the 25→26 step flagged as having
+    // dev-lab connections (via `meridian.__purgedDevLab`), re-seeds
+    // MAMBA + BLACK so JC's cluster topology survives the purge cycle.
+    //
+    // The marker gate is the load-bearing piece. Without it, every
+    // first-run install of round-shipped Meridian would land with two
+    // unconfigured dev-lab rows visible in Cluster Nodes settings —
+    // addresses JC's localhost LAN, not the user's machine. The marker
+    // is set inside the 25→26 migration ONLY when an actual dev-lab
+    // drop occurred, so non-JC installs (no dev-lab entries ever) get
+    // neither the drop NOR the seed. This couples the two behaviors
+    // and removes the "phantom entries on fresh installs" failure mode.
+    const sshConnsValue = await storage.get<Array<Record<string, unknown>>>('meridian.sshConnections');
+    const movedFromSshConnections: Array<Record<string, unknown>> = Array.isArray(sshConnsValue)
+      ? sshConnsValue.filter((entry) => {
+          if (!entry || typeof entry !== 'object') return false;
+          const host = typeof entry.host === 'string' ? entry.host.trim() : '';
+          const username = typeof entry.username === 'string' ? entry.username.trim() : '';
+          return host !== '' && username !== '';
+        })
+      : [];
+
+    // The marker is a NUMBER rather than a boolean because the 25→26
+    // migration might have dropped zero entries (no dev-lab match) even
+    // on JC's install if they had manually renamed. The number captures
+    // "how many dev-lab rows were dropped" — if any were dropped, the
+    // 26→27 step confidently re-seeds from the dev-lab table.
+    const purgedDevLab = await storage.get<number>('meridian.__purgedDevLab');
+    const shouldSeed = typeof purgedDevLab === 'number' && purgedDevLab > 0;
+    const seeded = [...movedFromSshConnections];
+    let addedSeedCount = 0;
+
+    if (shouldSeed) {
+      // Idempotent seed: skip any (host, username) pair already present.
+      const DEV_LAB_SEED: Array<Record<string, unknown>> = [
+        {
+          label: 'MAMBA',
+          host: '192.168.1.67',
+          port: 22,
+          username: 'jatilq',
+          authMethod: 'key',
+          keyPath: 'C:\\Users\\jatilq\\.ssh\\id_ed25519',
+        },
+        {
+          label: 'BLACK',
+          host: '192.168.1.64',
+          port: 22,
+          username: 'jatilq',
+          authMethod: 'key',
+          keyPath: 'C:\\Users\\jatilq\\.ssh\\id_ed25519',
+        },
+      ];
+      for (const entry of DEV_LAB_SEED) {
+        const exists = seeded.some((w) =>
+          typeof w.host === 'string'
+          && w.host === (entry.host as string)
+          && typeof w.username === 'string'
+          && w.username === (entry.username as string),
+        );
+        if (!exists) {
+          seeded.push(entry);
+          addedSeedCount += 1;
+        }
+      }
+    }
+
+    await storage.set('meridian.clusterWorkers', seeded);
+
+    if (typeof console !== 'undefined' && console.info) {
+      console.info(
+        `[meridian] schema 26→27: introduced meridian.clusterWorkers `
+        + `(moved ${movedFromSshConnections.length} from sshConnections, `
+        + `seeded ${addedSeedCount} dev-lab entries, marker=${shouldSeed}).`,
+      );
     }
   }
 

@@ -14,7 +14,11 @@ import type { SshConnectionSetting, SshAuthMethod } from '@/types/user-settings'
 
 const { t } = useI18n();
 const userSettingsStore = useUserSettingsStore();
-const sshConnections = computed(() => userSettingsStore.userSettings.meridian?.sshConnections ?? []);
+// Round-26 reset: Cluster Control owns its own worker list separate from
+// the file-browser SSH connections. Backend Manager's RPC Slaves tab
+// reads the same array. The legacy `meridian.sshConnections` list is
+// reserved for the file-browser remote-pane routing only.
+const clusterWorkers = computed(() => userSettingsStore.userSettings.meridian?.clusterWorkers ?? []);
 
 interface GpuStat {
   index: number;
@@ -63,7 +67,7 @@ interface NodeDef {
 
 // Build node list from SSH connections + mark local status
 const nodeDefs = computed<NodeDef[]>(() => {
-  const conns = sshConnections.value || [];
+  const conns = clusterWorkers.value || [];
   // MAMBA is special - it's local (where Meridian runs)
   const mambaConn = conns.find(c => c.label === 'MAMBA');
   const nodes: NodeDef[] = [];
@@ -114,8 +118,8 @@ function credsFromConn(conn: SshConnectionSetting | undefined) {
 async function refreshNodeViews() {
   const views: NodeView[] = [];
   for (const def of nodeDefs.value) {
-    // Use stored credentials from the SSH connection
-    const conn = sshConnections.value?.find(c => c.host === def.host);
+    // Use stored credentials from the cluster worker entry.
+    const conn = clusterWorkers.value?.find(c => c.host === def.host);
 
     try {
       const snap = def.local
@@ -161,7 +165,7 @@ async function launchRpcSlave() {
   rpcLaunching.value = true;
   rpcMessage.value = '';
   const target = nodeViews.value[0];
-  const conn = sshConnections.value?.find(c => c.host === target.host);
+  const conn = clusterWorkers.value?.find(c => c.host === target.host);
   if (!conn) {
     rpcMessage.value = `No SSH connection found for ${target.name}. Re-add the worker.`;
     rpcLaunching.value = false;
@@ -277,10 +281,10 @@ async function saveWorker() {
       keyPath: newWorker.authMethod === 'key' ? newWorker.keyPath.trim() : '',
       passwordSecureKey,
     };
-    userSettingsStore.userSettings.meridian.sshConnections.push(conn);
+    userSettingsStore.userSettings.meridian.clusterWorkers.push(conn);
     await userSettingsStore.setUserSettingsStorage(
-      'meridian.sshConnections',
-      userSettingsStore.userSettings.meridian.sshConnections,
+      'meridian.clusterWorkers',
+      userSettingsStore.userSettings.meridian.clusterWorkers,
     );
     showAddWorker.value = false;
     await refreshAll();
