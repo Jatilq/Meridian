@@ -127,8 +127,15 @@ const sizeOptions = ['1-3B', '4-8B', '9-15B', '16-30B', '30-60B', '60B+'] as con
 const selectedSizes = ref<Set<string>>(new Set());
 
 const quantOptions = ['Q4_K_M', 'Q5_K_M', 'Q6_K', 'Q8_0'] as const;
-// Default: Q4_K_M only (the speed/quality sweet spot). User toggles the rest.
-const selectedQuants = ref<Set<string>>(new Set(['Q4_K_M']));
+// Default: empty = "include all quants" (no filter). Per JC's Phase 11
+// spec, "all quant chips unchecked" means "show every GGUF" — i.e. the
+// user opted INTO a restrictive allowlist only by explicitly clicking
+// chips. The previous `new Set(['Q4_K_M'])` default was restrictive on
+// purpose and acted as a quality floor, but JC explicitly asked for the
+// inverse — and the Q4_K_M-only default ate every wildcard "B" search
+// result because HF's broad prefix-match response rarely carries a Q4_K_M
+// GGUF in the first repo slot.
+const selectedQuants = ref<Set<string>>(new Set());
 
 const trustedQuantizerOptions = [
   { key: 'bartowski', label: 'Bartowski' },
@@ -258,7 +265,11 @@ async function downloadModel(model: RankedGgufModel) {
 function clearFilters() {
   selectedArchitectures.value = new Set();
   selectedSizes.value = new Set();
-  selectedQuants.value = new Set(['Q4_K_M']);
+  // Clear quants: same default as the initial state — empty set means
+  // "all quants" per the Phase 11 spec. Setting this back to
+  // `new Set(['Q4_K_M'])` would re-impose the old restrictive default
+  // and silence every wildcard search as soon as JC hits Clear.
+  selectedQuants.value = new Set();
   selectedTrustedQuantizers.value = new Set(trustedQuantizerOptions.map((o) => o.key));
   onlyTrustedQuantizers.value = true;
   onlyFit.value = combinedVramGb.value > 0;
@@ -426,7 +437,7 @@ onUnmounted(() => {
       <div class="hardware__sidebar-section">
         <div class="hardware__section-label">
           Quantization
-          <span class="hardware__section-help">IQ1/2/3 hidden by default</span>
+          <span class="hardware__section-help">No selection = all quants · IQ1/2/3 hidden by default</span>
         </div>
         <div class="hardware__chip-group">
           <button
