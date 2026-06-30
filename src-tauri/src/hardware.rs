@@ -155,6 +155,13 @@ pub struct RankedGgufModel {
     pub gguf_url: String,
     pub gguf_filename: String,
     pub tags: Vec<String>,
+    /// Search mode the backend used for this query. `"exact"` for ≥ 5-char
+    /// queries (no transformation, HF fuzzy substring match) and
+    /// `"wildcard"` for 1–4 char queries (HF prefix-match via `q*`). Same
+    /// for every entry returned from a single invocation — the UI uses
+    /// it to surface a hint like "Showing prefix matches for 'B*'" so JC
+    /// knows to add more letters for more specific results.
+    pub kind: String,
 }
 
 // ============================================================================
@@ -227,24 +234,15 @@ pub async fn hardware_search_gguf_models(
         return Err("Search query must not be empty.".to_string());
     }
 
-    // 1. Build URL. `full=true` is the linchpin: one round-trip returns
-    // siblings with size, so we never need a `GET /api/models/<id>/tree/main`
-    // follow-up. HF's free-tier rate limit (~100 req / 5 min) is generous
-    // enough that 1-2 searches / minute from Meridian never trips it.
+    // 1. Build URL via the `build_hf_search_url` helper. `full=true` is the
+    // linchpin: one round-trip returns siblings with size, so we never need
+    // a `GET /api/models/<id>/tree/main` follow-up. HF's free-tier rate
+    // limit (~100 req / 5 min) is generous enough that 1-2 searches / min
+    // from Meridian never trips it. The helper also classifies the query
+    // as `"wildcard"` (1-4 char, prefix-match via `q*`) or `"exact"` so the
+    // UI can hint when results came from a fuzzy short-query match.
     let limit = params.limit.unwrap_or(30).clamp(1, 100);
-    let mut url = format!(
-        "https://huggingface.co/api/models?search={}&full=true&limit={}",
-        percent_encode(query),
-        limit
-    );
-    match params.sort_by.as_deref().unwrap_or("downloads") {
-        "lastModified" => url.push_str("&sort=lastModified&direction=-1"),
-        "likes" => url.push_str("&sort=likes&direction=-1"),
-        // "downloads" — HF default sort is already downloads-desc, but
-        // pass the param explicitly so the URL is self-documenting when
-        // a future engineer reads it without this comment.
-        _ => url.push_str("&sort=downloads&direction=-1"),
-    };
+    let (url, kind) = build_hf_search_url(query, params.sort_by.as_deref(), limit);
 
     // 2. Fetch.
     let client = reqwest::Client::builder()
@@ -414,6 +412,7 @@ pub async fn hardware_search_gguf_models(
             gguf_url,
             gguf_filename: best.rfilename.clone(),
             tags: repo.tags.clone(),
+            kind: kind.to_string(),
         });
     }
 
@@ -442,6 +441,73 @@ pub async fn hardware_search_gguf_models(
         body.len()
     );
     Ok(ranked)
+}
+
+// ============================================================================
+// URL builder (pure, testable)
+// ============================================================================
+
+/// Builds the HF list URL for a single model search and classifies the
+/// query as either `"wildcard"` (1–4 char input → append a literal `*`
+/// so HF uses prefix matching, useful for `B` → `BAAI/...`, `BigScience/...`
+/// etc when JC types a single-letter shortcut) or `"exact"` (≥ 5 char
+/// input → no transformation, HF's fuzzy substring match handles the
+/// rest natively).
+///
+/// Trailing `*` characters are stripped before re-appending so that
+/// `B*` typed by the user doesn't become `B**` (HF interprets `**` as
+/// the literal two-char sequence rather than a single wildcard, which
+/// would silently return nothing useful). The literal `*` is appended
+/// AFTER `percent_encode` runs because that helper's allowlist excludes
+/// `*` — encoding first then appending preserves HF's wildcard semantics.
+///
+/// `sort_by` tokens map directly to the HF API: `"downloads"` (default,
+/// called out explicitly so the URL stays self-documenting),
+/// `"lastModified"`, `"likes"`. Unknown tokens fall through to downloads
+/// so a future agent adding a new sort key doesn't accidentally send
+/// an `&sort=` parameter that HF rejects with 400.
+pub(crate) fn build_hf_search_url(
+    query: &str,
+    sort_by: Option<&str>,
+    limit: u32,
+) -> (String, &'static str) {
+    let trimmed = query.trim();
+    let length = trimmed.chars().count();
+    let is_wildcard = length <= 4;
+
+    // Strip trailing asterisks before re-appending our own. Two-char
+    // `B*` and three-char `BA*` are the realistic inputs; trimming them
+    // keeps `effective` consistent with `B` / `BA` from raw typing.
+    let stripped = if is_wildcard {
+        trimmed.trim_end_matches('*')
+    } else {
+        trimmed
+    };
+    // When the user typed ONLY stars (`*`, `**`, `***`), `stripped` becomes
+    // empty. Rather than emit `search=*` (which HF treats as a match-all
+    // glob and dumps the whole index), fall through to encode the original
+    // input verbatim — `**` percent-encodes to `%2A%2A`, HF treats it as
+    // a literal two-char token, and the search returns zero results the
+    // user can react to. The kind drops to "exact" so the UI clearly
+    // signals we're not in prefix-match mode anymore.
+    let use_wildcard = is_wildcard && !stripped.is_empty();
+    let effective = if use_wildcard {
+        format!("{}*", percent_encode(stripped))
+    } else {
+        percent_encode(trimmed)
+    };
+
+    let mut url = format!(
+        "https://huggingface.co/api/models?search={}&full=true&limit={}",
+        effective,
+        limit.clamp(1, 100)
+    );
+    match sort_by.unwrap_or("downloads") {
+        "lastModified" => url.push_str("&sort=lastModified&direction=-1"),
+        "likes" => url.push_str("&sort=likes&direction=-1"),
+        _ => url.push_str("&sort=downloads&direction=-1"),
+    }
+    (url, if use_wildcard { "wildcard" } else { "exact" })
 }
 
 // ============================================================================
@@ -979,5 +1045,130 @@ mod tests {
             result.unwrap_err().contains("empty"),
             "error must mention empty query"
         );
+    }
+
+    // ----- Fix 3: search looseness, wildcard vs exact -----
+
+    #[test]
+    fn build_search_url_single_letter_appends_wildcard() {
+        let (url, kind) = build_hf_search_url("B", None, 30);
+        assert!(
+            url.contains("search=B*&"),
+            "single-letter query must append literal *: {}",
+            url
+        );
+        assert_eq!(kind, "wildcard");
+    }
+
+    #[test]
+    fn build_search_url_four_char_query_appends_wildcard() {
+        let (url, kind) = build_hf_search_url("Qwen", None, 30);
+        assert!(
+            url.contains("search=Qwen*&"),
+            "four-char query must append literal *: {}",
+            url
+        );
+        assert_eq!(kind, "wildcard");
+    }
+
+    #[test]
+    fn build_search_url_five_char_query_no_wildcard() {
+        let (url, kind) = build_hf_search_url("llama", None, 30);
+        assert!(
+            url.contains("search=llama&"),
+            "five-char query must not transform: {}",
+            url
+        );
+        assert!(
+            !url.contains("llama*"),
+            "five-char query must not append *: {}",
+            url
+        );
+        assert_eq!(kind, "exact");
+    }
+
+    #[test]
+    fn build_search_url_strips_user_typed_trailing_star() {
+        let (url, kind) = build_hf_search_url("B*", None, 30);
+        assert!(
+            url.contains("search=B*&"),
+            "user-typed * must be stripped then re-appended: {}",
+            url
+        );
+        assert!(
+            !url.contains("B**"),
+            "no double-star allowed: {}",
+            url
+        );
+        assert!(
+            !url.contains("B%2A"),
+            "* must NOT be percent-encoded (would lose wildcard semantics): {}",
+            url
+        );
+        assert_eq!(kind, "wildcard");
+    }
+
+    #[test]
+    fn build_search_url_trims_surrounding_whitespace() {
+        let (url, kind) = build_hf_search_url("  llama  ", None, 30);
+        assert!(
+            url.contains("search=llama&"),
+            "query must be trimmed before encoding: {}",
+            url
+        );
+        assert_eq!(kind, "exact");
+    }
+
+    #[test]
+    fn build_search_url_honours_sort_token() {
+        let (url, _) = build_hf_search_url("llama", Some("lastModified"), 30);
+        assert!(url.contains("sort=lastModified"), "URL: {}", url);
+        assert!(
+            url.contains("direction=-1"),
+            "descending direction must be explicit: {}",
+            url
+        );
+    }
+
+    #[test]
+    fn build_search_url_clamps_limit_to_100() {
+        let (url, _) = build_hf_search_url("llama", None, 9999);
+        assert!(url.contains("limit=100"), "limit must clamp to 100: {}", url);
+        let (url, _) = build_hf_search_url("llama", None, 0);
+        assert!(url.contains("limit=1"), "limit must clamp to 1: {}", url);
+    }
+
+    #[test]
+    fn build_search_url_bare_stars_falls_back_to_exact() {
+        // User typed ONLY stars — falls back to "exact" mode so HF treats
+        // the encoded `**` (or `%2A%2A`) as a literal token rather than
+        // dumping the entire model index via a match-all wildcard glob.
+        let (url, kind) = build_hf_search_url("**", None, 30);
+        assert!(
+            url.contains("search=%2A%2A&"),
+            "URL must contain literal percent-encoded stars (no match-all glob): {}",
+            url
+        );
+        assert!(
+            !url.contains("search=*&"),
+            "URL must NOT be `search=*` (match-all glob): {}",
+            url
+        );
+        assert_eq!(
+            kind, "exact",
+            "bare-stars input must mark kind as exact, not wildcard"
+        );
+    }
+
+    #[test]
+    fn build_search_url_single_star_falls_back_to_exact() {
+        // Same bare-star guard for the single-asterisk variant.
+        let (url, kind) = build_hf_search_url("*", None, 30);
+        assert!(
+            url.contains("search=%2A&"),
+            "URL must contain literal percent-encoded single star: {}",
+            url
+        );
+        assert_eq!(kind, "exact");
     }
 }

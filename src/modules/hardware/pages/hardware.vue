@@ -70,6 +70,10 @@ interface RankedGgufModel {
   ggufUrl: string;
   ggufFilename: string;
   tags: string[];
+  /** Backend-stamped. `"exact"` for ≥ 5-char queries; `"wildcard"` for
+   *  1–4 char queries (HF prefix-match). UI surfaces a hint so JC
+   *  knows to add more letters when results feel too broad. */
+  kind: string;
 }
 
 // ============================================================================
@@ -152,6 +156,16 @@ const includeIq = ref<boolean>(false);
 const models = ref<RankedGgufModel[]>([]);
 const loadingModels = ref(false);
 const searchError = ref<string>('');
+// Track whether the last completed search was a wildcard match (1–4 char
+// query → prefix search) or exact (≥ 5 chars → fuzzy substring). Used by
+// the template hint line so JC knows when to type more characters.
+const lastSearchKind = ref<string>('');
+// Sequence counter: every searchModels() call increments this. Resolved
+// responses whose captured seq doesn't match the current seq are stale
+// (a newer search has superseded them) and are dropped — protects
+// `models.value`, `lastSearchKind`, `searchError` from being clobbered
+// by an out-of-order older HF response when JC types fast + hits enter.
+const searchSeq = ref<number>(0);
 
 // ============================================================================
 // Filter <-> Set helpers (drop-in for chip click handlers)
@@ -171,8 +185,15 @@ async function searchModels() {
   const q = query.value.trim();
   if (!q) {
     searchError.value = 'Enter a search query (e.g. "llama-3", "qwen2.5 7b").';
+    lastSearchKind.value = '';
     return;
   }
+  // Capture the seq at function entry. After the await, compare against
+  // the current `searchSeq.value` — if it advanced, a NEWER search has
+  // superseded this call and its response must not be applied (this
+  // prevents models/lastSearchKind/searchError from being clobbered by
+  // out-of-order HF responses when JC types fast or click-spams Search).
+  const mySeq = ++searchSeq.value;
   loadingModels.value = true;
   searchError.value = '';
   try {
@@ -191,16 +212,32 @@ async function searchModels() {
       combinedVramMb: combinedVramMb.value,
     };
     const result = await invoke<RankedGgufModel[]>('hardware_search_gguf_models', { params });
+    // Stale response — drop without writing any state. The newer search
+    // call will resolve and own the models/lastSearchKind updates.
+    if (mySeq !== searchSeq.value) return;
     models.value = result;
+    // Backend `kind` stamp on each row is the truth source for non-empty
+    // results (so bare-stars inputs correctly downgrade to "exact" after
+    // the Rust guard). For empty results the backend can't classify — we
+    // re-predict locally from `q.length <= 4` to keep the hint visible.
+    lastSearchKind.value = result[0]?.kind ?? (q.length <= 4 ? 'wildcard' : 'exact');
     if (result.length === 0) {
       searchError.value = `No GGUF models matched the current filters. Try clearing a chip or broadening the search.`;
     }
   } catch (error) {
+    // Drop errors from stale invocations too — letting them surface would
+    // wipe the newer search's still-in-flight state to a misleading
+    // error message.
+    if (mySeq !== searchSeq.value) return;
     const message = error instanceof Error ? error.message : String(error);
     searchError.value = message;
     models.value = [];
+    lastSearchKind.value = '';
   } finally {
-    loadingModels.value = false;
+    // Only the latest search owns the loading flag; an older finally
+    // block must NOT flip loading=false while a newer search has already
+    // re-set it to true.
+    if (mySeq === searchSeq.value) loadingModels.value = false;
   }
 }
 
@@ -349,7 +386,7 @@ onUnmounted(() => {
             :class="{ 'hardware__radio--active': sortBy === opt }"
             @click="sortBy = opt"
           >
-            {{ opt === 'downloads' ? 'Trending' : opt === 'lastModified' ? 'Recent' : 'Most liked' }}
+            {{ opt === 'downloads' ? 'Trending' : opt === 'lastModified' ? 'Recent updates' : 'Most liked' }}
           </button>
         </div>
       </div>
@@ -454,6 +491,15 @@ onUnmounted(() => {
           Local: <strong>{{ localCpuName }}</strong>
           · {{ combinedGpuCount }} GPU{{ combinedGpuCount === 1 ? '' : 's' }}
           · <strong>{{ combinedVramGb }} GB</strong> combined VRAM
+        </div>
+        <div
+          v-if="models.length > 0 && lastSearchKind === 'wildcard'"
+          class="hardware__results-wildcard-hint"
+          aria-live="polite"
+        >
+          Showing prefix matches for
+          <code>{{ query }}*</code>
+          — add another character for more specific results.
         </div>
       </div>
 
@@ -708,6 +754,26 @@ onUnmounted(() => {
 .hardware__results-sub {
   font-size: 0.75rem;
   color: hsl(var(--muted-foreground));
+}
+.hardware__results-wildcard-hint {
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
+  font-style: italic;
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--radius-sm);
+  background: hsl(var(--background-2));
+  border: 1px solid hsl(var(--border));
+  /* tight wrap preserves the inline <code> visual cue */
+  line-height: 1.4;
+}
+.hardware__results-wildcard-hint code {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.7rem;
+  background: hsl(var(--background-3, var(--background-2)));
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+  color: hsl(var(--foreground));
+  margin: 0 0.15rem;
 }
 .hardware__results-list {
   display: flex;
