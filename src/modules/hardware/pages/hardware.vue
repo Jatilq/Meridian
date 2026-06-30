@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * Hardware Scanner — HuggingFace GGUF model search.
+ * Hardware Scanner — HuggingFace GGUF model search + browse.
  *
  * Replaces the previous single hardcoded "Search HuggingFace GGUF models"
  * button with a real search experience: query input, filter sidebar
@@ -12,8 +12,21 @@
  * `src-tauri/src/hardware.rs`) returns a fully-resolved Vec<RankedGgufModel>
  * from one HF `full=true` round-trip — no client-side HF calls anymore,
  * so chip toggles no longer feel like a no-op until results land.
+ *
+ * Defaults (Phase 11 / 2026-06-30 spec):
+ *   - query: empty (browse mode active) — Type to search, or browse the
+ *     global trending feed.
+ *   - sort: downloads desc (Trending) — auto-fired on mount.
+ *   - selectedQuants: empty Set (chip group; "no selection = all quants")
+ *   - onlyTrustedQuantizers: OFF (chip group hidden entirely). JC wanted
+ *     no whitelist pre-applied so NVIDIA's own Nemotron series stays
+ *     visible by default.
+ *   - onlyFit: OFF. JC wanted full control — the previous auto-on
+ *     watcher forced a narrowing that JC found frustrating. Off by
+ *     default; the user opts in.
+ *   - includeIq: OFF (IQ1/2/3 hidden unless toggled).
  */
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { useRoute } from 'vue-router';
 import { useUserSettingsStore } from '@/stores/storage/user-settings';
@@ -40,7 +53,7 @@ const incomingQuery = computed(() => {
 // ============================================================================
 
 interface HardwareSearchParams {
-  query: string;
+  query: string | null;
   sortBy?: string;
   limit?: number;
   architectures: string[];
@@ -70,9 +83,10 @@ interface RankedGgufModel {
   ggufUrl: string;
   ggufFilename: string;
   tags: string[];
-  /** Backend-stamped. `"exact"` for ≥ 5-char queries; `"wildcard"` for
-   *  1–4 char queries (HF prefix-match). UI surfaces a hint so JC
-   *  knows to add more letters when results feel too broad. */
+  /** Backend-stamped. `"browse"` for empty/None queries (global trending
+   *  feed), `"wildcard"` for 1–4 char queries (HF prefix-match), or
+   *  `"exact"` for ≥ 5 char queries (HF fuzzy substring match). UI
+   *  surfaces a contextual hint line per kind. */
   kind: string;
 }
 
@@ -95,22 +109,20 @@ const {
 const localNode = computed(() => hardwareNodes.value.find((n) => n.isLocal) ?? null);
 const localCpuName = computed(() => localNode.value?.cpu?.name?.trim() || 'Unknown CPU');
 
-// Flip the fit-filter to ON the moment we have real VRAM data (reactive —
-// fires when the composable's first poll resolves, not gated by hand-rolled
-// `loadHardware()` callbacks that fire before pool entries land).
-watch(
-  combinedVramGb,
-  (vram) => {
-    if (vram > 0 && !onlyFit.value) onlyFit.value = true;
-  },
-  { immediate: true },
-);
+// NOTE: the previous `watch(combinedVramGb, ...)` auto-fit watcher was
+// removed in Phase 11. JC explicitly wanted the fit-toggle to stay OFF
+// until opted in (so he can browse oversized models to download for a
+// different machine). The 10%-buffer tooltip now documents what ON
+// actually does; the user owns the toggle.
 
 // ============================================================================
 // Search filters — reactive, bound to sidebar controls
 // ============================================================================
 
-const query = ref<string>('llama');
+// Empty query = browse mode (backend's `"browse"` kind). The input's
+// placeholder gives worked examples so users still get type hints.
+// `llama` used to be the default; JC explicitly asked for empty.
+const query = ref<string>('');
 const sortBy = ref<'downloads' | 'lastModified' | 'likes'>('downloads');
 
 const architectureOptions = [
@@ -144,13 +156,18 @@ const trustedQuantizerOptions = [
   { key: 'lonestriker', label: 'LoneStriker' },
   { key: 'mradermacher', label: 'mradermacher' },
 ] as const;
+// Default OFF — chip group hidden entirely. JC explicitly asked for the
+// whitelist to be opt-in; otherwise NVIDIA's own Nemotron series gets
+// filtered out on first paint when NVIDIA is not on the curated list.
+// When the user toggles ON, the 5 default names pre-populate so they can
+// scope down (e.g. unsubscribe from `mradermacher`) right away.
 const selectedTrustedQuantizers = ref<Set<string>>(new Set(trustedQuantizerOptions.map((o) => o.key)));
-const onlyTrustedQuantizers = ref<boolean>(true);
+const onlyTrustedQuantizers = ref<boolean>(false);
 
-// Default OFF until hardware data confirms positive VRAM. Defaulting ON
-// with `combinedVramMb === 0` caused an empty-results deadlock: the
-// fit-threshold becomes 0 and every model fails the check. The toggle
-// flips to ON inside `loadHardware` once real VRAM is available.
+// Default OFF. Phase 11 change: the previous auto-on watcher was
+// removed so JC can browse oversized models without the UI fighting
+// him. The tooltip on the toggle now documents the 10% safety buffer
+// so a click-ON user knows why a 35GB model gets rejected on 36GB.
 const onlyFit = ref<boolean>(false);
 // IQ1/IQ2/IQ3 are excluded unless this is on; keep OFF by default
 // (severe quality hit per AGENTS.md Phase 10).
@@ -163,9 +180,10 @@ const includeIq = ref<boolean>(false);
 const models = ref<RankedGgufModel[]>([]);
 const loadingModels = ref(false);
 const searchError = ref<string>('');
-// Track whether the last completed search was a wildcard match (1–4 char
-// query → prefix search) or exact (≥ 5 chars → fuzzy substring). Used by
-// the template hint line so JC knows when to type more characters.
+// Track the kind of the last completed search (browse / wildcard / exact /
+// ''). Empty string means no search has run yet. Used by the template to
+// render the right hint banner and by the result header for sort-aware
+// copy ("Showing top trending GGUF models..." in browse mode).
 const lastSearchKind = ref<string>('');
 // Sequence counter: every searchModels() call increments this. Resolved
 // responses whose captured seq doesn't match the current seq are stale
@@ -188,6 +206,34 @@ const visibleCount = ref<number>(30);
 const PAGE_STEP = 30;
 const hasMoreModels = computed(() => visibleCount.value < models.value.length);
 
+// Sort-aware subtitle for the browse-mode banner. Trending/Recent/Liked.
+// Kept as a computed so template renders one expression.
+const browseSubtitle = computed(() => {
+  switch (sortBy.value) {
+    case 'lastModified': return 'recently updated';
+    case 'likes': return 'most-liked';
+    default: return 'trending';
+  }
+});
+
+// Watch sortBy: when the search box is empty (true browse mode), changing
+// the sort radio auto-refires the search so the banner text and the model
+// list stay in sync. The watch-fires-when-query-is-empty criterion is
+// intentional — using `lastSearchKind === 'browse'` is wrong because that
+// state is sticky from the previous round-trip and would fire a SEARCH
+// with the user's typed query the moment JC types and toggles the radio.
+// Tracking `query.value.trim() === ''` covers both the normal "sort
+// change in browse mode" path AND the (x)-cleared transition where the
+// user just hit clear and now picks a different sort: in both, the
+// intent is "I want the global feed, sorted by my pick". Search-mode
+// (typed query, `wildcard` / `exact`) is excluded so JC's half-typed
+// search isn't auto-submitted just because he clicked a radio.
+watch(sortBy, () => {
+  if (!loadingModels.value && query.value.trim() === '') {
+    void searchModels();
+  }
+});
+
 // ============================================================================
 // Filter <-> Set helpers (drop-in for chip click handlers)
 // ============================================================================
@@ -204,11 +250,11 @@ function toggleSetMember(set: Set<string>, key: string) {
 
 async function searchModels() {
   const q = query.value.trim();
-  if (!q) {
-    searchError.value = 'Enter a search query (e.g. "llama-3", "qwen2.5 7b").';
-    lastSearchKind.value = '';
-    return;
-  }
+  // Empty query IS allowed now — it routes to browse mode (the backend
+  // emits ?full=true&...&sort=... without a search param). The old
+  // rejection ("Search query must not be empty.") was removed; this
+  // branch handles the user-cleared-input edge case so the result
+  // list isn't left in a stale state.
   // Capture the seq at function entry. After the await, compare against
   // the current `searchSeq.value` — if it advanced, a NEWER search has
   // superseded this call and its response must not be applied (this
@@ -219,7 +265,9 @@ async function searchModels() {
   searchError.value = '';
   try {
     const params: HardwareSearchParams = {
-      query: q,
+      // Send null on empty so the backend's `Option::<String>` resolves
+      // to `None` cleanly (without the frontend having to pre-trim).
+      query: q === '' ? null : q,
       sortBy: sortBy.value,
       // Fetch the full top-100 page so a single round-trip covers most
       // users' first glance; the v-for renders the top `visibleCount`
@@ -250,7 +298,13 @@ async function searchModels() {
     // results (so bare-stars inputs correctly downgrade to "exact" after
     // the Rust guard). For empty results the backend can't classify — we
     // re-predict locally from `q.length <= 4` to keep the hint visible.
-    lastSearchKind.value = result[0]?.kind ?? (q.length <= 4 ? 'wildcard' : 'exact');
+    // Note: an empty `q` here means the user typed nothing OR cleared the
+    // (x) button, both of which route to browse mode.
+    if (q === '') {
+      lastSearchKind.value = 'browse';
+    } else {
+      lastSearchKind.value = result[0]?.kind ?? (q.length <= 4 ? 'wildcard' : 'exact');
+    }
     if (result.length === 0) {
       searchError.value = `No GGUF models matched the current filters. Try clearing a chip or broadening the search.`;
     }
@@ -294,12 +348,17 @@ function clearFilters() {
   // and silence every wildcard search as soon as JC hits Clear.
   selectedQuants.value = new Set();
   selectedTrustedQuantizers.value = new Set(trustedQuantizerOptions.map((o) => o.key));
-  onlyTrustedQuantizers.value = true;
-  onlyFit.value = combinedVramGb.value > 0;
+  onlyTrustedQuantizers.value = false;
+  // Phase 11: explicit `false` regardless of hardware pool. The previous
+  // version auto-set this based on `combinedVramGb.value > 0`; that
+  // forced the fit-toggle back ON whenever the pool resolved with data,
+  // which JC found surprising. User owns the toggle.
+  onlyFit.value = false;
   includeIq.value = false;
   models.value = [];
   visibleCount.value = PAGE_STEP;
   searchError.value = '';
+  lastSearchKind.value = '';
 }
 
 /**
@@ -358,42 +417,67 @@ function relativeTime(iso: string | undefined): string {
 let deepLinkSafetyTimer: ReturnType<typeof setTimeout> | null = null;
 
 onMounted(() => {
-  // Deep-link entry: if we were pushed here with a `searchHuggingface`
-  // query param, pre-fill the input and kick off the search. The
-  // `useHardwarePool` composable auto-polls on mount; we just gate the
-  // search on the pool being populated so the fit-toggle has the right
-  // threshold (otherwise initial results all read "TOO BIG").
+  // Two paths from mount:
+  //   1. Deep-link: route.query.searchHuggingface is set → pre-fill the
+  //      search box and gate the search on VRAM data arrival (else size
+  //      fit-checks all read "TOO BIG" on initial load because the
+  //      pool hasn't polled yet).
+  //   2. Normal mount: auto-fire browse mode with current defaults —
+  //      query='', sortBy='downloads' (Trending), all chips empty,
+  //      fit OFF, no whitelist. First paint shows the top-100 trending
+  //      GGUFs from HF. No VRAM wait needed because fit is OFF.
   void (async () => {
-    if (!incomingQuery.value) return;
-    await new Promise<void>((resolve) => {
-      const stop = watch(combinedVramGb, (v) => {
-        if (v <= 0) return;
-        if (deepLinkSafetyTimer) {
-          clearTimeout(deepLinkSafetyTimer);
+    if (incomingQuery.value) {
+      // Deep-link flow: gate on VRAM before searching so the size
+      // fit-checks have a real threshold. Same watch+timer safety net
+      // as before.
+      await new Promise<void>((resolve) => {
+        const stop = watch(combinedVramGb, (v) => {
+          if (v <= 0) return;
+          if (deepLinkSafetyTimer) {
+            clearTimeout(deepLinkSafetyTimer);
+            deepLinkSafetyTimer = null;
+          }
+          stop();
+          resolve();
+        });
+        deepLinkSafetyTimer = setTimeout(() => {
+          // Belt-and-suspenders: when the watch callback already cleared
+          // the timer + resolved the Promise, the timer fires anyway. The
+          // ref-null check short-circuits the no-op fallback path. Without
+          // it, a future agent adding side effects to this branch gets a
+          // spurious second invocation on slow systems where watch + timer
+          // race on the same microtask.
+          if (!deepLinkSafetyTimer) return;
           deepLinkSafetyTimer = null;
-        }
-        stop();
-        resolve();
+          stop();
+          resolve();
+        }, 1500);
       });
-      deepLinkSafetyTimer = setTimeout(() => {
-        // Belt-and-suspenders: when the watch callback already cleared
-        // the timer + resolved the Promise, the timer fires anyway. The
-        // ref-null check short-circuits the no-op fallback path. Without
-        // it, a future agent adding side effects to this branch gets a
-        // spurious second invocation on slow systems where watch + timer
-        // race on the same microtask.
-        if (!deepLinkSafetyTimer) return;
-        deepLinkSafetyTimer = null;
-        stop();
-        resolve();
-      }, 1500);
-    });
-    query.value = incomingQuery.value;
-    await searchModels();
+      query.value = incomingQuery.value;
+      await searchModels();
+      return;
+    }
+    // Normal mount: auto-fire browse mode (Trending). One nextTick so
+    // the empty-state UI paints first — gives the perceived "loading"
+    // shimmer instead of looking like an instant populate that
+    // masks the round-trip cost.
+    await nextTick();
+    if (!loadingModels.value) {
+      await searchModels();
+    }
   })();
 });
 
 onUnmounted(() => {
+  // Invalidate any in-flight `searchModels()` (auto-fire on mount, deep-link,
+  // or manual) by bumping `searchSeq`. The seq-stale guard inside
+  // `searchModels` then drops the late resolution without writing to this
+  // (now torn-down) component's refs. Without this bump the await would
+  // resolve on a dead scope and Vue's silent-drop would emit a console
+  // warning in dev builds; the Rust side would already have consumed
+  // an HF round-trip for nothing.
+  searchSeq.value++;
   // Cancel any in-flight deep-link wait so the closure references the
   // resolved promise's anchor (not the long-gone component scope).
   if (deepLinkSafetyTimer) {
@@ -407,14 +491,25 @@ onUnmounted(() => {
   <div class="hardware">
     <!-- LEFT — filter sidebar. Right — results panel. -->
     <aside class="hardware__sidebar">
-      <div class="hardware__sidebar-section">
-        <input
-          v-model="query"
-          type="search"
-          class="hardware__query"
-          placeholder="Search e.g. 'llama-3.1', 'qwen2.5'"
-          @keydown.enter="searchModels"
-        >
+      <div class="hardware__sidebar-section hardware__sidebar-section--search">
+        <div class="hardware__query-wrap">
+          <input
+            v-model="query"
+            type="search"
+            class="hardware__query"
+            placeholder="Search e.g. 'llama-3.1', 'qwen2.5', 'nemotron'"
+            aria-label="Search HuggingFace GGUF models"
+            @keydown.enter="searchModels"
+          >
+          <button
+            v-if="query.length > 0"
+            class="hardware__query-clear"
+            type="button"
+            aria-label="Clear search (revert to browse mode)"
+            title="Clear — keeps you in browse mode but lets you pick a different sort"
+            @click="query = ''"
+          >×</button>
+        </div>
         <button
           class="hardware__search-btn"
           :disabled="loadingModels"
@@ -477,11 +572,17 @@ onUnmounted(() => {
           <span class="hardware__section-help">No selection = all quants · IQ1/2/3 hidden by default</span>
         </div>
         <div class="hardware__chip-group">
+          <!-- Chip color tokens are SCOPED to `.hardware__chip--active` (see
+               CSS). Removing the `quant--*` class from inactive chips is
+               the fix for the "Q6/Q8 auto-selected" bug — the previous
+               template painted the chip a vivid color regardless of
+               active state. Now the color is the active-marker, only on
+               when the user has clicked the chip. -->
           <button
             v-for="q in quantOptions"
             :key="q"
             class="hardware__chip"
-            :class="['hardware__chip--quant', `quant--${q.toLowerCase().replace('_','-')}`, { 'hardware__chip--active': selectedQuants.has(q) }]"
+            :class="[`quant--${q.toLowerCase().replace('_','-')}`, { 'hardware__chip--active': selectedQuants.has(q) }]"
             @click="toggleSetMember(selectedQuants, q)"
           >{{ q.replace('_','-') }}</button>
           <button
@@ -494,7 +595,10 @@ onUnmounted(() => {
       </div>
 
       <div class="hardware__sidebar-section">
-        <div class="hardware__section-label">Quantizer trust</div>
+        <div class="hardware__section-label">
+          Quantizer trust
+          <span class="hardware__section-help">Off by default — opt in to filter to trusted authors</span>
+        </div>
         <label class="hardware__toggle-row">
           <input v-model="onlyTrustedQuantizers" type="checkbox">
           <span>Only whitelist</span>
@@ -511,7 +615,11 @@ onUnmounted(() => {
       </div>
 
       <div class="hardware__sidebar-section">
-        <label class="hardware__toggle-row" :class="{ 'hardware__toggle-row--off': !onlyFit }">
+        <label
+          class="hardware__toggle-row"
+          :class="{ 'hardware__toggle-row--off': !onlyFit }"
+          title="Narrow to models whose best GGUF fits your combined VRAM with a 10% safety buffer for KV cache + runtime overhead."
+        >
           <input
             v-model="onlyFit"
             type="checkbox"
@@ -551,11 +659,25 @@ onUnmounted(() => {
           · {{ combinedGpuCount }} GPU{{ combinedGpuCount === 1 ? '' : 's' }}
           · <strong>{{ combinedVramGb }} GB</strong> combined VRAM
         </div>
+        <!-- Browse-mode banner: shown when the user hasn't typed anything
+             (or after clicking the (x) clear button) so they know they're
+             seeing the global HF feed and how it's sorted. Distinct from
+             the wildcard hint so the two never overlap. -->
         <div
-          v-if="models.length > 0 && lastSearchKind === 'wildcard'"
-          class="hardware__results-wildcard-hint"
+          v-if="models.length > 0 && lastSearchKind === 'browse'"
+          class="hardware__results-banner"
           aria-live="polite"
         >
+          <span class="hardware__results-banner-dot" aria-hidden="true"></span>
+          Showing the top <strong>{{ browseSubtitle }}</strong> GGUF models from
+          HuggingFace. Type to search, or change the sort above to switch the feed.
+        </div>
+        <div
+          v-if="models.length > 0 && lastSearchKind === 'wildcard'"
+          class="hardware__results-banner hardware__results-wildcard-hint"
+          aria-live="polite"
+        >
+          <span class="hardware__results-banner-dot" aria-hidden="true"></span>
           Showing prefix matches for
           <code>{{ query }}*</code>
           — add another character for more specific results.
@@ -635,7 +757,8 @@ onUnmounted(() => {
 
       <div v-else-if="!searchError" class="hardware__empty">
         <p class="hardware__empty-text">
-          Enter a query above and pick filters.
+          Pick a filter or type a query.
+          Default view: top {{ browseSubtitle }} GGUF models.
           Hardware fit considers {{ combinedVramGb > 0 ? `your ${combinedVramGb}GB combined VRAM (local + RPC workers)` : 'no GPU data yet' }}.
         </p>
       </div>
@@ -693,9 +816,17 @@ onUnmounted(() => {
   font-style: italic;
   opacity: 0.8;
 }
+
+/* Query row: input on the left, (x) clear-button absolutely positioned
+   inside the wrap so it overlays the input's right edge. Input gets
+   right-padding so typed text doesn't run under the (x) button. */
+.hardware__query-wrap {
+  position: relative;
+  width: 100%;
+}
 .hardware__query {
   width: 100%;
-  padding: 0.55rem 0.75rem;
+  padding: 0.55rem 2rem 0.55rem 0.75rem;
   border-radius: var(--radius-sm);
   border: 1px solid hsl(var(--border));
   background: hsl(var(--background-2));
@@ -705,6 +836,37 @@ onUnmounted(() => {
 .hardware__query:focus {
   outline: 2px solid hsl(var(--primary) / 0.5);
   outline-offset: 1px;
+}
+/* Hide the native search-cancel decoration since we provide our own
+   cross-browser (×) button. */
+.hardware__query::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+.hardware__query-clear {
+  position: absolute;
+  top: 50%;
+  right: 0.4rem;
+  transform: translateY(-50%);
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  background: hsl(var(--background-3, var(--background-2)));
+  border: 1px solid hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: all 120ms ease;
+}
+.hardware__query-clear:hover {
+  color: hsl(var(--foreground));
+  border-color: hsl(var(--primary) / 0.6);
+  background: hsl(var(--primary) / 0.1);
 }
 .hardware__search-btn {
   padding: 0.6rem 0.75rem;
@@ -775,6 +937,10 @@ onUnmounted(() => {
   font-style: italic;
   border-style: dashed;
 }
+/* The legacy `.hardware__chip--quant` marker was REMOVED from the chip
+   class binding in Phase 11 — it had no CSS rules targeting it in the
+   new scope-split design and was dead code. Color tokens now live under
+   `.quant--*` rules scoped to `.hardware__chip--active` below. */
 
 .hardware__toggle-row {
   display: flex;
@@ -834,16 +1000,30 @@ onUnmounted(() => {
   font-size: 0.75rem;
   color: hsl(var(--muted-foreground));
 }
-.hardware__results-wildcard-hint {
+/* Browse-mode / wildcard-hint banner. Two-tone: the dot on the left is
+   a status pip; the message sits next to it. The wildcard hint reuses
+   `.hardware__results-wildcard-hint` for its tighter <code> styling. */
+.hardware__results-banner {
   font-size: 0.75rem;
   color: hsl(var(--muted-foreground));
   font-style: italic;
-  padding: 0.4rem 0.6rem;
+  padding: 0.4rem 0.6rem 0.4rem 0.9rem;
   border-radius: var(--radius-sm);
   background: hsl(var(--background-2));
   border: 1px solid hsl(var(--border));
-  /* tight wrap preserves the inline <code> visual cue */
+  position: relative;
   line-height: 1.4;
+  margin-top: 0.25rem;
+}
+.hardware__results-banner-dot {
+  position: absolute;
+  top: 0.65rem;
+  left: 0.4rem;
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: hsl(var(--primary));
+  box-shadow: 0 0 0 0.2rem hsl(var(--primary) / 0.18);
 }
 .hardware__results-wildcard-hint code {
   font-family: var(--font-mono, monospace);
@@ -1031,48 +1211,93 @@ onUnmounted(() => {
   100% { background-position: -200% 0; }
 }
 
-/* Quant color tokens. Mind the prefix `quant--q4-km` etc matches what
- * `quantColorClass()` returns. We use em-dash variants so the chip
- * matches the badge in the result card. */
-.quant--q4,
-.quant--q4-km,
-.quant--q4-ks,
-.quant--q4-0 {
+/* ─── Quant color tokens ─────────────────────────────────────────────────
+ *
+ * IMPORTANT — split scopes to fix the "Q6/Q8 auto-selected" bug:
+ *
+ *   - Chips: color tokens ONLY apply when the chip is .hardware__chip--active.
+ *     Without this would paint an inactive Q6 chip orange, looking toggle-on.
+ *   - Result badges (.hardware__result-quant): always colored (informational).
+ *
+ * The compound selector keeps the color-as-active-marker pattern: a
+ * chip's color glow tells you the toggle state at a glance. */
+.hardware__chip--active.quant--q4,
+.hardware__chip--active.quant--q4-km,
+.hardware__chip--active.quant--q4-ks,
+.hardware__chip--active.quant--q4-0 {
+  background: rgba(34, 197, 94, 0.18);
+  color: rgb(74, 222, 128);
+  border-color: rgba(34, 197, 94, 0.6);
+}
+.hardware__result-quant.quant--q4,
+.hardware__result-quant.quant--q4-km,
+.hardware__result-quant.quant--q4-ks,
+.hardware__result-quant.quant--q4-0 {
   background: rgba(34, 197, 94, 0.15);
   color: rgb(74, 222, 128);
   border: 1px solid rgba(34, 197, 94, 0.4);
 }
-.quant--q5,
-.quant--q5-km,
-.quant--q5-ks {
+.hardware__chip--active.quant--q5,
+.hardware__chip--active.quant--q5-km,
+.hardware__chip--active.quant--q5-ks {
+  background: rgba(234, 179, 8, 0.18);
+  color: rgb(250, 204, 21);
+  border-color: rgba(234, 179, 8, 0.6);
+}
+.hardware__result-quant.quant--q5,
+.hardware__result-quant.quant--q5-km,
+.hardware__result-quant.quant--q5-ks {
   background: rgba(234, 179, 8, 0.15);
   color: rgb(250, 204, 21);
   border: 1px solid rgba(234, 179, 8, 0.4);
 }
-.quant--q6,
-.quant--q6-k {
+.hardware__chip--active.quant--q6,
+.hardware__chip--active.quant--q6-k {
+  background: rgba(249, 115, 22, 0.18);
+  color: rgb(251, 146, 60);
+  border-color: rgba(249, 115, 22, 0.6);
+}
+.hardware__result-quant.quant--q6,
+.hardware__result-quant.quant--q6-k {
   background: rgba(249, 115, 22, 0.15);
   color: rgb(251, 146, 60);
   border: 1px solid rgba(249, 115, 22, 0.4);
 }
-.quant--q8,
-.quant--q8-0 {
+.hardware__chip--active.quant--q8,
+.hardware__chip--active.quant--q8-0 {
+  background: rgba(59, 130, 246, 0.18);
+  color: rgb(96, 165, 250);
+  border-color: rgba(59, 130, 246, 0.6);
+}
+.hardware__result-quant.quant--q8,
+.hardware__result-quant.quant--q8-0 {
   background: rgba(59, 130, 246, 0.15);
   color: rgb(96, 165, 250);
   border: 1px solid rgba(59, 130, 246, 0.4);
 }
-.quant--f16,
-.quant--bf16 {
+.hardware__chip--active.quant--f16,
+.hardware__chip--active.quant--bf16 {
+  background: rgba(168, 85, 247, 0.18);
+  color: rgb(192, 132, 252);
+  border-color: rgba(168, 85, 247, 0.6);
+}
+.hardware__result-quant.quant--f16,
+.hardware__result-quant.quant--bf16 {
   background: rgba(168, 85, 247, 0.15);
   color: rgb(192, 132, 252);
   border: 1px solid rgba(168, 85, 247, 0.4);
 }
-.quant--f32 {
+.hardware__chip--active.quant--f32 {
+  background: rgba(244, 63, 94, 0.18);
+  color: rgb(251, 113, 133);
+  border-color: rgba(244, 63, 94, 0.6);
+}
+.hardware__result-quant.quant--f32 {
   background: rgba(244, 63, 94, 0.15);
   color: rgb(251, 113, 133);
   border: 1px solid rgba(244, 63, 94, 0.4);
 }
-.quant--unknown {
+.hardware__result-quant.quant--unknown {
   background: hsl(var(--background-2));
   color: hsl(var(--muted-foreground));
   border: 1px solid hsl(var(--border));

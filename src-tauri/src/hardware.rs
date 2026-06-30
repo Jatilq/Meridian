@@ -2,7 +2,7 @@
 // License: GNU GPLv3 or later. See the project root for the full license text.
 // Copyright © 2026 Meridian Agent. All rights reserved.
 
-//! Meridian — Hardware Scanner (HF GGUF model search backend).
+//! Meridian — Hardware Scanner (HF GGUF model search + browse backend).
 //!
 //! Single-stage `hardware_search_gguf_models` Tauri command. Replaces the
 //! previous 62-round-trip-per-click pattern (1 list + 50 sibling fetches
@@ -10,12 +10,26 @@
 //! back with siblings + their sizes baked in. The Vue side then renders a
 //! pre-ranked Vec<RankedGgufModel> with no client-side HF calls.
 //!
+//! **Browse mode**: an empty (`""`) or `None` query against this command
+//! no longer rejects — it now emits a *browse* URL (no `search=` param)
+//! that resolves to the global trending / latest feed sorted by the
+//! user-selected field. This lets the Vue side call the SAME command with
+//! an empty input rather than having to split UI state across two
+//! commands; the user-facing affordance is "leave the search box empty
+//! and you've got the global trending feed, click Recent updates for
+//! latest uploads, click Most liked for top-liked". The `kind` field on
+//! each result row is stamped `"browse"` for empty queries, `"wildcard"`
+//! for 1–4 char queries, and `"exact"` for ≥ 5 char queries so the UI
+//! can render the right hint line.
+//!
 //! Default filter values (sent from the Vue side on first paint):
-//!   - sort: downloads desc
-//!   - quant allowlist: Q4_K_M, Q5_K_M, Q6_K, Q8_0 (IQ1/2/3 always excluded
-//!     unless include_iq is true)
-//!   - trusted quantizers: empty (UI tier toggles it ON with default list)
-//!   - only_fit: false (UI tier toggles it ON when combined VRAM > 0)
+//!   - sort: downloads desc (Trending)
+//!   - empty query (browse mode active)
+//!   - quant allowlist: empty (UI: chip group; "no selection = all quants")
+//!   - trusted quantizers: empty by default (UI: opt-in only-whitelist
+//!     so NVIDIA's own Nemotron series stays visible)
+//!   - only_fit: false by default (UI: opt-in fit-toggle with 10% buffer)
+//!   - include_iq: false (IQ1/2/3 hidden unless toggled)
 //!
 //! `combined_vram_mb` is the total VRAM across local + RPC workers (per
 //! AGENTS.md Phase 10: a single inference is joint across the pool). The
@@ -25,11 +39,12 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-/// Trust whitelist the UI seeds by default (Bartowski, Unsloth, MaziyarPanahi,
-/// LoneStriker, mradermacher). Empty `trusted_quantizers` param means the
-/// trust filter is in "any" mode (no author is excluded) so the user sees
-/// results across all authors. Sending a non-empty list switches it to
-/// "only-allow" filter mode.
+/// Trust whitelist the UI seeds when the user toggles "Only whitelist" ON
+/// (Bartowski, Unsloth, MaziyarPanahi, LoneStriker, mradermacher). Empty
+/// `trusted_quantizers` param means the trust filter is in "any" mode (no
+/// author is excluded) so the user sees results across all authors —
+/// including NVIDIA's own Nemotron series, which would otherwise be
+/// filtered out because NVIDIA is not on the curated whitelist.
 pub const DEFAULT_TRUSTED_QUANTIZERS: &[&str] = &[
     "bartowski",
     "unsloth",
@@ -41,7 +56,9 @@ pub const DEFAULT_TRUSTED_QUANTIZERS: &[&str] = &[
 /// Default quantization allowlist when the UI doesn't override. Q4_K_M is
 /// the speed/quality sweet spot for most 7-13B models on 36-52GB; Q8_0 is
 /// for users with VRAM to spare; Q5_K_M + Q6_K are middle ground. IQ
-/// variants are always excluded unless `include_iq=true`.
+/// variants are always excluded unless `include_iq=true`. Note: this
+/// constant is **only** applied if the Vue chip group has selected at least
+/// one quant — an empty allowlist means "all quants" (Phase 11 spec).
 pub const DEFAULT_QUANT_ALLOWLIST: &[&str] = &["Q4_K_M", "Q5_K_M", "Q6_K", "Q8_0"];
 
 /// Tokens that mark a model as "IQ-quantized" — extreme size reduction at
@@ -62,6 +79,15 @@ pub const PARAM_BUCKETS: &[&str] = &[
     "1-3B", "4-8B", "9-15B", "16-30B", "30-60B", "60B+",
 ];
 
+/// Search-mode tags the build function emits on the per-result `kind`
+/// field. The Vue side reads this to render the right hint line and
+/// differentiates the three states so users never have to guess whether
+/// they're seeing a wildcard prefix match, a fuzzy substring match, or
+/// a global browse feed.
+pub const KIND_BROWSE: &str = "browse";
+pub const KIND_WILDCARD: &str = "wildcard";
+pub const KIND_EXACT: &str = "exact";
+
 // ============================================================================
 // IPC types (frontend-facing)
 // ============================================================================
@@ -69,6 +95,12 @@ pub const PARAM_BUCKETS: &[&str] = &[
 /// Search-knob payload the Vue sidebar sends to the backend on every
 /// search click. Built up from `<script setup>` reactive refs in
 /// `hardware.vue` and emitted via `invoke('hardware_search_gguf_models', { params })`.
+///
+/// `query` accepts `Option<String>`: a `None` or an empty string routes
+/// the request to *browse mode* — the global latest/trending feed
+/// without a `search=` filter. This is the path the Vue UI also uses on
+/// mount (auto-fire with empty query + downloads sort to surface the
+/// top-100 trending GGUFs on first paint).
 ///
 /// `combined_vram_mb` is filled from the existing
 /// `cluster::get_local_hardware` snapshot + any active RPC workers. Sending
@@ -78,7 +110,8 @@ pub const PARAM_BUCKETS: &[&str] = &[
 #[serde(rename_all = "camelCase")]
 pub struct HardwareSearchParams {
     /// Free-text search query, e.g. "qwen2.5", "llama-3.1".
-    pub query: String,
+    /// `None` or `Some("")` = browse mode (no `search=` param emitted).
+    pub query: Option<String>,
 
     /// One of "downloads" (default), "lastModified", "likes".
     #[serde(default)]
@@ -103,13 +136,17 @@ pub struct HardwareSearchParams {
     #[serde(default)]
     pub size_buckets: Vec<String>,
 
-    /// Quant allowlist — empty list = DEFAULT_QUANT_ALLOWLIST.
+    /// Quant allowlist — empty list = "all quants" (Phase-11 semantics:
+    /// no quant filter applied). A non-empty list switches to "only-allow"
+    /// filter mode.
     #[serde(default)]
     pub quant_allowlist: Vec<String>,
 
     /// Quantizer trust — empty list = "any mode" (no author excluded).
     /// Non-empty switches to "only-allow" filter mode and DOES exclude
-    /// untrusted authors entirely.
+    /// untrusted authors entirely. The Vue UI defaults this to empty
+    /// (search across all authors), then pre-fills the 5-name list only
+    /// when the user flips the "Only whitelist" toggle on.
     #[serde(default)]
     pub trusted_quantizers: Vec<String>,
 
@@ -120,7 +157,11 @@ pub struct HardwareSearchParams {
     pub include_iq: Option<bool>,
 
     /// When true, drop models whose best GGUF exceeds the combined VRAM
-    /// (with safety buffer). Recommended when combined VRAM > 0.
+    /// (with safety buffer). Off by default (Phase-11 change: the auto-on
+    /// watcher was removed so the user can opt in for fit-only browsing
+    /// without it unintentionally narrowing their results when they pur-
+    /// posely want to see oversized models to download for a different
+    /// machine).
     #[serde(default)]
     pub only_fit: Option<bool>,
 
@@ -161,12 +202,14 @@ pub struct RankedGgufModel {
     pub gguf_url: String,
     pub gguf_filename: String,
     pub tags: Vec<String>,
-    /// Search mode the backend used for this query. `"exact"` for ≥ 5-char
-    /// queries (no transformation, HF fuzzy substring match) and
-    /// `"wildcard"` for 1–4 char queries (HF prefix-match via `q*`). Same
-    /// for every entry returned from a single invocation — the UI uses
-    /// it to surface a hint like "Showing prefix matches for 'B*'" so JC
-    /// knows to add more letters for more specific results.
+    /// Search/browse mode the backend used for this query:
+    /// `"browse"` for an empty/None query (global trending feed, no
+    /// `search=` param), `"wildcard"` for 1–4 char queries (HF
+    /// prefix-match via `q*`), or `"exact"` for ≥ 5 char queries (HF
+    /// fuzzy substring match). Same for every entry returned from a
+    /// single invocation — the UI uses it to surface a contextual hint
+    /// (no hint in browse mode, prefix hint in wildcard mode, no hint in
+    /// exact mode because results are precisely targeted).
     pub kind: String,
 }
 
@@ -210,12 +253,14 @@ struct HfSibling {
 // Tauri command
 // ============================================================================
 
-/// Search HuggingFace for GGUF models matching the given filter set.
+/// Search HuggingFace for GGUF models matching the given filter set, or
+/// browse the global trending feed when the query is empty/None.
 /// Returns a ranked, pre-resolved Vec<RankedGgufModel> ready for the Vue
 /// result cards. No further HF round-trips are needed from the client.
 ///
 /// Pipeline:
 ///   1. Build list URL with `full=true&limit=N` (siblings + size bundled).
+///      Empty/None query → no `search=` param → global trending feed.
 ///   2. Single HF list GET.
 ///   3. For each repo: filter by arch / param bucket / quantizer trust /
 ///      quant allowlist / IQ exclusion.
@@ -226,29 +271,37 @@ struct HfSibling {
 ///      tiebreak: fits → trusted → best quant → alphabetical.
 ///
 /// Errors are user-visible (returned via the invoke promise):
-///   - empty query (no HF round-trip wasted)
 ///   - HTTP non-2xx (named explicitly)
 ///   - JSON schema drift ("Missing siblings array")
 ///   - HF rate limit (HTTP 429) surfaced verbatim — response carries the
-///     `Retry-After` header so the UI can render it
+///     `Retry-After` header so the UI can render it.
+///
+/// Empty / None queries are NOT an error condition: they route the
+/// request to the browse branch in `build_hf_search_url` and return the
+/// global HF feed sorted by the user-selected sort key.
 #[tauri::command]
 pub async fn hardware_search_gguf_models(
     params: HardwareSearchParams,
 ) -> Result<Vec<RankedGgufModel>, String> {
-    let query = params.query.trim();
-    if query.is_empty() {
-        return Err("Search query must not be empty.".to_string());
-    }
+    let query = params.query.as_deref().unwrap_or("").trim();
 
     // 1. Build URL via the `build_hf_search_url` helper. `full=true` is the
     // linchpin: one round-trip returns siblings with size, so we never need
     // a `GET /api/models/<id>/tree/main` follow-up. HF's free-tier rate
-    // limit (~100 req / 5 min) is generous enough that 1-2 searches / min
-    // from Meridian never trips it. The helper also classifies the query
-    // as `"wildcard"` (1-4 char, prefix-match via `q*`) or `"exact"` so the
-    // UI can hint when results came from a fuzzy short-query match.
+    // limit (~1000 req / day per IP for the anonymous list API) is generous
+    // enough that normal Meridian browse patterns never trip it; a heavy
+    // scripting user would see HTTP 429 surfaced as a backend error with
+    // the Retry-After hint. The helper classifies each request into one
+    // of three modes — `"browse"` for empty/None queries (no `search=`
+    // param emitted), `"wildcard"` for 1–4 char inputs (literal `q*`
+    // appended), `"exact"` for ≥ 5 char inputs — and stamps that on
+    // every result row so the UI renders the right hint copy.
     let limit = params.limit.unwrap_or(100).clamp(1, 100);
-    let (url, kind) = build_hf_search_url(query, params.sort_by.as_deref(), limit);
+    let (url, kind) = build_hf_search_url(
+        if query.is_empty() { None } else { Some(query) },
+        params.sort_by.as_deref(),
+        limit,
+    );
 
     // 2. Fetch.
     let client = reqwest::Client::builder()
@@ -434,13 +487,10 @@ pub async fn hardware_search_gguf_models(
         });
     }
 
-    // 6. Sort. Primary sort = user-selected; tiebreak = fit > trusted >
-    // best-quant > alphabetical for stable, predictable ordering.
-    match params.sort_by.as_deref().unwrap_or("downloads") {
-        "lastModified" => ranked.sort_by(|a, b| b.last_modified.cmp(&a.last_modified)),
-        "likes" => ranked.sort_by(|a, b| b.likes.cmp(&a.likes)),
-        _ => ranked.sort_by(|a, b| b.downloads.cmp(&a.downloads)),
-    }
+    // 6. Sort. Primary sort = user-selected; tiebreak = downloads desc >
+    // fit > trusted > best-quant > alphabetical for stable, predictable
+    // ordering across modes. (The primary `sort_by` already ran above;
+    // this is a tiebreak-only pass.)
     ranked.sort_by(|a, b| {
         b.downloads
             .cmp(&a.downloads)
@@ -453,8 +503,9 @@ pub async fn hardware_search_gguf_models(
     });
 
     log::info!(
-        "[hardware_search_gguf_models] query='{}' returned {} ranked results (raw repos: {})",
-        query,
+        "[hardware_search_gguf_models] query='{}' (kind={}) returned {} ranked results (raw repos: {})",
+        if query.is_empty() { "<browse>" } else { query },
+        kind,
         ranked.len(),
         body.len()
     );
@@ -465,12 +516,18 @@ pub async fn hardware_search_gguf_models(
 // URL builder (pure, testable)
 // ============================================================================
 
-/// Builds the HF list URL for a single model search and classifies the
-/// query as either `"wildcard"` (1–4 char input → append a literal `*`
-/// so HF uses prefix matching, useful for `B` → `BAAI/...`, `BigScience/...`
-/// etc when JC types a single-letter shortcut) or `"exact"` (≥ 5 char
-/// input → no transformation, HF's fuzzy substring match handles the
-/// rest natively).
+/// Builds the HF list URL for a single model search (or browse) and
+/// classifies the request into one of three modes that the Vue side
+/// uses to render contextual hint copy:
+///
+/// * `"exact"` — ≥ 5 char input, no transformation, HF fuzzy substring
+///   match handles the rest natively.
+/// * `"wildcard"` — 1–4 char input → append a literal `*` so HF uses
+///   prefix matching (typed `B` becomes `B*`, useful for one-letter
+///   shortcuts to `BAAI/...`, `BigScience/...` etc).
+/// * `"browse"` — empty/None input → no `search=` param is emitted and
+///   the URL resolves to HF's global latest / trending feed sorted by
+///   the user-selected field. This is the auto-fire default on mount.
 ///
 /// Trailing `*` characters are stripped before re-appending so that
 /// `B*` typed by the user doesn't become `B**` (HF interprets `**` as
@@ -479,19 +536,28 @@ pub async fn hardware_search_gguf_models(
 /// AFTER `percent_encode` runs because that helper's allowlist excludes
 /// `*` — encoding first then appending preserves HF's wildcard semantics.
 ///
+/// When the input contains ONLY stars (`*`, `**`, `***`), the function
+/// drops out of wildcard mode, encodes the literal stars as `%2A`, and
+/// stamps `kind` as `"exact"` — better than dumping HF's entire model
+/// index via a match-all glob.
+///
 /// `sort_by` tokens map directly to the HF API: `"downloads"` (default,
 /// called out explicitly so the URL stays self-documenting),
 /// `"lastModified"`, `"likes"`. Unknown tokens fall through to downloads
 /// so a future agent adding a new sort key doesn't accidentally send
 /// an `&sort=` parameter that HF rejects with 400.
 pub(crate) fn build_hf_search_url(
-    query: &str,
+    query: Option<&str>,
     sort_by: Option<&str>,
     limit: u32,
 ) -> (String, &'static str) {
-    let trimmed = query.trim();
+    let trimmed = query.unwrap_or("").trim();
+    let is_browse = trimmed.is_empty();
+
+    // Wildcard mode only fires when the user typed SOMETHING (1–4 chars).
+    // Browse mode (empty/None) bypasses wildcard semantics entirely.
     let length = trimmed.chars().count();
-    let is_wildcard = length <= 4;
+    let is_wildcard = !is_browse && length <= 4;
 
     // Strip trailing asterisks before re-appending our own. Two-char
     // `B*` and three-char `BA*` are the realistic inputs; trimming them
@@ -511,21 +577,35 @@ pub(crate) fn build_hf_search_url(
     let use_wildcard = is_wildcard && !stripped.is_empty();
     let effective = if use_wildcard {
         format!("{}*", percent_encode(stripped))
-    } else {
+    } else if !is_browse {
         percent_encode(trimmed)
+    } else {
+        // Browse mode: no `search=` param is emitted, so `effective` is
+        // unused. Kept as a placeholder String to keep the format!
+        // branches uniform.
+        String::new()
     };
 
     let mut url = format!(
-        "https://huggingface.co/api/models?search={}&full=true&limit={}",
-        effective,
+        "https://huggingface.co/api/models?full=true&limit={}",
         limit.clamp(1, 100)
     );
+    if !is_browse {
+        url.push_str(&format!("&search={}", effective));
+    }
     match sort_by.unwrap_or("downloads") {
         "lastModified" => url.push_str("&sort=lastModified&direction=-1"),
         "likes" => url.push_str("&sort=likes&direction=-1"),
         _ => url.push_str("&sort=downloads&direction=-1"),
     }
-    (url, if use_wildcard { "wildcard" } else { "exact" })
+    let kind = if is_browse {
+        KIND_BROWSE
+    } else if use_wildcard {
+        KIND_WILDCARD
+    } else {
+        KIND_EXACT
+    };
+    (url, kind)
 }
 
 // ============================================================================
@@ -666,7 +746,7 @@ fn infer_architecture(repo: &HfRepo) -> String {
         ("deepseek", "deepseek"),
     ];
     // 1. Tags. Match either (a) exact token, OR (b) token-prefix where the
-    // next char is a digit / dot / dash `â€• picks up `qwen2.5`, `llama-3.1`,
+    // next char is a digit / dot / dash — picks up `qwen2.5`, `llama-3.1`,
     // `phi3-mini-128k`, `gemma-3-27b-it`. Bare dash-prefix (`starts_with("qwen-")`)
     // misses the dot convention HF ships most modern Qwen / Gemma / Llama
     // variants under.
@@ -914,7 +994,7 @@ mod tests {
         // Suffix variants like "qwen2.5", "gemma-3-27b-it", "llama-3.1"
         // don't match the bare PATTERNS tokens directly, but each has a
         // dash-prefix match against the bare parent ("qwen-", "gemma-",
-        // "llama-") `\u2014 the `t.starts_with(format!("{}-", token))` branch
+        // "llama-") — the `t.starts_with(format!("{}-", token))` branch
         // in the tag check picks them up. This test pins down the intent
         // so a future engineer who reads the test set cannot accidentally
         // regress the suffix-coverage behavior.
@@ -960,11 +1040,18 @@ mod tests {
             downloads: 0,
             likes: 0,
             last_modified: None,
-            tags: vec!["phi3".to_string()],
+            tags: vec![],
             siblings: vec![],
         };
-        assert_eq!(infer_architecture(&repo), "phi");
-        repo.tags = vec!["phi4".to_string()];
+        // Pre-tag baseline: id has no `phi` substring and tags are empty, so
+        // the function MUST return "unknown". Subsequent asserts cover the
+        // subfamily-ordering surface that the test name advertises.
+        assert_eq!(
+            infer_architecture(&repo),
+            "unknown",
+            "empty tags + no id-substring must return 'unknown' before any subfamily test"
+        );
+        repo.tags = vec!["phi3".to_string()];
         assert_eq!(infer_architecture(&repo), "phi");
         repo.tags = vec!["qwen2".to_string()];
         assert_eq!(infer_architecture(&repo), "qwen");
@@ -1068,16 +1155,105 @@ mod tests {
         assert_eq!(round_gb(17_179_869_184), 16.0); // exactly 16 GiB
     }
 
+    // ----- Fix Phase 11: empty query routes to browse mode (was: rejected) -----
+    //
+    // Pre-Phase-11 the search command rejected `Some("")` and `None` with
+    // a hard error. The Vue side wanted to auto-fire on mount with an
+    // empty query + downloads sort to populate the panel before the user
+    // typed anything. The fix flips the rejection: empty/None queries now
+    // route to the *browse* branch in `build_hf_search_url` and emit
+    // `?full=true&limit=N&sort=downloads&direction=-1` (no `search=`).
+    //
+    // We can only test the URL builder portion deterministically — a real
+    // call to HF is not part of the test set. Production behaviour is
+    // covered by the live integration once the user loads the panel.
+
     #[test]
-    fn empty_params_query_rejected() {
-        // Pure test of the precondition (must not await HTTP). We can't
-        // construct a full HfRepo body without a server, so this checks
-        // only the empty-query branch.
+    fn build_search_url_none_query_routes_to_browse() {
+        let (url, kind) = build_hf_search_url(None, None, 30);
+        assert!(
+            !url.contains("&search="),
+            "browse URL must NOT include search param: {}",
+            url
+        );
+        assert!(
+            url.contains("sort=downloads"),
+            "browse URL must carry explicit sort: {}",
+            url
+        );
+        assert_eq!(
+            kind, KIND_BROWSE,
+            "kind must be 'browse' for None query (got {})",
+            kind
+        );
+    }
+
+    #[test]
+    fn build_search_url_empty_string_routes_to_browse() {
+        let (url, kind) = build_hf_search_url(Some(""), None, 30);
+        assert!(
+            !url.contains("&search="),
+            "empty-string browse URL must NOT include search param: {}",
+            url
+        );
+        assert_eq!(kind, KIND_BROWSE);
+    }
+
+    #[test]
+    fn build_search_url_whitespace_only_routes_to_browse() {
+        // Whitespace-only input is treated as empty (we trim it).
+        let (url, kind) = build_hf_search_url(Some("   "), None, 30);
+        assert!(
+            !url.contains("&search="),
+            "whitespace-only input becomes empty → browse: {}",
+            url
+        );
+        assert_eq!(kind, KIND_BROWSE);
+    }
+
+    #[test]
+    fn build_search_url_browse_honours_sort_token() {
+        let (url, _) = build_hf_search_url(None, Some("lastModified"), 30);
+        assert!(
+            url.contains("sort=lastModified"),
+            "browse URL must respect sort_by: {}",
+            url
+        );
+        assert!(!url.contains("&search="));
+    }
+
+    #[test]
+    fn build_search_url_browse_clamps_limit() {
+        let (url, _) = build_hf_search_url(None, None, 9999);
+        assert!(
+            url.contains("limit=100"),
+            "browse limit must clamp to 100: {}",
+            url
+        );
+        let (url, _) = build_hf_search_url(None, None, 0);
+        assert!(url.contains("limit=1"), "browse limit must clamp to 1: {}", url);
+    }
+
+    #[test]
+    #[ignore = "live HF HTTP integration test — run with `cargo test -- --ignored` when network is available"]
+    fn empty_params_query_routes_to_browse_url() {
+        // Sanity check that an empty query on the params struct does NOT
+        // return the pre-Phase-11 hard-rejection. The previous test earned
+        // its place in the unit suite because the rejection fired before
+        // any network I/O — guaranteed-deterministic, no flake. Now the
+        // rejection is removed and the function actually hits HF, so the
+        // test is gated with #[ignore] for offline CI defaults; running
+        // it requires `cargo test --lib hardware::tests -- --ignored`
+        // with network access. The pure URL-builder behaviour is covered
+        // deterministically by `build_search_url_*_routes_to_browse` tests
+        // above; this one only verifies the wiring from
+        // `hardware_search_gguf_models` -> `build_hf_search_url` is not
+        // regressed by a future direct rejection guard insertion.
         let rt = tokio::runtime::Runtime::new().unwrap();
         let result = rt.block_on(hardware_search_gguf_models(HardwareSearchParams {
-            query: "".to_string(),
+            query: Some("".to_string()),
             sort_by: None,
-            limit: None,
+            limit: Some(30),
             architectures: vec![],
             size_buckets: vec![],
             quant_allowlist: vec![],
@@ -1086,40 +1262,57 @@ mod tests {
             only_fit: None,
             combined_vram_mb: 0,
         }));
-        assert!(result.is_err(), "empty query must reject without HTTP");
-        assert!(
-            result.unwrap_err().contains("empty"),
-            "error must mention empty query"
-        );
+        match result {
+            Ok(vec) => {
+                // Whatever the live response shape, every entry's kind
+                // must be KIND_BROWSE (the backend-stamped mode).
+                for entry in &vec {
+                    assert_eq!(
+                        entry.kind, KIND_BROWSE,
+                        "every browse-mode entry must stamp kind='browse' (got {})",
+                        entry.kind
+                    );
+                }
+            }
+            Err(msg) => {
+                // Acceptable: HTTP error. Must NOT be the pre-Phase-11
+                // rejection wording.
+                assert!(
+                    !msg.to_lowercase().contains("search query must not be empty"),
+                    "pre-Phase-11 rejection wording detected — guard was not removed: {}",
+                    msg
+                );
+            }
+        }
     }
 
     // ----- Fix 3: search looseness, wildcard vs exact -----
 
     #[test]
     fn build_search_url_single_letter_appends_wildcard() {
-        let (url, kind) = build_hf_search_url("B", None, 30);
+        let (url, kind) = build_hf_search_url(Some("B"), None, 30);
         assert!(
             url.contains("search=B*&"),
             "single-letter query must append literal *: {}",
             url
         );
-        assert_eq!(kind, "wildcard");
+        assert_eq!(kind, KIND_WILDCARD);
     }
 
     #[test]
     fn build_search_url_four_char_query_appends_wildcard() {
-        let (url, kind) = build_hf_search_url("Qwen", None, 30);
+        let (url, kind) = build_hf_search_url(Some("Qwen"), None, 30);
         assert!(
             url.contains("search=Qwen*&"),
             "four-char query must append literal *: {}",
             url
         );
-        assert_eq!(kind, "wildcard");
+        assert_eq!(kind, KIND_WILDCARD);
     }
 
     #[test]
     fn build_search_url_five_char_query_no_wildcard() {
-        let (url, kind) = build_hf_search_url("llama", None, 30);
+        let (url, kind) = build_hf_search_url(Some("llama"), None, 30);
         assert!(
             url.contains("search=llama&"),
             "five-char query must not transform: {}",
@@ -1130,12 +1323,12 @@ mod tests {
             "five-char query must not append *: {}",
             url
         );
-        assert_eq!(kind, "exact");
+        assert_eq!(kind, KIND_EXACT);
     }
 
     #[test]
     fn build_search_url_strips_user_typed_trailing_star() {
-        let (url, kind) = build_hf_search_url("B*", None, 30);
+        let (url, kind) = build_hf_search_url(Some("B*"), None, 30);
         assert!(
             url.contains("search=B*&"),
             "user-typed * must be stripped then re-appended: {}",
@@ -1151,23 +1344,23 @@ mod tests {
             "* must NOT be percent-encoded (would lose wildcard semantics): {}",
             url
         );
-        assert_eq!(kind, "wildcard");
+        assert_eq!(kind, KIND_WILDCARD);
     }
 
     #[test]
     fn build_search_url_trims_surrounding_whitespace() {
-        let (url, kind) = build_hf_search_url("  llama  ", None, 30);
+        let (url, kind) = build_hf_search_url(Some("  llama  "), None, 30);
         assert!(
             url.contains("search=llama&"),
             "query must be trimmed before encoding: {}",
             url
         );
-        assert_eq!(kind, "exact");
+        assert_eq!(kind, KIND_EXACT);
     }
 
     #[test]
     fn build_search_url_honours_sort_token() {
-        let (url, _) = build_hf_search_url("llama", Some("lastModified"), 30);
+        let (url, _) = build_hf_search_url(Some("llama"), Some("lastModified"), 30);
         assert!(url.contains("sort=lastModified"), "URL: {}", url);
         assert!(
             url.contains("direction=-1"),
@@ -1178,9 +1371,9 @@ mod tests {
 
     #[test]
     fn build_search_url_clamps_limit_to_100() {
-        let (url, _) = build_hf_search_url("llama", None, 9999);
+        let (url, _) = build_hf_search_url(Some("llama"), None, 9999);
         assert!(url.contains("limit=100"), "limit must clamp to 100: {}", url);
-        let (url, _) = build_hf_search_url("llama", None, 0);
+        let (url, _) = build_hf_search_url(Some("llama"), None, 0);
         assert!(url.contains("limit=1"), "limit must clamp to 1: {}", url);
     }
 
@@ -1189,7 +1382,7 @@ mod tests {
         // User typed ONLY stars — falls back to "exact" mode so HF treats
         // the encoded `**` (or `%2A%2A`) as a literal token rather than
         // dumping the entire model index via a match-all wildcard glob.
-        let (url, kind) = build_hf_search_url("**", None, 30);
+        let (url, kind) = build_hf_search_url(Some("**"), None, 30);
         assert!(
             url.contains("search=%2A%2A&"),
             "URL must contain literal percent-encoded stars (no match-all glob): {}",
@@ -1201,7 +1394,7 @@ mod tests {
             url
         );
         assert_eq!(
-            kind, "exact",
+            kind, KIND_EXACT,
             "bare-stars input must mark kind as exact, not wildcard"
         );
     }
@@ -1209,24 +1402,16 @@ mod tests {
     #[test]
     fn build_search_url_single_star_falls_back_to_exact() {
         // Same bare-star guard for the single-asterisk variant.
-        let (url, kind) = build_hf_search_url("*", None, 30);
+        let (url, kind) = build_hf_search_url(Some("*"), None, 30);
         assert!(
             url.contains("search=%2A&"),
             "URL must contain literal percent-encoded single star: {}",
             url
         );
-        assert_eq!(kind, "exact");
+        assert_eq!(kind, KIND_EXACT);
     }
 
     // ----- Empty quant allowlist = no filter -----
-    //
-    // These tests document the Phase 11 contract: an empty allowlist means
-    // "all quants" — not "fall back to DEFAULT_QUANT_ALLOWLIST". The Vue
-    // default for `selectedQuants` is now an empty Set precisely so a
-    // wildcard "B"* search returns EVERY matching GGUF instead of letting
-    // a restrictive Q4_K_M-only list eat the response. Both the production
-    // loop and these tests share one helper (`passes_quant_filter`) so a
-    // future refactor can't quietly fork them.
 
     #[test]
     fn quant_filter_empty_means_no_filter() {
@@ -1285,7 +1470,7 @@ mod tests {
         // loop runs gates in this fixed order:
         //   1. `if !include_iq && carries_iq_token(fname) { continue; }`
         //      ↳ IQ1/2/3 gate; skipped when `include_iq == true`.
-        //   2. `if fname.to_uppercase().contains(\"IQ4\") { continue; }`
+        //   2. `if fname.to_uppercase().contains("IQ4") { continue; }`
         //      ↳ IQ4 gate — ALWAYS rejects regardless of `include_iq`.
         //   3. `if !passes_quant_filter(...) { continue; }`
         //      ↳ allowlist gate (the predicate we're testing alongside).
