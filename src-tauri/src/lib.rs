@@ -27,6 +27,7 @@ mod backend_manager;
 mod extensions;
 mod file_operations;
 mod global_search;
+mod hardware;
 mod image_thumbnails;
 mod lan_share;
 mod link_operations;
@@ -425,6 +426,7 @@ pub fn run() {
             backend_manager::list_gguf_models,
             backend_manager::scan_models_recursive,
             backend_manager::hf_resolve_model_files,
+            hardware::hardware_search_gguf_models,
             sftp::sftp_read_dir,
             rain_memory::rain_load_memory,
             rain_memory::rain_append_memory,
