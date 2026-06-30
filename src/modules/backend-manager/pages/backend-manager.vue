@@ -293,6 +293,10 @@ interface RawModelEntry {
 const models = ref<ModelRow[]>([]);
 const modelsBusy = ref(false);
 const modelsNote = ref('');
+// Free-text filter applied to the Models tab list. Matches against
+// substring of the filename OR the quant token so typing "llama" or
+// "Q4_K_M" both narrow the list sensibly. Case-insensitive.
+const modelQuery = ref('');
 // User-selected target backend per model (keyed by model.path) so each row
 // in the Models tab keeps an independent choice instead of falling back to
 // DOM sibling-groping at click time.
@@ -308,6 +312,37 @@ function parseQuant(filename: string): string {
 function formatBytes2(bytes: number | undefined | null): string {
   return formatBytes(bytes);
 }
+
+const filteredModels = computed<ModelRow[]>(() => {
+  const q = modelQuery.value.trim().toLowerCase();
+  if (!q) return models.value;
+  return models.value.filter((m) => {
+    // Filename (without extension noise) OR quant substring. The user-facing
+    // discovery signal here is "I just downloaded llama-3.1-8b-q4 — can I
+    // find it?" — a substring match on either the filename or the parsed
+    // quant token covers that case while staying simple.
+    if (m.filename.toLowerCase().includes(q)) return true;
+    if (m.quant.toLowerCase().includes(q)) return true;
+    // Size match: typing e.g. "8gb" matches models of that approximate
+    // size, which is the second-most-common filtering intent. When the
+    // user types a bare number, infer the unit from magnitude: <= 32 is
+    // almost certainly GB (anything smaller is a tiny embedding), > 32
+    // is almost certainly MB (single GB models don't ask for a filter at
+    // "8gb" by leaving the unit off). This avoids the footgun where
+    // typing "700" alone silently defaults to GB and misses a 700MB file.
+    const sizeMatch = q.match(/^(\d+(?:\.\d+)?)\s*(gb|mb)?$/i);
+    if (sizeMatch) {
+      const target = parseFloat(sizeMatch[1]);
+      const explicitUnit = sizeMatch[2]?.toLowerCase();
+      const unit = explicitUnit ?? (target <= 32 ? 'gb' : 'mb');
+      const actualGb = m.sizeBytes / 1024 / 1024 / 1024;
+      const tolerance = Math.max(0.5, actualGb * 0.15);
+      if (unit === 'mb' && Math.abs(actualGb * 1024 - target) <= 0.5) return true;
+      if (unit === 'gb' && Math.abs(actualGb - target) <= tolerance) return true;
+    }
+    return false;
+  });
+});
 
 // ============================================================================
 // RPC Slaves tab state — populated from user-settings.clusterWorkers.
@@ -899,7 +934,33 @@ onMounted(() => {
 
       <p v-if="modelsNote" class="bm__note">{{ modelsNote }}</p>
 
-      <ul v-if="models.length" class="bm__models">
+      <div v-if="models.length" class="bm__models-filter" role="search">
+        <input
+          v-model="modelQuery"
+          type="search"
+          class="bm__input"
+          placeholder="Filter — filename, quant (Q4_K_M), or size (7 = GB, 700 = MB, '8gb' explicit)"
+          aria-label="Filter local models"
+          :disabled="modelsBusy"
+        >
+        <span class="bm__models-count">
+          {{ filteredModels.length }}
+          <template v-if="modelQuery.trim()">/ {{ models.length }}</template>
+          shown
+        </span>
+        <button
+          v-if="modelQuery.trim()"
+          class="bm__btn bm__btn--ghost"
+          type="button"
+          @click="modelQuery = ''"
+        >Clear</button>
+      </div>
+
+      <p v-if="models.length && filteredModels.length === 0" class="bm__note bm__note--empty">
+        No model matched "{{ modelQuery }}". Try a shorter substring or clear the filter.
+      </p>
+
+      <ul v-if="filteredModels.length" class="bm__models">
         <li v-for="model in models" :key="model.path" class="bm__model">
           <div class="bm__model-info">
             <div class="bm__model-name">{{ model.filename }}</div>
@@ -1414,6 +1475,28 @@ onMounted(() => {
 
 .bm__input--port {
   max-width: 110px;
+}
+
+.bm__models-filter {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.75rem;
+  background: hsl(var(--background-2));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-sm);
+}
+
+.bm__models-filter > .bm__input {
+  flex: 1;
+  min-width: 0;
+}
+
+.bm__models-count {
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .bm__model-row {
