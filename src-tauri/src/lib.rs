@@ -427,6 +427,7 @@ pub fn run() {
             backend_manager::scan_models_recursive,
             backend_manager::hf_resolve_model_files,
             hardware::hardware_search_gguf_models,
+            hardware::hardware_fetch_model_detail,
             sftp::sftp_read_dir,
             rain_memory::rain_load_memory,
             rain_memory::rain_append_memory,

@@ -2,29 +2,32 @@
 /**
  * Hardware Scanner — HuggingFace GGUF model search + browse.
  *
- * Replaces the previous single hardcoded "Search HuggingFace GGUF models"
- * button with a real search experience: query input, filter sidebar
- * (architecture / parameter size / quant allowlist / quantizer trust /
- * fit-toggle / include-IQ), pre-filtered result cards ranked by downloads
- * with VRAM-fit badges per JC's combined hardware pool.
+ * Phase 11 LM-Studio parity (2026-06-30):
+ *   * Search-all: single-letter queries (`b`, `g`) now substring-match
+ *     the HF catalog instead of prefix-matching a tiny slice. The
+ *     previous wildcard mode (`*` at 1-4 chars) was removed in
+ *     hardware.rs — HF's fuzzy matcher is already loose and the literal
+ *     star over-narrowed.
+ *   * Machine-selector dropdown: VRAM target per search (Local / each
+ *     worker / Combined). Drives both the top-level FITS badge and
+ *     every per-sibling row in the expanded LM-Studio-style table.
+ *   * Expandable card details: chevron toggles a per-quant breakdown
+ *     (filename / quant / size / FITS) and a real-fetch button for
+ *     `max_position_embeddings` from `config.json` (heuristic first;
+ *     truth on demand — the latter goes through a new Tauri command
+ *     `hardware_fetch_model_detail`).
+ *   * HF model-card link: the `model.id` text is now a real
+ *     `<a href>` to `https://huggingface.co/{id}` with an external-link
+ *     icon, target=_blank.
  *
- * The new Tauri command `hardware_search_gguf_models` (in
- * `src-tauri/src/hardware.rs`) returns a fully-resolved Vec<RankedGgufModel>
- * from one HF `full=true` round-trip — no client-side HF calls anymore,
- * so chip toggles no longer feel like a no-op until results land.
- *
- * Defaults (Phase 11 / 2026-06-30 spec):
- *   - query: empty (browse mode active) — Type to search, or browse the
- *     global trending feed.
- *   - sort: downloads desc (Trending) — auto-fired on mount.
- *   - selectedQuants: empty Set (chip group; "no selection = all quants")
- *   - onlyTrustedQuantizers: OFF (chip group hidden entirely). JC wanted
- *     no whitelist pre-applied so NVIDIA's own Nemotron series stays
- *     visible by default.
- *   - onlyFit: OFF. JC wanted full control — the previous auto-on
- *     watcher forced a narrowing that JC found frustrating. Off by
- *     default; the user opts in.
- *   - includeIq: OFF (IQ1/2/3 hidden unless toggled).
+ * Defaults (carried over from prior phases):
+ *   - query: empty (browse mode)
+ *   - sort: downloads desc (Trending) — auto-fired on mount
+ *   - selectedQuants: empty Set ("all quants")
+ *   - onlyTrustedQuantizers: OFF
+ *   - onlyFit: OFF (the user opts in)
+ *   - includeIq: OFF
+ *   - targetMachine: 'combined' (sum of all GPUs across local + workers)
  */
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
@@ -35,23 +38,27 @@ import { useHardwarePool } from '@/composables/use-hardware-pool';
 const userSettingsStore = useUserSettingsStore();
 const modelsFolder = computed(() => userSettingsStore.userSettings.meridian?.modelsFolder ?? '');
 
-// ============================================================================
-// Deep-link entrypoint: the Backend Manager → Models tab (and quick-actions
-// in the future) push to /hardware?searchHuggingface=<query>. Pre-fill the
-// search box, then auto-run the search so the user lands on real results
-// rather than an empty panel with a populated query.
-// ============================================================================
-
 const route = useRoute();
 const incomingQuery = computed(() => {
   const raw = route.query.searchHuggingface;
   return typeof raw === 'string' && raw.trim() ? raw.trim() : '';
 });
 
+// 10% safety buffer — must stay in lockstep with
+// src-tauri/src/hardware.rs::VRAM_FIT_SAFETY_RATIO.
+const VRAM_FIT_SAFETY_RATIO = 0.90;
+
 // ============================================================================
 // IPC types (must mirror src-tauri/src/hardware.rs)
 // ============================================================================
 
+// contextLengthSource contract: the Rust backend ALWAYS writes one of
+// `"estimate"` (heuristic matched, value > 0) or `"none"` (heuristic
+// returned None, value null). The Vue side promotes `"none"` to
+// `"config_json"` after `hardware_fetch_model_detail` resolves with a
+// real `max_position_embeddings`. A future maintainer who reads the
+// type union and looks for a wire-format `"config_json"` path: there
+// isn't one — it's a post-fetch affordance only.
 interface HardwareSearchParams {
   query: string | null;
   sortBy?: string;
@@ -63,6 +70,15 @@ interface HardwareSearchParams {
   includeIq?: boolean;
   onlyFit?: boolean;
   combinedVramMb: number;
+}
+
+interface RankedGgufSibling {
+  filename: string;
+  quant: string;
+  sizeBytes: number;
+  sizeGb: number;
+  fitsHardware: boolean;
+  score: number;
 }
 
 interface RankedGgufModel {
@@ -83,20 +99,20 @@ interface RankedGgufModel {
   ggufUrl: string;
   ggufFilename: string;
   tags: string[];
-  /** Backend-stamped. `"browse"` for empty/None queries (global trending
-   *  feed), `"wildcard"` for 1–4 char queries (HF prefix-match), or
-   *  `"exact"` for ≥ 5 char queries (HF fuzzy substring match). UI
-   *  surfaces a contextual hint line per kind. */
   kind: string;
+  contextLength?: number;
+  contextLengthSource?: 'estimate' | 'config_json' | 'none';
+  siblings: RankedGgufSibling[];
+}
+
+interface ModelDetail {
+  repoId: string;
+  maxPositionEmbeddings: number | null;
+  source: 'config_json' | 'none';
 }
 
 // ============================================================================
-// Hardware pane data
-//
-// Replaced the inline `loadHardware()` with the shared `useHardwarePool`
-// composable so the "fit-only" VRAM budget includes remote RPC workers
-// getting their GPU memory added into the pool (was previously local-only,
-// so combined VRAM read as 36 GB even with BLACK online contributing 16).
+// Hardware pool
 // ============================================================================
 
 const {
@@ -109,19 +125,85 @@ const {
 const localNode = computed(() => hardwareNodes.value.find((n) => n.isLocal) ?? null);
 const localCpuName = computed(() => localNode.value?.cpu?.name?.trim() || 'Unknown CPU');
 
-// NOTE: the previous `watch(combinedVramGb, ...)` auto-fit watcher was
-// removed in Phase 11. JC explicitly wanted the fit-toggle to stay OFF
-// until opted in (so he can browse oversized models to download for a
-// different machine). The 10%-buffer tooltip now documents what ON
-// actually does; the user owns the toggle.
+// ============================================================================
+// Machine-selector dropdown
+//
+// Each option targets one node's GPU VRAM; 'combined' sums across all
+// nodes. `targetVramMb` is the reactive truth for every fit check in
+// this component — both the top-level card badge AND every sibling
+// row in the expanded table bind to it via `fitsForSizeGb`. No HF
+// round-trip fires on dropdown change (Phase 11 LM-Studio parity:
+// switching target re-renders locally because sibling sizes are
+// pre-baked).
+// ============================================================================
+
+// String discriminator for the machine-selector v-model. The previous
+// tagged-union shape (`'combined' | 'local' | { kind: 'worker'; host }`)
+// silently deselected after any poll cycle because Vue's built-in `<select>`
+// v-model uses `===` to compare the bound ref against the option `:value`,
+// and the parent `computed` re-created fresh `{ kind, host }` objects on
+// every recompute. A string discriminator survives reference churn and
+// stays stable across renders. Worker entries stringify to `worker:<host>`.
+type MachineTargetId = 'combined' | 'local' | `worker:${string}`;
+
+const workerOptionId = (host: string): MachineTargetId => `worker:${host}`;
+
+const selectedMachineId = ref<MachineTargetId>('combined');
+const workerOptions = computed(() => hardwareNodes.value.filter((n) => !n.isLocal && n.online));
+
+interface MachineOption {
+  id: MachineTargetId;
+  label: string;
+  vramMb: number;
+}
+
+const machineOptions = computed<MachineOption[]>(() => {
+  const opts: MachineOption[] = [
+    { id: 'combined', label: 'Combined (all GPUs)', vramMb: combinedVramMb.value },
+  ];
+  opts.push({
+    id: 'local',
+    label: 'Local',
+    vramMb: (localNode.value?.gpus ?? []).reduce((s, g) => s + (g.memoryTotal || 0), 0),
+  });
+  for (const w of workerOptions.value) {
+    const vr = w.gpus.reduce((s, g) => s + (g.memoryTotal || 0), 0);
+    if (vr <= 0) continue;
+    opts.push({ id: workerOptionId(w.host), label: `${w.name} (${w.host})`, vramMb: vr });
+  }
+  return opts;
+});
+
+const targetVramMb = computed(() => {
+  const id = selectedMachineId.value;
+  if (id === 'combined') return combinedVramMb.value;
+  if (id === 'local') {
+    return (localNode.value?.gpus ?? []).reduce((s, g) => s + (g.memoryTotal || 0), 0);
+  }
+  // `worker:<host>` branch — strip the prefix, look up the pool node.
+  const WORKER_PREFIX = 'worker:';
+  if (id.startsWith(WORKER_PREFIX)) {
+    const host = id.slice(WORKER_PREFIX.length);
+    const node = hardwareNodes.value.find((n) => !n.isLocal && n.host === host);
+    if (!node) return 0;
+    return node.gpus.reduce((s, g) => s + (g.memoryTotal || 0), 0);
+  }
+  return 0;
+});
+
+const targetVramGb = computed(() => targetVramMb.value > 0 ? Math.floor(targetVramMb.value / 1024) : 0);
+
+function fitsForSizeGb(sizeGb: number, targetMb: number): boolean {
+  if (targetMb === 0) return true; // No hardware data — show all.
+  const targetGb = targetMb / 1024;
+  return sizeGb <= targetGb * VRAM_FIT_SAFETY_RATIO;
+}
 
 // ============================================================================
 // Search filters — reactive, bound to sidebar controls
 // ============================================================================
 
-// Empty query = browse mode (backend's `"browse"` kind). The input's
-// placeholder gives worked examples so users still get type hints.
-// `llama` used to be the default; JC explicitly asked for empty.
+// Empty query = browse mode. (No more `llama` placeholder default.)
 const query = ref<string>('');
 const sortBy = ref<'downloads' | 'lastModified' | 'likes'>('downloads');
 
@@ -139,14 +221,7 @@ const sizeOptions = ['1-3B', '4-8B', '9-15B', '16-30B', '30-60B', '60B+'] as con
 const selectedSizes = ref<Set<string>>(new Set());
 
 const quantOptions = ['Q4_K_M', 'Q5_K_M', 'Q6_K', 'Q8_0'] as const;
-// Default: empty = "include all quants" (no filter). Per JC's Phase 11
-// spec, "all quant chips unchecked" means "show every GGUF" — i.e. the
-// user opted INTO a restrictive allowlist only by explicitly clicking
-// chips. The previous `new Set(['Q4_K_M'])` default was restrictive on
-// purpose and acted as a quality floor, but JC explicitly asked for the
-// inverse — and the Q4_K_M-only default ate every wildcard "B" search
-// result because HF's broad prefix-match response rarely carries a Q4_K_M
-// GGUF in the first repo slot.
+// Empty set = "include all quants". Same as Phase 11 default.
 const selectedQuants = ref<Set<string>>(new Set());
 
 const trustedQuantizerOptions = [
@@ -156,21 +231,10 @@ const trustedQuantizerOptions = [
   { key: 'lonestriker', label: 'LoneStriker' },
   { key: 'mradermacher', label: 'mradermacher' },
 ] as const;
-// Default OFF — chip group hidden entirely. JC explicitly asked for the
-// whitelist to be opt-in; otherwise NVIDIA's own Nemotron series gets
-// filtered out on first paint when NVIDIA is not on the curated list.
-// When the user toggles ON, the 5 default names pre-populate so they can
-// scope down (e.g. unsubscribe from `mradermacher`) right away.
 const selectedTrustedQuantizers = ref<Set<string>>(new Set(trustedQuantizerOptions.map((o) => o.key)));
 const onlyTrustedQuantizers = ref<boolean>(false);
 
-// Default OFF. Phase 11 change: the previous auto-on watcher was
-// removed so JC can browse oversized models without the UI fighting
-// him. The tooltip on the toggle now documents the 10% safety buffer
-// so a click-ON user knows why a 35GB model gets rejected on 36GB.
 const onlyFit = ref<boolean>(false);
-// IQ1/IQ2/IQ3 are excluded unless this is on; keep OFF by default
-// (severe quality hit per AGENTS.md Phase 10).
 const includeIq = ref<boolean>(false);
 
 // ============================================================================
@@ -180,34 +244,114 @@ const includeIq = ref<boolean>(false);
 const models = ref<RankedGgufModel[]>([]);
 const loadingModels = ref(false);
 const searchError = ref<string>('');
-// Track the kind of the last completed search (browse / wildcard / exact /
-// ''). Empty string means no search has run yet. Used by the template to
-// render the right hint banner and by the result header for sort-aware
-// copy ("Showing top trending GGUF models..." in browse mode).
 const lastSearchKind = ref<string>('');
-// Sequence counter: every searchModels() call increments this. Resolved
-// responses whose captured seq doesn't match the current seq are stale
-// (a newer search has superseded them) and are dropped — protects
-// `models.value`, `lastSearchKind`, `searchError` from being clobbered
-// by an out-of-order older HF response when JC types fast + hits enter.
+// Sequence counter — every searchModels() call increments. Stale
+// resolutions whose captured seq != current are dropped. The same
+// pattern protects `onUnmounted` mid-flight resolutions (see blow).
 const searchSeq = ref<number>(0);
-// Pagination state: full result set stays in `models.value`; the v-for
-// renders only the top `visibleCount` cards so a "Load More" button can
-// reveal more without a fresh HF round-trip. PAGE_STEP is the increment
-// granularity. `hasMoreModels` is true when the rendered slice is shorter
-// than the loaded array — drives the visibility of the "Load More"
-// button. Kept as a computed so it stays in sync with both
-// `visibleCount.value` increments and `models.value` replacements
-// without manual recompute glue in `loadMoreModels` / `clearFilters` /
-// `searchModels`. `models.length` is the source of truth for total
-// count — we deliberately do NOT keep a parallel `totalModelsRaw` ref
-// because that would be a duplicate of state that can drift.
+
 const visibleCount = ref<number>(30);
 const PAGE_STEP = 30;
 const hasMoreModels = computed(() => visibleCount.value < models.value.length);
 
-// Sort-aware subtitle for the browse-mode banner. Trending/Recent/Liked.
-// Kept as a computed so template renders one expression.
+// ============================================================================
+// Card-expand state — Phase 11 LM-Studio parity
+//
+// `expandedCards` holds repo ids currently expanded. `modelDetails`
+// holds the per-repo ModelDetail payload fetched on demand (real
+// `max_position_embeddings` from `config.json`). The user can
+// expand multiple cards at once for LM-Studio-style cross-comparison.
+// ============================================================================
+
+const expandedCards = ref<Set<string>>(new Set());
+const modelDetails = ref<Map<string, ModelDetail>>(new Map());
+const loadingDetail = ref<Set<string>>(new Set());
+
+function isExpanded(modelId: string): boolean {
+  return expandedCards.value.has(modelId);
+}
+
+function toggleExpand(model: RankedGgufModel) {
+  if (expandedCards.value.has(model.id)) {
+    expandedCards.value.delete(model.id);
+  } else {
+    expandedCards.value.add(model.id);
+    // Lazy-fetch real context on first expand IF the heuristic was
+    // unable to classify. (User explicitly asked for "real fetch
+    // only on detail-view expand" — so when the heuristic figured it
+    // out, we honour the estimate and don't fire a config.json call.)
+    if (
+      model.contextLength == null ||
+      model.contextLengthSource !== 'estimate'
+    ) {
+      if (!modelDetails.value.has(model.id) && !loadingDetail.value.has(model.id)) {
+        void fetchContextLength(model.id);
+      }
+    }
+  }
+}
+
+async function fetchContextLength(repoId: string) {
+  // Snapshot the search-generation at fetch start. A new search calls
+  // `searchModels()` which bumps `searchSeq.value` and replaces
+  // `models.value`. If our fetch resolves AFTER that replacement,
+  // `models.value.find(m => m.id === repoId)` might find a *different*
+  // row carrying the same id (filter narrowed, repo dropped, etc.) and
+  // overwrite the new row's context with the stale-fetch result. Drop
+  // the mutation when the apply-time seq != our snapshot. Same
+  // invariant the search command itself uses.
+  const fetchSeq = searchSeq.value;
+  loadingDetail.value.add(repoId);
+  try {
+    const detail = await invoke<ModelDetail>('hardware_fetch_model_detail', { repoId });
+    if (fetchSeq !== searchSeq.value) return;
+    modelDetails.value.set(repoId, detail);
+    const target = models.value.find((m) => m.id === repoId);
+    if (target) {
+      target.contextLength = detail.maxPositionEmbeddings ?? undefined;
+      target.contextLengthSource = detail.source;
+    }
+    // Clear any stale error notice for this row now that the apply
+    // succeeded. Without this, a user who clicks Retry after a
+    // transient failure sees the success path land AND the error
+    // message still showing — two contradictory affordances in the
+    // same expanded row.
+    clearContextFetchNotice(repoId);
+  } catch (err) {
+    if (fetchSeq !== searchSeq.value) return; // Stale-resolved: drop on the new fetch's behalf.
+    // Keep the heuristic source as-is (likely 'none' / 'estimate') so
+    // the badge doesn't pretend we know more than we do. Surface the
+    // error inline in the expanded row keyed by `repoId` — a 401 on
+    // one card shouldn't shout "search failed" at the whole panel.
+    const msg = `Context fetch failed: ${err instanceof Error ? err.message : String(err)}`;
+    setContextFetchNotice(repoId, msg);
+  } finally {
+    loadingDetail.value.delete(repoId);
+  }
+}
+
+// Scoped per-repo notices for context-fetch errors. Each repo gets
+// its own slot (Map<repoId, message>) so a transient 401 on one card
+// doesn't blow away other cards' state. Replaces the previous global
+// `contextFetchNotice` ref which conflated source-failure with
+// destination-missing. Cleared on every fresh searchSeq bump so stale
+// errors don't linger on rows that already re-fetched successfully.
+type NoticeMap = Record<string, string>;
+const contextFetchNoticeByRepo = ref<NoticeMap>({});
+function setContextFetchNotice(repoId: string, msg: string) {
+  contextFetchNoticeByRepo.value = { ...contextFetchNoticeByRepo.value, [repoId]: msg };
+}
+function clearContextFetchNotice(repoId: string) {
+  if (!(repoId in contextFetchNoticeByRepo.value)) return;
+  const next = { ...contextFetchNoticeByRepo.value };
+  delete next[repoId];
+  contextFetchNoticeByRepo.value = next;
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
 const browseSubtitle = computed(() => {
   switch (sortBy.value) {
     case 'lastModified': return 'recently updated';
@@ -216,31 +360,30 @@ const browseSubtitle = computed(() => {
   }
 });
 
-// Watch sortBy: when the search box is empty (true browse mode), changing
-// the sort radio auto-refires the search so the banner text and the model
-// list stay in sync. The watch-fires-when-query-is-empty criterion is
-// intentional — using `lastSearchKind === 'browse'` is wrong because that
-// state is sticky from the previous round-trip and would fire a SEARCH
-// with the user's typed query the moment JC types and toggles the radio.
-// Tracking `query.value.trim() === ''` covers both the normal "sort
-// change in browse mode" path AND the (x)-cleared transition where the
-// user just hit clear and now picks a different sort: in both, the
-// intent is "I want the global feed, sorted by my pick". Search-mode
-// (typed query, `wildcard` / `exact`) is excluded so JC's half-typed
-// search isn't auto-submitted just because he clicked a radio.
+// Watch sortBy: when the search box is empty (true browse mode),
+// changing the sort radio auto-refires the search.
 watch(sortBy, () => {
   if (!loadingModels.value && query.value.trim() === '') {
     void searchModels();
   }
 });
 
-// ============================================================================
-// Filter <-> Set helpers (drop-in for chip click handlers)
-// ============================================================================
+// Reset transient context-fetch notices AND prune the per-repo detail
+// cache on every fresh search so a past failure (or a no-longer-in-view
+// repo) doesn't linger indefinitely. Without the prune, users who
+// expand dozens of cards across many searches would balloon the Map;
+// across 100 searches × 50 cards expanded that's ~5000 entries /
+// several MB of cached config.json payloads sitting in memory even
+// though Vue's reactive Map.set triggers a new identity each time.
+// `modelDetails.value.clear()` is cheaper than filtering by id and the
+// UX intent is clear: every search is a new exploration; old detail
+// fetches don't carry forward.
+watch(searchSeq, () => {
+  contextFetchNoticeByRepo.value = {};
+  modelDetails.value.clear();
+});
 
 function toggleSetMember(set: Set<string>, key: string) {
-  // Vue 3 reactivity tracks Set.add / Set.delete on `ref(new Set())`
-  // automatically — no manual reassign needed.
   if (set.has(key)) {
     set.delete(key);
   } else {
@@ -248,32 +391,26 @@ function toggleSetMember(set: Set<string>, key: string) {
   }
 }
 
+function isQuantIq(quant: string): boolean {
+  return /IQ[1-3]/i.test(quant);
+}
+
+function formatContextLength(tokens: number | null | undefined): string {
+  if (tokens == null) return '—';
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(tokens >= 10_000_000 ? 0 : 1)}M`;
+  if (tokens >= 1024) return `${Math.round(tokens / 1024)}k`;
+  return `${tokens}`;
+}
+
 async function searchModels() {
   const q = query.value.trim();
-  // Empty query IS allowed now — it routes to browse mode (the backend
-  // emits ?full=true&...&sort=... without a search param). The old
-  // rejection ("Search query must not be empty.") was removed; this
-  // branch handles the user-cleared-input edge case so the result
-  // list isn't left in a stale state.
-  // Capture the seq at function entry. After the await, compare against
-  // the current `searchSeq.value` — if it advanced, a NEWER search has
-  // superseded this call and its response must not be applied (this
-  // prevents models/lastSearchKind/searchError from being clobbered by
-  // out-of-order HF responses when JC types fast or click-spams Search).
   const mySeq = ++searchSeq.value;
   loadingModels.value = true;
   searchError.value = '';
   try {
     const params: HardwareSearchParams = {
-      // Send null on empty so the backend's `Option::<String>` resolves
-      // to `None` cleanly (without the frontend having to pre-trim).
       query: q === '' ? null : q,
       sortBy: sortBy.value,
-      // Fetch the full top-100 page so a single round-trip covers most
-      // users' first glance; the v-for renders the top `visibleCount`
-      // and a "Load More" button reveals more locally. Loosening this to
-      // the cap=100 ceiling costs the same HF quota as a 30-only page
-      // would; the difference is purely client-side UX.
       limit: 100,
       architectures: Array.from(selectedArchitectures.value),
       sizeBuckets: Array.from(selectedSizes.value),
@@ -286,50 +423,40 @@ async function searchModels() {
       combinedVramMb: combinedVramMb.value,
     };
     const result = await invoke<RankedGgufModel[]>('hardware_search_gguf_models', { params });
-    // Stale response — drop without writing any state. The newer search
-    // call will resolve and own the models/lastSearchKind updates.
     if (mySeq !== searchSeq.value) return;
     models.value = result;
-    // Reset pagination to the first page on every fresh search — the
-    // user just asked a new question, so showing the LATER half of the
-    // previous result set would be misleading.
     visibleCount.value = PAGE_STEP;
-    // Backend `kind` stamp on each row is the truth source for non-empty
-    // results (so bare-stars inputs correctly downgrade to "exact" after
-    // the Rust guard). For empty results the backend can't classify — we
-    // re-predict locally from `q.length <= 4` to keep the hint visible.
-    // Note: an empty `q` here means the user typed nothing OR cleared the
-    // (x) button, both of which route to browse mode.
     if (q === '') {
       lastSearchKind.value = 'browse';
     } else {
-      lastSearchKind.value = result[0]?.kind ?? (q.length <= 4 ? 'wildcard' : 'exact');
+      lastSearchKind.value = result[0]?.kind ?? 'exact';
     }
     if (result.length === 0) {
       searchError.value = `No GGUF models matched the current filters. Try clearing a chip or broadening the search.`;
     }
   } catch (error) {
-    // Drop errors from stale invocations too — letting them surface would
-    // wipe the newer search's still-in-flight state to a misleading
-    // error message.
     if (mySeq !== searchSeq.value) return;
     const message = error instanceof Error ? error.message : String(error);
     searchError.value = message;
     models.value = [];
     lastSearchKind.value = '';
   } finally {
-    // Only the latest search owns the loading flag; an older finally
-    // block must NOT flip loading=false while a newer search has already
-    // re-set it to true.
     if (mySeq === searchSeq.value) loadingModels.value = false;
   }
 }
 
-async function downloadModel(model: RankedGgufModel) {
+async function downloadModel(model: RankedGgufModel, sibling?: RankedGgufSibling) {
+  // When the user clicks a sibling row's Download button, the
+  // `sibling` arg is set and we download the specific quant; the
+  // top-level button falls back to the best sibling (`model.gguf*`).
+  const url = sibling
+    ? `https://huggingface.co/${model.id}/resolve/main/${sibling.filename}`
+    : model.ggufUrl;
+  const fileName = sibling ? sibling.filename : model.ggufFilename;
   try {
     await invoke('downloader_enqueue', {
-      url: model.ggufUrl,
-      file_name: model.ggufFilename,
+      url,
+      file_name: fileName,
       format_id: null,
       auto_save_folder: modelsFolder.value,
       chunk_count: null,
@@ -342,41 +469,25 @@ async function downloadModel(model: RankedGgufModel) {
 function clearFilters() {
   selectedArchitectures.value = new Set();
   selectedSizes.value = new Set();
-  // Clear quants: same default as the initial state — empty set means
-  // "all quants" per the Phase 11 spec. Setting this back to
-  // `new Set(['Q4_K_M'])` would re-impose the old restrictive default
-  // and silence every wildcard search as soon as JC hits Clear.
   selectedQuants.value = new Set();
   selectedTrustedQuantizers.value = new Set(trustedQuantizerOptions.map((o) => o.key));
   onlyTrustedQuantizers.value = false;
-  // Phase 11: explicit `false` regardless of hardware pool. The previous
-  // version auto-set this based on `combinedVramGb.value > 0`; that
-  // forced the fit-toggle back ON whenever the pool resolved with data,
-  // which JC found surprising. User owns the toggle.
   onlyFit.value = false;
   includeIq.value = false;
   models.value = [];
   visibleCount.value = PAGE_STEP;
   searchError.value = '';
   lastSearchKind.value = '';
+  expandedCards.value = new Set();
+  selectedMachineId.value = 'combined';
 }
 
-/**
- * Reveal the next batch of cards locally. No HF round-trip fires —
- * `models.value` holds up to 100 entries from the last search, so we
- * just expand the rendered window by PAGE_STEP. Cheap to call many
- * times; the `hasMoreModels` computed protects against running off the
- * end of the array. Re-clicking after the array is exhausted is a no-op
- * because the comparison is strict-less-than.
- */
 function loadMoreModels() {
   if (!hasMoreModels.value) return;
   visibleCount.value = Math.min(visibleCount.value + PAGE_STEP, models.value.length);
 }
 
 function quantColorClass(quant: string): string {
-  // Q4 = green (best speed/quality). Q5 = yellow. Q6 = orange. Q8+ = blue.
-  // Returns a class name mapped in the <style> block.
   if (quant.includes('Q4')) return 'quant--q4';
   if (quant.includes('Q5')) return 'quant--q5';
   if (quant.includes('Q6')) return 'quant--q6';
@@ -387,7 +498,6 @@ function quantColorClass(quant: string): string {
 }
 
 function quantLabel(quant: string): string {
-  // Normalise `_` to `-` for display: "Q4_K_M" -> "Q4-K-M".
   return quant.replace(/_/g, '-');
 }
 
@@ -409,28 +519,13 @@ function relativeTime(iso: string | undefined): string {
   return `${Math.floor(days / 365)}y ago`;
 }
 
-// Pin the safety timer in module scope so React-key style "nav away before
-// poll resolves" doesn't leak a still-running setTimeout. Vue's lifecycle
-// doesn't auto-cancel setTimeout on unmount, so `onUnmounted` clears it
-// explicitly. Without this guard, rapid navigation between Hardware
-// Scanner and other panels leaks a closure-referenced timer per visit.
+// Pin the safety timer in module scope so "nav away before poll
+// resolves" doesn't leak a still-running setTimeout.
 let deepLinkSafetyTimer: ReturnType<typeof setTimeout> | null = null;
 
 onMounted(() => {
-  // Two paths from mount:
-  //   1. Deep-link: route.query.searchHuggingface is set → pre-fill the
-  //      search box and gate the search on VRAM data arrival (else size
-  //      fit-checks all read "TOO BIG" on initial load because the
-  //      pool hasn't polled yet).
-  //   2. Normal mount: auto-fire browse mode with current defaults —
-  //      query='', sortBy='downloads' (Trending), all chips empty,
-  //      fit OFF, no whitelist. First paint shows the top-100 trending
-  //      GGUFs from HF. No VRAM wait needed because fit is OFF.
   void (async () => {
     if (incomingQuery.value) {
-      // Deep-link flow: gate on VRAM before searching so the size
-      // fit-checks have a real threshold. Same watch+timer safety net
-      // as before.
       await new Promise<void>((resolve) => {
         const stop = watch(combinedVramGb, (v) => {
           if (v <= 0) return;
@@ -442,12 +537,6 @@ onMounted(() => {
           resolve();
         });
         deepLinkSafetyTimer = setTimeout(() => {
-          // Belt-and-suspenders: when the watch callback already cleared
-          // the timer + resolved the Promise, the timer fires anyway. The
-          // ref-null check short-circuits the no-op fallback path. Without
-          // it, a future agent adding side effects to this branch gets a
-          // spurious second invocation on slow systems where watch + timer
-          // race on the same microtask.
           if (!deepLinkSafetyTimer) return;
           deepLinkSafetyTimer = null;
           stop();
@@ -458,10 +547,6 @@ onMounted(() => {
       await searchModels();
       return;
     }
-    // Normal mount: auto-fire browse mode (Trending). One nextTick so
-    // the empty-state UI paints first — gives the perceived "loading"
-    // shimmer instead of looking like an instant populate that
-    // masks the round-trip cost.
     await nextTick();
     if (!loadingModels.value) {
       await searchModels();
@@ -470,26 +555,35 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-  // Invalidate any in-flight `searchModels()` (auto-fire on mount, deep-link,
-  // or manual) by bumping `searchSeq`. The seq-stale guard inside
-  // `searchModels` then drops the late resolution without writing to this
-  // (now torn-down) component's refs. Without this bump the await would
-  // resolve on a dead scope and Vue's silent-drop would emit a console
-  // warning in dev builds; the Rust side would already have consumed
-  // an HF round-trip for nothing.
   searchSeq.value++;
-  // Cancel any in-flight deep-link wait so the closure references the
-  // resolved promise's anchor (not the long-gone component scope).
   if (deepLinkSafetyTimer) {
     clearTimeout(deepLinkSafetyTimer);
     deepLinkSafetyTimer = null;
   }
 });
+
+// Per-quant filter applied client-side to the sibling list (so chip
+// toggles affect both the visual top-level pick AND the expand
+// table). Returns siblings whose quant token matches the chip
+// selection, AND excludes IQ1/2/3 unless the toggle is on.
+function visibleSiblingsFor(model: RankedGgufModel): RankedGgufSibling[] {
+  return model.siblings.filter((s) => {
+    if (!includeIq.value && isQuantIq(s.quant)) return false;
+    if (selectedQuants.value.size > 0) {
+      return selectedQuants.value.has(s.quant);
+    }
+    return true;
+  });
+}
+
+// Whether the model.id can be linked to (HF uses these as page keys).
+function hfModelUrl(repoId: string): string {
+  return `https://huggingface.co/${repoId}`;
+}
 </script>
 
 <template>
   <div class="hardware">
-    <!-- LEFT — filter sidebar. Right — results panel. -->
     <aside class="hardware__sidebar">
       <div class="hardware__sidebar-section hardware__sidebar-section--search">
         <div class="hardware__query-wrap">
@@ -497,7 +591,7 @@ onUnmounted(() => {
             v-model="query"
             type="search"
             class="hardware__query"
-            placeholder="Search e.g. 'llama-3.1', 'qwen2.5', 'nemotron'"
+            placeholder="Search e.g. 'llama-3.1', 'qwen2.5', 'nemotron' or leave empty to browse"
             aria-label="Search HuggingFace GGUF models"
             @keydown.enter="searchModels"
           >
@@ -572,12 +666,6 @@ onUnmounted(() => {
           <span class="hardware__section-help">No selection = all quants · IQ1/2/3 hidden by default</span>
         </div>
         <div class="hardware__chip-group">
-          <!-- Chip color tokens are SCOPED to `.hardware__chip--active` (see
-               CSS). Removing the `quant--*` class from inactive chips is
-               the fix for the "Q6/Q8 auto-selected" bug — the previous
-               template painted the chip a vivid color regardless of
-               active state. Now the color is the active-marker, only on
-               when the user has clicked the chip. -->
           <button
             v-for="q in quantOptions"
             :key="q"
@@ -614,11 +702,36 @@ onUnmounted(() => {
         </div>
       </div>
 
+      <!-- Hardware fit target — Phase 11 LM-Studio parity. Single global
+           dropdown drives every FITS/TOO BIG badge (top-level AND each
+           per-quant row in the expanded table). Switching the dropdown
+           is purely client-side — sibling sizes are pre-baked in the
+           search response so no HF round-trip fires. -->
+      <div class="hardware__sidebar-section">
+        <div class="hardware__section-label">
+          Fit against
+          <span class="hardware__section-help">10% buffer for KV cache + overhead</span>
+        </div>
+        <select
+          v-model="selectedMachineId"
+          class="hardware__machine-select"
+          aria-label="Fit-against hardware target"
+        >
+          <option
+            v-for="opt in machineOptions"
+            :key="opt.id"
+            :value="opt.id"
+          >
+            {{ opt.label }} ({{ opt.vramMb > 0 ? `${Math.floor(opt.vramMb / 1024)} GB` : 'no GPU data' }})
+          </option>
+        </select>
+      </div>
+
       <div class="hardware__sidebar-section">
         <label
           class="hardware__toggle-row"
           :class="{ 'hardware__toggle-row--off': !onlyFit }"
-          title="Narrow to models whose best GGUF fits your combined VRAM with a 10% safety buffer for KV cache + runtime overhead."
+          title="Narrow to models whose best GGUF fits your combined VRAM with a 10% safety buffer。"
         >
           <input
             v-model="onlyFit"
@@ -637,15 +750,9 @@ onUnmounted(() => {
       </div>
     </aside>
 
-    <!-- RIGHT — results panel -->
     <main class="hardware__results">
       <div class="hardware__results-header">
         <h2 class="hardware__results-title">
-          <!-- Pagination message: when fewer than `models.length` cards are
-               rendered, show "Showing X of Y" so the user knows there's
-               more to see (and the Load More button is the path to it).
-               When everything fits, fall back to the plain count for
-               parity with the previous render. -->
           <template v-if="hasMoreModels">
             Showing {{ Math.min(visibleCount, models.length) }} of {{ models.length }}
             {{ models.length === 1 ? 'model' : 'models' }}
@@ -653,16 +760,13 @@ onUnmounted(() => {
           <template v-else>
             {{ models.length }} {{ models.length === 1 ? 'model' : 'models' }}
           </template>
+          <span v-if="targetVramGb > 0" class="hardware__results-target"> · fits against {{ targetVramGb }} GB</span>
         </h2>
         <div class="hardware__results-sub">
           Local: <strong>{{ localCpuName }}</strong>
           · {{ combinedGpuCount }} GPU{{ combinedGpuCount === 1 ? '' : 's' }}
           · <strong>{{ combinedVramGb }} GB</strong> combined VRAM
         </div>
-        <!-- Browse-mode banner: shown when the user hasn't typed anything
-             (or after clicking the (x) clear button) so they know they're
-             seeing the global HF feed and how it's sorted. Distinct from
-             the wildcard hint so the two never overlap. -->
         <div
           v-if="models.length > 0 && lastSearchKind === 'browse'"
           class="hardware__results-banner"
@@ -671,16 +775,6 @@ onUnmounted(() => {
           <span class="hardware__results-banner-dot" aria-hidden="true"></span>
           Showing the top <strong>{{ browseSubtitle }}</strong> GGUF models from
           HuggingFace. Type to search, or change the sort above to switch the feed.
-        </div>
-        <div
-          v-if="models.length > 0 && lastSearchKind === 'wildcard'"
-          class="hardware__results-banner hardware__results-wildcard-hint"
-          aria-live="polite"
-        >
-          <span class="hardware__results-banner-dot" aria-hidden="true"></span>
-          Showing prefix matches for
-          <code>{{ query }}*</code>
-          — add another character for more specific results.
         </div>
       </div>
 
@@ -693,10 +787,13 @@ onUnmounted(() => {
       <div v-else-if="models.length > 0" class="hardware__results-list">
         <article
           v-for="model in models.slice(0, visibleCount)"
-          :key="model.id + ':' + model.ggufFilename"
+          :key="model.id"
           class="hardware__result"
-          :class="{ 'hardware__result--no-fit': !model.fitsHardware }"
+          :class="['hardware__result--expanded-' + isExpanded(model.id), { 'hardware__result--no-fit': !fitsForSizeGb(model.sizeGb, targetVramMb) }]"
         >
+          <!-- Top row: name + primary quant + fit + trusted + chevron.
+               Click the chevron (or this top-row zone) to toggle the
+               LM-Studio-style per-quant breakdown below. -->
           <div class="hardware__result-info">
             <div class="hardware__result-row1">
               <span class="hardware__result-name">{{ model.name }}</span>
@@ -706,13 +803,50 @@ onUnmounted(() => {
               >{{ quantLabel(model.primaryQuant) }}</span>
               <span
                 class="hardware__result-fit"
-                :class="{ 'hardware__result-fit--yes': model.fitsHardware, 'hardware__result-fit--no': !model.fitsHardware }"
+                :class="{ 'hardware__result-fit--yes': fitsForSizeGb(model.sizeGb, targetVramMb), 'hardware__result-fit--no': !fitsForSizeGb(model.sizeGb, targetVramMb) }"
               >
-                {{ model.fitsHardware ? 'FITS' : 'TOO BIG' }}
+                {{ fitsForSizeGb(model.sizeGb, targetVramMb) ? 'FITS' : 'TOO BIG' }}
               </span>
               <span v-if="model.isTrustedQuantizer" class="hardware__result-trust">✓ trusted</span>
+              <!-- Context-length badge: heuristic estimate (≈), real
+                   value from config.json (✓), or unknown (—). The label
+                   tells the user the provenance; the value updates on
+                   expand + fetch. -->
+              <span
+                class="hardware__ctx-badge"
+                :class="{
+                  'hardware__ctx-badge--estimate': model.contextLengthSource === 'estimate',
+                  'hardware__ctx-badge--real': model.contextLengthSource === 'config_json',
+                  'hardware__ctx-badge--unknown': model.contextLength == null,
+                }"
+                :title="model.contextLengthSource === 'config_json'
+                  ? 'Context window from this repo’s config.json'
+                  : model.contextLengthSource === 'estimate'
+                  ? 'Context window estimated from family + id (click Details to verify)'
+                  : 'Context window unknown — click Details to fetch from config.json'"
+              >
+                <span class="hardware__ctx-label">ctx</span>
+                <span class="hardware__ctx-value">{{ formatContextLength(model.contextLength) }}</span>
+                <span class="hardware__ctx-mark">
+                  {{ model.contextLengthSource === 'config_json' ? '✓'
+                    : model.contextLengthSource === 'estimate' ? '≈'
+                    : '—' }}
+                </span>
+              </span>
             </div>
-            <div class="hardware__result-repo">{{ model.id }}</div>
+            <!-- HF repo id — wraps the existing `model.id` text in a
+                 real <a> to huggingface.co/{id}, with a small external-
+                 link icon beside it. Clicking opens in a new tab. -->
+            <a
+              :href="hfModelUrl(model.id)"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="hardware__result-repo-link"
+              :title="`Open ${model.id} on HuggingFace`"
+            >
+              <span class="hardware__result-repo">{{ model.id }}</span>
+              <span class="hardware__external-icon" aria-hidden="true">↗</span>
+            </a>
             <div class="hardware__result-meta">
               {{ model.ggufFilename }} ·
               <span class="hardware__result-size">{{ model.sizeGb.toFixed(1) }} GB</span> ·
@@ -726,25 +860,101 @@ onUnmounted(() => {
               Quantizer: <strong>{{ model.quantizerLabel }}</strong>
             </div>
           </div>
-          <button
-            class="hardware__download-btn"
-            :disabled="!model.fitsHardware"
-            :title="model.fitsHardware ? `Download ${model.ggufFilename}` : 'Model exceeds combined VRAM'"
-            @click="downloadModel(model)"
-          >Download</button>
+          <!-- Expand chevron + top-level Download. The chevron toggles
+               the LM-Studio-style per-quant breakdown below; Download
+               enqueues the currently best-pick GGUF. -->
+          <div class="hardware__result-actions">
+            <button
+              class="hardware__download-btn"
+              :disabled="!fitsForSizeGb(model.sizeGb, targetVramMb)"
+              :title="fitsForSizeGb(model.sizeGb, targetVramMb)
+                ? `Download ${model.ggufFilename}`
+                : `Model exceeds ${targetVramGb > 0 ? targetVramGb + 'GB' : ''} target`"
+              @click="downloadModel(model)"
+            >Download</button>
+            <button
+              class="hardware__expand-btn"
+              :aria-expanded="isExpanded(model.id)"
+              :aria-label="isExpanded(model.id) ? `Collapse ${model.name} details` : `Expand ${model.name} details`"
+              :title="isExpanded(model.id) ? 'Collapse details' : `Expand — ${model.siblings.length} quants + real context`"
+              @click="toggleExpand(model)"
+            >{{ isExpanded(model.id) ? '▴' : '▾' }}</button>
+          </div>
+
+          <!-- LM-Studio-style per-quant breakdown. Renders ONLY when
+               expanded. Filters siblings client-side via the same
+               quant + IQ toggles as the sidebar, so the visible table
+               always matches the user's stated intent. Each row's
+               FITS/TOO BIG reflects the currently-selected machine
+               target. -->
+          <div v-if="isExpanded(model.id)" class="hardware__expanded">
+            <div class="hardware__expanded-header">
+              <strong>{{ model.siblings.length }} GGUF variants</strong>
+              <span class="hardware__expanded-help">vs. {{ targetVramGb > 0 ? `${targetVramGb} GB target` : 'no GPU data' }} (10% buffer)</span>
+            </div>
+            <div class="hardware__sibling-table">
+              <div
+                v-for="sib in visibleSiblingsFor(model)"
+                :key="sib.filename"
+                class="hardware__sibling-row"
+                :class="{ 'hardware__sibling-row--no-fit': !fitsForSizeGb(sib.sizeGb, targetVramMb) }"
+              >
+                <span
+                  class="hardware__sibling-quant"
+                  :class="quantColorClass(sib.quant)"
+                >{{ quantLabel(sib.quant) }}</span>
+                <span class="hardware__sibling-size">{{ sib.sizeGb.toFixed(1) }} GB</span>
+                <span
+                  class="hardware__sibling-fit"
+                  :class="{ 'hardware__sibling-fit--yes': fitsForSizeGb(sib.sizeGb, targetVramMb), 'hardware__sibling-fit--no': !fitsForSizeGb(sib.sizeGb, targetVramMb) }"
+                >{{ fitsForSizeGb(sib.sizeGb, targetVramMb) ? 'FITS' : 'TOO BIG' }}</span>
+                <button
+                  class="hardware__sibling-download"
+                  :disabled="!fitsForSizeGb(sib.sizeGb, targetVramMb)"
+                  :title="`Download ${sib.filename}`"
+                  @click="downloadModel(model, sib)"
+                >↓</button>
+              </div>
+            </div>
+            <!-- Real-fetch context affordance. Loading skeleton pulses
+                 while in flight. After: (a) real value, (b) heuristic,
+                 (c) unknown — distinct template branches so the user
+                 knows the provenance. (d) is the explicit fetch-error
+                 case from `contextFetchNotice`, rendered inline here
+                 so a network/HTTP failure is visible WITHOUT confusing
+                 it with the generic "no config.json" branch. -->
+            <div class="hardware__ctx-row">
+              <template v-if="contextFetchNoticeByRepo[model.id]">
+                <span class="hardware__ctx-error">
+                  {{ contextFetchNoticeByRepo[model.id] }}
+                  <button class="hardware__ctx-fetch-btn" @click="fetchContextLength(model.id)">Retry</button>
+                </span>
+              </template>
+              <template v-else-if="loadingDetail.has(model.id)">
+                <span class="hardware__ctx-fetching">Fetching max_position_embeddings from config.json…</span>
+              </template>
+              <template v-else-if="model.contextLengthSource === 'config_json' && model.contextLength != null">
+                <span class="hardware__ctx-real">
+                  Context window: <strong>{{ formatContextLength(model.contextLength) }}</strong>
+                  <span class="hardware__ctx-source">(from config.json)</span>
+                </span>
+              </template>
+              <template v-else-if="model.contextLengthSource === 'none' || (model.contextLength == null && !loadingDetail.has(model.id))">
+                <span class="hardware__ctx-unknown">
+                  Context window unknown for this repo — config.json doesn't ship a max_position_embeddings value.
+                  <button class="hardware__ctx-fetch-btn" @click="fetchContextLength(model.id)">Retry fetch</button>
+                </span>
+              </template>
+              <template v-else>
+                <span class="hardware__ctx-verified-hint">
+                  Context is currently a heuristic estimate. <button class="hardware__ctx-fetch-btn" @click="fetchContextLength(model.id)">Verify against config.json</button>
+                </span>
+              </template>
+            </div>
+          </div>
         </article>
       </div>
 
-      <!-- Local pagination footer. Sits OUTSIDE `hardware__results-list`
-           (the vertical scroll container) so the button stays anchored
-           below the scrollable cards. Hoisting matters: when JC scrolls
-           to card 30 with the button inside the scroll div, the button
-           scrolls off with the last card and the user has to scroll back
-           up to find it again. The original todo for Fix 4 explicitly
-           called out "scroll-cutoff fix" — moving the button below the
-           scroll container IS the cutoff fix. Re-clicking after the
-           array is exhausted is a no-op because `v-if` hides the whole
-           wrap when `hasMoreModels` is false. -->
       <div v-if="hasMoreModels" class="hardware__load-more-wrap">
         <button
           class="hardware__load-more-btn"
@@ -759,7 +969,7 @@ onUnmounted(() => {
         <p class="hardware__empty-text">
           Pick a filter or type a query.
           Default view: top {{ browseSubtitle }} GGUF models.
-          Hardware fit considers {{ combinedVramGb > 0 ? `your ${combinedVramGb}GB combined VRAM (local + RPC workers)` : 'no GPU data yet' }}.
+          Hardware fit considers {{ targetVramGb > 0 ? `your ${targetVramGb} GB target (${targetVramMb.toLocaleString()} MiB · 10% buffer)` : 'no GPU data yet' }}.
         </p>
       </div>
     </main>
@@ -770,8 +980,6 @@ onUnmounted(() => {
 .hardware {
   display: flex;
   flex-direction: row;
-  /* Page-level no-scroll container. claim the full router-view-wrapper
-     height — inner panels scroll independently. */
   flex: 1;
   min-height: 0;
   overflow: hidden;
@@ -817,9 +1025,6 @@ onUnmounted(() => {
   opacity: 0.8;
 }
 
-/* Query row: input on the left, (x) clear-button absolutely positioned
-   inside the wrap so it overlays the input's right edge. Input gets
-   right-padding so typed text doesn't run under the (x) button. */
 .hardware__query-wrap {
   position: relative;
   width: 100%;
@@ -837,8 +1042,6 @@ onUnmounted(() => {
   outline: 2px solid hsl(var(--primary) / 0.5);
   outline-offset: 1px;
 }
-/* Hide the native search-cancel decoration since we provide our own
-   cross-browser (×) button. */
 .hardware__query::-webkit-search-cancel-button {
   -webkit-appearance: none;
   appearance: none;
@@ -937,10 +1140,6 @@ onUnmounted(() => {
   font-style: italic;
   border-style: dashed;
 }
-/* The legacy `.hardware__chip--quant` marker was REMOVED from the chip
-   class binding in Phase 11 — it had no CSS rules targeting it in the
-   new scope-split design and was dead code. Color tokens now live under
-   `.quant--*` rules scoped to `.hardware__chip--active` below. */
 
 .hardware__toggle-row {
   display: flex;
@@ -959,6 +1158,27 @@ onUnmounted(() => {
 .hardware__vram-inline {
   color: hsl(var(--muted-foreground));
   font-size: 0.75rem;
+}
+
+/* Phase 11 LM-Studio parity — machine-selector dropdown. The
+   selected target drives every FITS/TOO BIG badge; changing it
+   re-renders locally without a fresh HF round-trip (sibling sizes
+   are pre-baked in the search response). */
+.hardware__machine-select {
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border-radius: var(--radius-sm);
+  background: hsl(var(--background-2));
+  border: 1px solid hsl(var(--border));
+  color: hsl(var(--foreground));
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.hardware__machine-select:focus {
+  outline: 2px solid hsl(var(--primary) / 0.5);
+  outline-offset: 1px;
+  border-color: hsl(var(--primary));
 }
 
 .hardware__clear-btn {
@@ -996,13 +1216,15 @@ onUnmounted(() => {
   font-weight: 600;
   margin: 0;
 }
+.hardware__results-target {
+  font-weight: 400;
+  color: hsl(var(--muted-foreground));
+  font-size: 0.85rem;
+}
 .hardware__results-sub {
   font-size: 0.75rem;
   color: hsl(var(--muted-foreground));
 }
-/* Browse-mode / wildcard-hint banner. Two-tone: the dot on the left is
-   a status pip; the message sits next to it. The wildcard hint reuses
-   `.hardware__results-wildcard-hint` for its tighter <code> styling. */
 .hardware__results-banner {
   font-size: 0.75rem;
   color: hsl(var(--muted-foreground));
@@ -1025,15 +1247,6 @@ onUnmounted(() => {
   background: hsl(var(--primary));
   box-shadow: 0 0 0 0.2rem hsl(var(--primary) / 0.18);
 }
-.hardware__results-wildcard-hint code {
-  font-family: var(--font-mono, monospace);
-  font-size: 0.7rem;
-  background: hsl(var(--background-3, var(--background-2)));
-  padding: 0.05rem 0.3rem;
-  border-radius: 3px;
-  color: hsl(var(--foreground));
-  margin: 0 0.15rem;
-}
 .hardware__results-list {
   display: flex;
   flex-direction: column;
@@ -1045,8 +1258,8 @@ onUnmounted(() => {
   padding-right: 0.5rem;
 }
 .hardware__result {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: 1fr auto;
   align-items: flex-start;
   gap: 1rem;
   padding: 0.75rem 1rem;
@@ -1063,7 +1276,6 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 0.15rem;
   min-width: 0;
-  flex: 1;
 }
 .hardware__result-row1 {
   display: flex;
@@ -1103,12 +1315,35 @@ onUnmounted(() => {
   color: rgb(74, 222, 128);
   font-weight: 500;
 }
-.hardware__result-repo {
+
+/* ─── HF repo id link (Phase 11 LM-Studio parity) ──────────────────────── */
+.hardware__result-repo-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
   font-family: var(--font-mono, monospace);
   font-size: 0.7rem;
   color: hsl(var(--muted-foreground));
+  text-decoration: none;
   word-break: break-all;
 }
+.hardware__result-repo-link:hover {
+  color: hsl(var(--primary));
+  text-decoration: underline;
+}
+.hardware__result-repo {
+  font-family: inherit;
+  font-size: inherit;
+}
+.hardware__external-icon {
+  font-size: 0.85rem;
+  color: hsl(var(--muted-foreground));
+  flex-shrink: 0;
+}
+.hardware__result-repo-link:hover .hardware__external-icon {
+  color: hsl(var(--primary));
+}
+
 .hardware__result-meta {
   font-size: 0.7rem;
   color: hsl(var(--muted-foreground));
@@ -1122,8 +1357,54 @@ onUnmounted(() => {
   font-size: 0.7rem;
   color: hsl(var(--muted-foreground));
 }
-.hardware__download-btn {
+
+/* ─── Context-length badge (Phase 11) ────────────────────────────────── */
+.hardware__ctx-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-size: 0.65rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-family: var(--font-mono, monospace);
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--background-2));
+  color: hsl(var(--muted-foreground));
+}
+.hardware__ctx-badge--estimate {
+  background: rgba(234, 179, 8, 0.12);
+  border-color: rgba(234, 179, 8, 0.4);
+  color: rgb(250, 204, 21);
+}
+.hardware__ctx-badge--real {
+  background: rgba(34, 197, 94, 0.15);
+  border-color: rgba(34, 197, 94, 0.4);
+  color: rgb(74, 222, 128);
+}
+.hardware__ctx-badge--unknown {
+  background: hsl(var(--background-2));
+  border-color: hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+  font-style: italic;
+}
+.hardware__ctx-label {
+  opacity: 0.75;
+  font-size: 0.6rem;
+}
+.hardware__ctx-mark {
+  font-weight: 700;
+  font-size: 0.7rem;
+}
+
+/* ─── Per-row actions + expand chevron ───────────────────────────────── */
+.hardware__result-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.4rem;
   flex-shrink: 0;
+}
+.hardware__download-btn {
   padding: 0.4rem 0.9rem;
   border-radius: var(--radius-sm);
   background: hsl(var(--primary));
@@ -1140,6 +1421,177 @@ onUnmounted(() => {
 .hardware__download-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+.hardware__expand-btn {
+  width: 2rem;
+  height: 1.6rem;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 1px solid hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0;
+  line-height: 1;
+}
+.hardware__expand-btn:hover {
+  border-color: hsl(var(--primary));
+  color: hsl(var(--primary));
+}
+
+/* ─── Expanded details: per-quant table + context fetch ───────────────── */
+.hardware__result--expanded-true .hardware__expanded {
+  display: block;
+}
+.hardware__result--expanded-false .hardware__expanded {
+  display: none;
+}
+.hardware__expanded {
+  grid-column: 1 / -1;
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px dashed hsl(var(--border));
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.hardware__expanded-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: hsl(var(--foreground));
+}
+.hardware__expanded-help {
+  font-size: 0.7rem;
+  color: hsl(var(--muted-foreground));
+  font-style: italic;
+}
+.hardware__sibling-table {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.hardware__sibling-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: var(--radius-sm);
+  background: hsl(var(--background-1, var(--background-2)));
+  border: 1px solid hsl(var(--border));
+  font-size: 0.75rem;
+}
+.hardware__sibling-row--no-fit {
+  opacity: 0.55;
+  border-style: dashed;
+}
+.hardware__sibling-quant {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.7rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  font-weight: 600;
+}
+.hardware__sibling-size {
+  color: hsl(var(--muted-foreground));
+  font-family: var(--font-mono, monospace);
+  font-size: 0.7rem;
+}
+.hardware__sibling-fit {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.65rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-weight: 700;
+}
+.hardware__sibling-fit--yes {
+  background: rgba(34, 197, 94, 0.15);
+  color: rgb(74, 222, 128);
+  border: 1px solid rgba(34, 197, 94, 0.4);
+}
+.hardware__sibling-fit--no {
+  background: rgba(220, 38, 38, 0.12);
+  color: rgb(248, 113, 113);
+  border: 1px solid rgba(220, 38, 38, 0.4);
+}
+.hardware__sibling-download {
+  width: 1.8rem;
+  height: 1.6rem;
+  border-radius: var(--radius-sm);
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  border: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 700;
+  padding: 0;
+  line-height: 1;
+}
+.hardware__sibling-download:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+.hardware__sibling-download:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.hardware__ctx-row {
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--radius-sm);
+  background: hsl(var(--background-2));
+  border: 1px solid hsl(var(--border));
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
+}
+.hardware__ctx-fetching {
+  font-style: italic;
+}
+.hardware__ctx-real {
+  color: hsl(var(--foreground));
+}
+.hardware__ctx-source {
+  margin-left: 0.4rem;
+  font-style: italic;
+  font-size: 0.7rem;
+  color: hsl(var(--muted-foreground));
+}
+.hardware__ctx-unknown {
+  color: hsl(var(--muted-foreground));
+}
+/* Phase 11 LM-Studio parity — error-state styling for the per-repo
+   context-fetch failure branch (5th template in the expanded row).
+   Without this rule the error text inherits muted-foreground and
+   reads identically to the success-shaped "config.json missing"
+   branch above; user can't visually distinguish a transient network
+   failure from the repo genuinely not shipping a config.json. Red
+   foreground + matching button border so the visual cue is obvious. */
+.hardware__ctx-error {
+  color: rgb(248, 113, 113);
+}
+.hardware__ctx-error .hardware__ctx-fetch-btn {
+  border-color: rgb(248, 113, 113);
+  color: rgb(248, 113, 113);
+}
+.hardware__ctx-verified-hint {
+  color: hsl(var(--muted-foreground));
+  font-style: italic;
+}
+.hardware__ctx-fetch-btn {
+  margin-left: 0.4rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 1px solid hsl(var(--primary));
+  color: hsl(var(--primary));
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 500;
+  font-style: normal;
+}
+.hardware__ctx-fetch-btn:hover {
+  background: hsl(var(--primary) / 0.12);
 }
 
 .hardware__error {
@@ -1211,20 +1663,15 @@ onUnmounted(() => {
   100% { background-position: -200% 0; }
 }
 
-/* ─── Quant color tokens ─────────────────────────────────────────────────
- *
- * IMPORTANT — split scopes to fix the "Q6/Q8 auto-selected" bug:
- *
- *   - Chips: color tokens ONLY apply when the chip is .hardware__chip--active.
- *     Without this would paint an inactive Q6 chip orange, looking toggle-on.
- *   - Result badges (.hardware__result-quant): always colored (informational).
- *
- * The compound selector keeps the color-as-active-marker pattern: a
- * chip's color glow tells you the toggle state at a glance. */
+/* ─── Quant color tokens ───────────────────────────────────────────────── */
 .hardware__chip--active.quant--q4,
 .hardware__chip--active.quant--q4-km,
 .hardware__chip--active.quant--q4-ks,
-.hardware__chip--active.quant--q4-0 {
+.hardware__chip--active.quant--q4-0,
+.hardware__sibling-quant.quant--q4,
+.hardware__sibling-quant.quant--q4-km,
+.hardware__sibling-quant.quant--q4-ks,
+.hardware__sibling-quant.quant--q4-0 {
   background: rgba(34, 197, 94, 0.18);
   color: rgb(74, 222, 128);
   border-color: rgba(34, 197, 94, 0.6);
@@ -1239,7 +1686,10 @@ onUnmounted(() => {
 }
 .hardware__chip--active.quant--q5,
 .hardware__chip--active.quant--q5-km,
-.hardware__chip--active.quant--q5-ks {
+.hardware__chip--active.quant--q5-ks,
+.hardware__sibling-quant.quant--q5,
+.hardware__sibling-quant.quant--q5-km,
+.hardware__sibling-quant.quant--q5-ks {
   background: rgba(234, 179, 8, 0.18);
   color: rgb(250, 204, 21);
   border-color: rgba(234, 179, 8, 0.6);
@@ -1252,7 +1702,9 @@ onUnmounted(() => {
   border: 1px solid rgba(234, 179, 8, 0.4);
 }
 .hardware__chip--active.quant--q6,
-.hardware__chip--active.quant--q6-k {
+.hardware__chip--active.quant--q6-k,
+.hardware__sibling-quant.quant--q6,
+.hardware__sibling-quant.quant--q6-k {
   background: rgba(249, 115, 22, 0.18);
   color: rgb(251, 146, 60);
   border-color: rgba(249, 115, 22, 0.6);
@@ -1264,7 +1716,9 @@ onUnmounted(() => {
   border: 1px solid rgba(249, 115, 22, 0.4);
 }
 .hardware__chip--active.quant--q8,
-.hardware__chip--active.quant--q8-0 {
+.hardware__chip--active.quant--q8-0,
+.hardware__sibling-quant.quant--q8,
+.hardware__sibling-quant.quant--q8-0 {
   background: rgba(59, 130, 246, 0.18);
   color: rgb(96, 165, 250);
   border-color: rgba(59, 130, 246, 0.6);
@@ -1276,7 +1730,9 @@ onUnmounted(() => {
   border: 1px solid rgba(59, 130, 246, 0.4);
 }
 .hardware__chip--active.quant--f16,
-.hardware__chip--active.quant--bf16 {
+.hardware__chip--active.quant--bf16,
+.hardware__sibling-quant.quant--f16,
+.hardware__sibling-quant.quant--bf16 {
   background: rgba(168, 85, 247, 0.18);
   color: rgb(192, 132, 252);
   border-color: rgba(168, 85, 247, 0.6);
@@ -1287,7 +1743,8 @@ onUnmounted(() => {
   color: rgb(192, 132, 252);
   border: 1px solid rgba(168, 85, 247, 0.4);
 }
-.hardware__chip--active.quant--f32 {
+.hardware__chip--active.quant--f32,
+.hardware__sibling-quant.quant--f32 {
   background: rgba(244, 63, 94, 0.18);
   color: rgb(251, 113, 133);
   border-color: rgba(244, 63, 94, 0.6);
@@ -1297,6 +1754,7 @@ onUnmounted(() => {
   color: rgb(251, 113, 133);
   border: 1px solid rgba(244, 63, 94, 0.4);
 }
+.hardware__sibling-quant.quant--unknown,
 .hardware__result-quant.quant--unknown {
   background: hsl(var(--background-2));
   color: hsl(var(--muted-foreground));
