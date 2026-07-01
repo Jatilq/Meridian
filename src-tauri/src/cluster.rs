@@ -452,6 +452,24 @@ pub async fn get_remote_hardware(
     let reg_vram = parse_registry_vram_bytes(&gpu_reg_out);
     merge_gpus_with_registry(&mut gpus, &reg_vram);
 
+    // Defense-in-depth fallback: when registry walk returns empty (some
+    // AMD driver builds don't publish qwMemorySize at any of the paths
+    // probed above) we consult a curated GPU-name table. JC's instruction:
+    // "don't be afraid to come up with other solutions to detect it —
+    // a last resort is to allow the user to manually input the VRAM."
+    // This table is the second-chance detection between auto and manual.
+    // We trust the table ONLY when it claims a larger value than the WMI
+    // reading (`vram_looks_capped` returns true — WMI < 0.9 × table →
+    // registry is broken). When the table value matches WMI / registry,
+    // we don't touch it — no override noise.
+    for gpu in gpus.iter_mut() {
+        if let Some(table_vram_mb) = gpu_vram_from_name_table(&gpu.name) {
+            if vram_looks_capped(gpu.memory_total, table_vram_mb) {
+                gpu.memory_total = table_vram_mb;
+            }
+        }
+    }
+
     Ok(HardwareSnapshot {
         online: true,
         cpu: Some(CpuInfo { name: cpu_name, cores, utilization: cpu_util }),
@@ -492,6 +510,149 @@ fn parse_wmi_gpu_json(out: &str) -> Vec<GpuStat> {
         });
     }
     gpus
+}
+
+/// True when the WMI-reported VRAM (`wmi_mb`) is below 90% of the
+/// trusted table value (`table_mb`) — i.e. the reading is plausibly
+/// capped by the WMI uint32 truncation bug, so the table value should
+/// win. Extracted so production code and tests share the same
+/// threshold formula and a future tweak (e.g. 80%) flips both at once.
+///
+/// `wmi_mb == table_mb` returns false (no override noise). `wmi_mb`
+/// at 90% of `table_mb` returns false (border-zone — leave alone);
+/// strictly-less-than is the right semantic to avoid drift on healthy
+/// hosts whose registry happened to match.
+pub(crate) fn vram_looks_capped(wmi_mb: u64, table_mb: u64) -> bool {
+    wmi_mb < table_mb * 9 / 10
+}
+
+/// Lowercases an input string and strips whitespace + dashes so we can
+/// substring-match against normalized GPU-table keys. Spaces and dashes
+/// are common in real WMI `Caption` strings ("AMD Radeon RX 6900 XT",
+/// "NVIDIA GeForce RTX 3060") and the table keys are dense ("rx6900xt").
+/// Stripping all three gives an apples-to-apples compare.
+fn normalize_gpu_name(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    for c in name.chars() {
+        match c {
+            'A'..='Z' | 'a'..='z' | '0'..='9' => out.push(c.to_ascii_lowercase()),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Curated table mapping normalized GPU names → expected VRAM in MiB.
+///
+/// INVARIANT (enforced at runtime — see `gpu_vram_table_longest_key_wins`):
+/// `gpu_vram_from_name_table` filters this list by substring
+/// match and picks the LONGEST matching key. The caller is therefore
+/// order-independent — a future agent can append new entries anywhere
+/// in this array without breaking the longest-key-wins contract; no
+/// declaration-order discipline is required. The doc comment used to
+/// claim the array was length-sorted DESC; that was misleading
+/// because hand-curated declaration order only worked because each
+/// Super/Ti/12g/16g variant happened to precede its bare entry.
+/// Runtime enforcement via `.filter().max_by_key(|k| k.len())` makes
+/// that accidental invariant explicit. The test
+/// `gpu_vram_table_longest_key_wins` pins it end-to-end.
+///
+/// This is the second-chance fallback between auto-detection and
+/// manual override. Covers every card JC plausibly owns — RTX 30/40/
+/// 50 series + RX 5000/6000/7000 series — and the most common cards
+/// the open-source LLM community is likely to encounter. Cards NOT
+/// in the table return `None` silently: the caller treats lack of
+/// match as "no opinion" and the WMI / registry value stays.
+const KNOWN_GPU_VRAM: &[(&str, u64)] = &[
+    // NVIDIA RTX 50-series
+    ("rtx5090", 32768),
+    ("rtx5080", 16384),
+    ("rtx5070ti", 16384),
+    ("rtx5070", 12288),
+    // NVIDIA RTX 40-series
+    ("rtx4090", 24576),
+    ("rtx4080super", 16384),
+    ("rtx4080", 16384),
+    ("rtx4070tisuper", 12288),
+    ("rtx4070ti", 12288),
+    ("rtx4070super", 12288),
+    ("rtx4070", 12288),
+    ("rtx4060ti16g", 16384),
+    ("rtx4060ti", 8192),
+    ("rtx4060", 8192),
+    // NVIDIA RTX 30-series
+    ("rtx3090ti", 24576),
+    ("rtx3090", 24576),
+    ("rtx3080ti", 12288),
+    ("rtx308012g", 12288),
+    ("rtx3080", 10240),
+    ("rtx3070ti", 8192),
+    ("rtx3070", 8192),
+    ("rtx3060ti", 8192),
+    ("rtx306012g", 12288),
+    ("rtx3060", 12288),
+    ("rtx3050", 8192),
+    ("rtx30508g", 8192),
+    // NVIDIA RTX 20-series
+    ("rtx2080ti", 11264),
+    ("rtx2080super", 8192),
+    ("rtx2080", 8192),
+    ("rtx2070super", 8192),
+    ("rtx2070", 8192),
+    ("rtx2060super", 8192),
+    ("rtx206012g", 12288),
+    ("rtx2060", 6144),
+    // AMD RX 7000-series
+    ("rx7900xtx", 24576),
+    ("rx7900xt", 20480),
+    ("rx7900gre", 16384),
+    ("rx7800xt", 16384),
+    ("rx7700xt", 12288),
+    ("rx7600", 8192),
+    // AMD RX 6000-series
+    ("rx6950xt", 16384),
+    ("rx6900xt", 16384),
+    ("rx6800xt", 16384),
+    ("rx6800", 16384),
+    ("rx6700xt", 12288),
+    ("rx6650xt", 8192),
+    ("rx6600xt", 8192),
+    ("rx6600", 8192),
+    ("rx6500xt", 4096),
+    ("rx6400", 4096),
+    // AMD RX 5000-series
+    ("rx5700xt", 8192),
+    ("rx5700", 8192),
+    ("rx5600xt", 6144),
+    ("rx5500xt", 8192),
+];
+
+/// Substring-match `name` against the curated GPU table. Returns the
+/// expected VRAM (MiB) of the LONGEST matching key, or `None` if no
+/// key matches.
+///
+/// Order-independent: iterates all entries, filters by substring
+/// match, then `max_by_key` on key length. A future agent can append
+/// anywhere in `KNOWN_GPU_VRAM` without breaking the
+/// longest-key-wins contract — no declaration-order discipline
+/// needed. The test `gpu_vram_table_longest_key_wins` pins this
+/// invariant.
+///
+/// Used by `get_remote_hardware` after the registry-walk fix as a
+/// defense-in-depth fallback for AMD driver builds where neither
+/// WMI nor registry expose the full 64-bit VRAM.
+pub(crate) fn gpu_vram_from_name_table(name: &str) -> Option<u64> {
+    let normalized = normalize_gpu_name(name);
+    if normalized.is_empty() {
+        return None;
+    }
+    // `.contains()` for partial matches — e.g. "AMDRadeonRX6900XT"
+    // normalized to "amdradeonrx6900xt" still contains "rx6900xt".
+    KNOWN_GPU_VRAM
+        .iter()
+        .filter(|(key, _)| normalized.contains(*key))
+        .max_by_key(|(key, _)| key.len())
+        .map(|(_, vram_mb)| *vram_mb)
 }
 
 /// Replace each GPU's WMI-derived `memory_total` with the matching registry
@@ -769,4 +930,167 @@ mod tests {
         assert_eq!(sizes.len(), 1);
         assert_eq!(sizes[0], 17179869184);
     }
+
+    // ----- GPU-name-table defense-in-depth tests -----
+
+    #[test]
+    fn normalize_gpu_name_strips_whitespace_dashes_and_lowercases() {
+        // WMI names look like "AMD Radeon RX 6900 XT" or "NVIDIA GeForce
+        // RTX 3060"; table keys are dense ("rx6900xt"). Normalize to an
+        // apples-to-apples compare so substring-matches work.
+        assert_eq!(normalize_gpu_name("AMD Radeon RX 6900 XT"), "amdradeonrx6900xt");
+        assert_eq!(
+            normalize_gpu_name("NVIDIA GeForce RTX 3060"),
+            "nvidiageforcertx3060"
+        );
+        assert_eq!(normalize_gpu_name("  --RX-6900-XT--  "), "rx6900xt");
+        assert_eq!(normalize_gpu_name(""), "");
+    }
+
+    #[test]
+    fn gpu_vram_table_matches_known_amd_and_nvidia_cards() {
+        // Pin the entries JC actually owns (RX 6900 XT + RTX 3060) plus a
+        // sanity check for RTX 4090 / RX 7900 XTX. If a future refactor
+        // drops or renames any of these entries, this test fails.
+        assert_eq!(gpu_vram_from_name_table("AMD Radeon RX 6900 XT"), Some(16384));
+        assert_eq!(gpu_vram_from_name_table("NVIDIA GeForce RTX 3060"), Some(12288));
+        assert_eq!(gpu_vram_from_name_table("NVIDIA GeForce RTX 4090"), Some(24576));
+        assert_eq!(gpu_vram_from_name_table("AMD Radeon RX 7900 XTX"), Some(24576));
+    }
+
+    #[test]
+    fn gpu_vram_table_returns_none_for_unknown_cards() {
+        // No table entry → caller treats it as "no opinion" and the
+        // WMI / registry value stays untouched.
+        assert_eq!(gpu_vram_from_name_table("Intel UHD Graphics 770"), None);
+        assert_eq!(gpu_vram_from_name_table("Some Random GPU"), None);
+        // Empty string is a known None (already covered) but pin again:
+        assert_eq!(gpu_vram_from_name_table(""), None);
+    }
+
+    #[test]
+    fn gpu_vram_table_longest_key_wins() {
+        // KNOWN_GPU_VRAM is length-sorted DESC at module scope so a
+        // linear scan returns the longest matching key first. An RTX
+        // 3080 Ti (12288 MB) MUST NOT collapse to the bare `rtx3080`
+        // (10240 MB) entry. Without the sort, .contains() on the first
+        // match would pick the wrong card.
+        assert_eq!(
+            gpu_vram_from_name_table("NVIDIA GeForce RTX 3080 Ti"),
+            Some(12288),
+            "RTX 3080 Ti (12288 MB) must not collapse to RTX 3080 (10240 MB)"
+        );
+        assert_eq!(
+            gpu_vram_from_name_table("NVIDIA GeForce RTX 3080"),
+            Some(10240),
+            "RTX 3080 (bare, 10240 MB) still matches correctly"
+        );
+        // The 12 GB RTX 3080 SKU is also pinned separately — make sure
+        // the explicit `rtx308012g` entry wins over bare `rtx3080`.
+        assert_eq!(
+            gpu_vram_from_name_table("NVIDIA GeForce RTX 3080 12GB"),
+            Some(12288),
+            "RTX 3080 12 GB SKU must hit the dedicated entry"
+        );
+    }
+
+    #[test]
+    fn vram_looks_capped_threshold_is_90_percent() {
+        // WMI < 90% of table → looks capped (override). WMI ≥ 90% → leave
+        // alone (no override noise). Border case (exactly 90%) → leave
+        // alone (strict-less-than semantics).
+        assert!(vram_looks_capped(4096, 16384), "4 GB on 16 GB AMD = capped");
+        assert!(vram_looks_capped(0, 16384), "zero reading = capped");
+        assert!(vram_looks_capped(12000, 16384), "12 GB on 16 GB = capped");
+        assert!(!vram_looks_capped(14745, 16384), "14745 = 90% of 16384 = border, not capped");
+        assert!(!vram_looks_capped(16384, 16384), "exact match = not capped");
+        assert!(!vram_looks_capped(16385, 16384), "table smaller than WMI = not capped");
+    }
+
+    #[test]
+    fn defense_in_depth_overrides_wmi_for_capped_amd_card() {
+        // Bidirectional pin on the heuristic. Three cases that TOGETHER
+        // catch every plausible regression of `vram_looks_capped`:
+        //   - always-true:   breaks Case C (15000 forcibly overwritten to 16384)
+        //   - always-false:  breaks Case B (4096 stays at 4096 instead of 16384)
+        //   - inverse:       breaks Case A (registry-corrected 16384 forcibly
+        //                    re-overwritten; same observable no-op but the
+        //                    if-table-equals-input case couldn't catch
+        //                    always-fire by itself — Case C disambiguates)
+        //
+        // Case A — registry-corrected (memory_total already equals the
+        // table value). The override must NOT fire (no churn).
+        let mut corrected = vec![make_gpu(0, "AMD Radeon RX 6900 XT", 16384)];
+        for gpu in corrected.iter_mut() {
+            if let Some(table_vram_mb) = gpu_vram_from_name_table(&gpu.name) {
+                if vram_looks_capped(gpu.memory_total, table_vram_mb) {
+                    gpu.memory_total = table_vram_mb;
+                }
+            }
+        }
+        assert_eq!(
+            corrected[0].memory_total, 16384,
+            "table must NOT override a value registry already corrected"
+        );
+        // Case B — WMI-capped (memory_total is well below the table value).
+        // The override MUST fire and lift the value to the table entry.
+        let mut capped = vec![make_gpu(0, "AMD Radeon RX 6900 XT", 4096)];
+        for gpu in capped.iter_mut() {
+            if let Some(table_vram_mb) = gpu_vram_from_name_table(&gpu.name) {
+                if vram_looks_capped(gpu.memory_total, table_vram_mb) {
+                    gpu.memory_total = table_vram_mb;
+                }
+            }
+        }
+        assert_eq!(
+            capped[0].memory_total, 16384,
+            "table MUST lift a capped WMI value to the trusted table entry"
+        );
+        // Case C — above the 90% threshold but below the table value
+        // (15 000 < 14 745 → no wait, 15000 < 14745 is FALSE; 15000 is
+        // safely above 90% of 16384 = 14745). The override must NOT fire
+        // and the value must stay at 15000. Without Case C, a regression
+        // that made `vram_looks_capped` always true would slip through
+        // Case A (input == table → silently no-op overwrite) and Case B
+        // (forced-fire writes the right table value anyway). Case C is
+        // the only case that catches an always-fire heuristic.
+        let mut in_zone = vec![make_gpu(0, "AMD Radeon RX 6900 XT", 15000)];
+        for gpu in in_zone.iter_mut() {
+            if let Some(table_vram_mb) = gpu_vram_from_name_table(&gpu.name) {
+                if vram_looks_capped(gpu.memory_total, table_vram_mb) {
+                    gpu.memory_total = table_vram_mb;
+                }
+            }
+        }
+        assert_eq!(
+            in_zone[0].memory_total, 15000,
+            "above-90% value must NOT be lifted — only capped values get the table"
+        );
+    }
+
+    #[test]
+    fn defense_in_depth_skips_unknown_gpu() {
+        // Negative-control: when `gpu_vram_from_name_table` returns
+        // `None` (no table entry for the card), the production loop's
+        // `if let Some(...)` guard must skip the GPU entirely — the
+        // `memory_total` stays at whatever the caller set.
+        //
+        // Pins the silent no-op path. A regression that made
+        // `gpu_vram_from_name_table` return `Some(default)` for
+        // unknown cards (e.g. always-true, or a global constant) would
+        // silently clobber values here and this test would catch it.
+        let mut gpus = vec![make_gpu(0, "Intel UHD Graphics 770", 8192)];
+        for gpu in gpus.iter_mut() {
+            if let Some(table_vram_mb) = gpu_vram_from_name_table(&gpu.name) {
+                if vram_looks_capped(gpu.memory_total, table_vram_mb) {
+                    gpu.memory_total = table_vram_mb;
+                }
+            }
+        }
+        assert_eq!(
+            gpus[0].memory_total, 8192,
+            "unknown GPU name (Intel UHD) must NOT be rewritten by the table fallback"
+        );
+    }
+
 }

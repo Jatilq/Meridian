@@ -496,6 +496,16 @@ pub async fn hardware_fetch_model_detail(repo_id: String) -> Result<ModelDetail,
 ///   over-narrowed single-letter queries. Bare-stars input is still
 ///   percent-encoded so HF sees the literal `*` token rather than
 ///   dumping the index via a match-all glob.
+///
+/// **Fix 2 (2026-06-30):** Queries of ≤ 3 characters now have
+/// `+GGUF` appended to them. This is because HF's trending/browse
+/// feed returns the most popular base models (Llama, Qwen, Gemma,
+/// etc.) and none of these repos ship GGUF files in their siblings.
+/// A short query like `b` was returning `BAAI/bge-small-en-v1.5` and
+/// `google/bigbird-roberta-base` — neither of which are GGUF
+/// quantizer repos. Appending `GGUF` targets the GGUF-quantized
+/// model repos (e.g. `bartowski/Llama-3.2-1B-Instruct-GGUF`) which
+/// are the repos the Hardware Scanner was built to discover.
 pub(crate) fn build_hf_search_url(
     query: Option<&str>,
     sort_by: Option<&str>,
@@ -509,7 +519,18 @@ pub(crate) fn build_hf_search_url(
         limit.clamp(1, 100)
     );
     if !is_browse {
-        url.push_str(&format!("&search={}", percent_encode(trimmed)));
+        // Fix 2: short queries (≤ 3 chars) like 'b', 'be', 'q' route
+        // through HF's search as '<query> GGUF' so the result set
+        // targets GGUF-quantized model repos instead of popular base
+        // models that have no GGUF siblings. Longer queries (≥ 4 chars)
+        // like 'llama', 'qwen2.5' are specific enough to find GGUF
+        // repos without the suffix.
+        let search_expression = if trimmed.chars().count() <= 3 {
+            format!("{} GGUF", trimmed)
+        } else {
+            trimmed.to_string()
+        };
+        url.push_str(&format!("&search={}", percent_encode(&search_expression)));
     }
     match sort_by.unwrap_or("downloads") {
         "lastModified" => url.push_str("&sort=lastModified&direction=-1"),
@@ -982,12 +1003,15 @@ mod tests {
         assert!(build_hf_search_url(None, None, 0).0.contains("limit=1"));
     }
 
-    /// Phase 11 no-wildcard: 1-4 char queries do NOT append `*` — they
-    /// route to HF's fuzzy substring matcher directly.
+    /// Short queries (≤ 3 chars) now append `+GGUF` so the HF search
+    /// targets GGUF-quantized model repos instead of base models that
+    /// have no GGUF siblings. Single letter B → B+GGUF.
+    /// No literal `*` is appended — HF's fuzzy substring matcher is
+    /// already loose enough for the query without the star.
     #[test]
     fn build_search_url_single_letter_no_wildcard() {
         let (url, kind) = build_hf_search_url(Some("B"), None, 30);
-        assert!(url.contains("search=B&"), "URL: {}", url);
+        assert!(url.contains("search=B%20GGUF&"), "URL: {}", url);
         assert!(!url.contains("B*"), "URL must NOT have literal *: {}", url);
         assert_eq!(kind, KIND_EXACT);
     }
@@ -1005,7 +1029,8 @@ mod tests {
     #[test]
     fn build_search_url_user_typed_star_is_percent_encoded() {
         let (url, kind) = build_hf_search_url(Some("B*"), None, 30);
-        assert!(url.contains("search=B%2A&"), "URL: {}", url);
+        // B* is 2 chars → +GGUF suffix appended
+        assert!(url.contains("search=B%2A%20GGUF&"), "URL: {}", url);
         assert!(!url.contains("B**"));
         assert_eq!(kind, KIND_EXACT);
     }
@@ -1039,18 +1064,47 @@ mod tests {
     }
 
     /// Bare-stars percent-encode so HF treats them as literal tokens.
+    /// 2-char input → +GGUF appended.
     #[test]
     fn build_search_url_bare_stars_percent_encoded() {
         let (url, kind) = build_hf_search_url(Some("**"), None, 30);
-        assert!(url.contains("search=%2A%2A&"), "URL: {}", url);
+        assert!(url.contains("search=%2A%2A%20GGUF&"), "URL: {}", url);
         assert!(!url.contains("search=*&"));
         assert_eq!(kind, KIND_EXACT);
     }
 
+    /// Single star percent-encoded and +GGUF appended (≤ 3 chars).
     #[test]
     fn build_search_url_single_star_percent_encoded() {
         let (url, kind) = build_hf_search_url(Some("*"), None, 30);
-        assert!(url.contains("search=%2A&"), "URL: {}", url);
+        assert!(url.contains("search=%2A%20GGUF&"), "URL: {}", url);
+        assert_eq!(kind, KIND_EXACT);
+    }
+
+    /// 4+ char queries do NOT get the +GGUF suffix — they're
+    /// specific enough to find GGUF repos on their own.
+    #[test]
+    fn build_search_url_four_or_more_chars_no_gguf_suffix() {
+        let (url, kind) = build_hf_search_url(Some("qwen"), None, 30);
+        assert!(url.contains("search=qwen&"), "URL: {}", url);
+        assert!(!url.contains("qwen%20GGUF"));
+        assert_eq!(kind, KIND_EXACT);
+    }
+
+    #[test]
+    fn build_search_url_five_chars_no_gguf_suffix() {
+        let (url, kind) = build_hf_search_url(Some("llama"), None, 30);
+        assert!(url.contains("search=llama&"), "URL: {}", url);
+        assert!(!url.contains("llama%20GGUF"));
+        assert_eq!(kind, KIND_EXACT);
+    }
+
+    #[test]
+    fn build_search_url_exact_4_chars_no_gguf_suffix() {
+        // 4 is the boundary — just long enough to not need the suffix.
+        let (url, kind) = build_hf_search_url(Some("deep"), None, 30);
+        assert!(url.contains("search=deep&"), "URL: {}", url);
+        assert!(!url.contains("deep%20GGUF"));
         assert_eq!(kind, KIND_EXACT);
     }
 

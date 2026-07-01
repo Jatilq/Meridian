@@ -19,7 +19,7 @@
   --drive-progress-glow-red: 0 0 20px 6px hsl(4deg 82% 58% / 15%);
 
   /* Sizes */
-  --nav-sidebar-width: 42px;
+  --nav-sidebar-width: 160px;
   --quick-access-panel-width: 260px;
   --window-toolbar-height: 48px;
   --action-toolbar-height: 42px;
@@ -95,30 +95,30 @@
 
   --light: 0 0% 100%;
   --dark: 0 0% 0%;
-  --background-2: 225 10% 16%;
-  --background-3: 225 12% 13%;
-  --window-toolbar: 220 11% 19%;
-  --icon: 0 0% 62%;
+  --background-2: 0 0% 6%;
+  --background-3: 0 0% 8%;
+  --window-toolbar: 0 0% 7%;
+  --icon: 0 0% 55%;
 
-  /* SIGMA-UI */
-  --background: 225 10% 16%;
-  --foreground: 0 0% 75%;
-  --muted: 225 10% 20%;
-  --muted-foreground: 0 0% 62%;
-  --popover: 225 10% 16% / 50%;
-  --popover-foreground: 0 0% 75%;
-  --card: 225 10% 16% / 80%;
+  /* Meridian dark theme — near-black bg, coral accent, white text */
+  --background: 0 0% 4%;
+  --foreground: 0 0% 90%;
+  --muted: 0 0% 9%;
+  --muted-foreground: 0 0% 55%;
+  --popover: 0 0% 6% / 80%;
+  --popover-foreground: 0 0% 90%;
+  --card: 0 0% 6% / 80%;
   --card-foreground: 210 20% 98%;
-  --border: 225 10% 20%;
-  --input: 225 10% 16% / 50%;
-  --primary: 198 19% 38%;
-  --primary-foreground: 220.9 39.3% 11%;
-  --secondary: 222 10% 18%;
-  --secondary-foreground: 0 0% 60%;
+  --border: 0 0% 14%;
+  --input: 0 0% 8%;
+  --primary: 8 85% 55%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 0 0% 9%;
+  --secondary-foreground: 0 0% 65%;
   --destructive: 0 62.8% 50%;
   --destructive-foreground: 210 20% 98%;
-  --ring: 216 12.2% 83.9%;
-  --success: 174 100% 27%;
+  --ring: 8 85% 55%;
+  --success: 142 70% 45%;
   --dangerous: 4 82% 58%;
   --warning: 43 70% 56%;
 }

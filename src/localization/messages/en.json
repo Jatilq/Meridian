@@ -83,6 +83,10 @@
     "home": "Home page",
     "navigator": "Navigator",
     "dashboard": "Dashboard",
+    "topology": "Topology",
+    "hardware": "Hardware",
+    "backend-manager": "Backend Manager",
+    "rain-cli": "Rain CLI",
     "notes": "Notes",
     "settings": "Settings",
     "extensions": "Extensions"

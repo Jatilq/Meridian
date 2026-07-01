@@ -16,7 +16,7 @@ import {
 import { BUILTIN_NAVIGATOR_ICON_THEME_IDS } from '@/types/icon-theme';
 
 export const USER_SETTINGS_SCHEMA_VERSION_KEY = '__schemaVersion';
-export const USER_SETTINGS_SCHEMA_VERSION = 27;
+export const USER_SETTINGS_SCHEMA_VERSION = 28;
 
 export const DEFAULT_GLOBAL_SEARCH_IGNORED_PATHS = [
   '/node_modules',
@@ -417,7 +417,7 @@ async function migrateUserSettingsStep(storage: StorageAdapter, fromVersion: num
     await setDefaultObjectIfMissing(storage, 'meridian.aiPanel', {
       endpointUrl: 'http://localhost:9777/api/text',
       model: '',
-      omnixEnabled: false,
+      omnixEnabled: true,
       omnixPath: 'E:\\ai\\Apps\\Omnix',
       routerEndpoint: 'http://localhost:11434/v1',
       ttsEnabled: false,
@@ -667,6 +667,16 @@ async function migrateUserSettingsStep(storage: StorageAdapter, fromVersion: num
     }
   }
 
+  if (fromVersion === 27 && toVersion === 28) {
+    // Rain must always start with Omnix enabled — it's the core AI engine.
+    // Previous migrations (22→23) tried `setDefaultBooleanIfMissing` which
+    // couldn't override an existing `false`. Now we force-set to `true` so
+    // every install — fresh OR existing — gets Omnix on by default.
+    // Users who explicitly disable it in Settings are respected on subsequent
+    // launches (the toggle calls setUseOmnix(false) which persists the choice).
+    await storage.set('meridian.aiPanel.omnixEnabled', true);
+  }
+
   if (fromVersion === 22 && toVersion === 23) {
     // Universal onboarding v2: enable Omnix by default, add onboarding flow keys,
     // and migrate existing installs to connection-mode-aware defaults.
@@ -675,7 +685,9 @@ async function migrateUserSettingsStep(storage: StorageAdapter, fromVersion: num
     await setDefaultStringIfMissing(storage, 'meridian.aiPanel.connectionMode', 'basic');
     await setDefaultStringIfMissing(storage, 'meridian.aiPanel.onboardingStep', 'intro');
     await setDefaultStringIfMissing(storage, 'meridian.aiPanel.apiKeyTemp', '');
-    await setDefaultBooleanIfMissing(storage, 'meridian.aiPanel.omnixEnabled', true);
+    // Force Omnix on — even if previously set to false, the default must be true
+    // so Rain starts using Omnix on first launch without any user action.
+    await storage.set('meridian.aiPanel.omnixEnabled', true);
   }
 }
 

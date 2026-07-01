@@ -434,6 +434,8 @@ pub fn run() {
             rain_memory::rain_append_favorite,
             rain_tools::rain_tool_schemas,
             rain_tools::rain_run_tool,
+            rain_tools::rain_run_shell_command,
+            rain_tools::rain_write_file,
             rain_log::rain_log_tool_call,
             secure_keys::secure_store_api_key,
             secure_keys::secure_get_api_key,

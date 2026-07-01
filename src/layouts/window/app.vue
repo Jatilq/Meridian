@@ -4,9 +4,10 @@ Copyright © 2021 - present Aleksey Hoffman. All rights reserved.
 -->
 
 <script setup lang="ts">
-import { onMounted } from 'vue';
+import { onMounted, ref } from 'vue';
 import { NavSidebar, WindowToolbar } from '@/modules/shell';
 import { AiPanel } from '@/modules/ai-panel';
+import { RainCliSlideIn, RainCliToggle } from '@/modules/rain-cli';
 import { useAiPanelStore } from '@/stores/runtime/ai-panel';
 import { invoke } from '@tauri-apps/api/core';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -82,7 +83,10 @@ onMounted(() => {
             </div>
           </RouterView>
           </div>
-          <AiPanel v-if="aiPanelStore.isOpen" class="app-layout__ai-panel" />
+          <!-- Rain slide-in overlay (quick access from any page) -->
+          <RainCliSlideIn v-if="aiPanelStore.isOpen" class="app-layout__ai-panel" @close="aiPanelStore.close()" />
+          <!-- Floating toggle button -->
+          <RainCliToggle />
         </div>
       </div>
     </TooltipProvider>

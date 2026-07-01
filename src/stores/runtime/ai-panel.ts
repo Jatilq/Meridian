@@ -60,7 +60,7 @@ const endpoint = ref(userSettingsStore.userSettings.meridian?.aiPanel?.endpointU
 const selectedModel = ref(userSettingsStore.userSettings.meridian?.aiPanel?.model || persisted.selectedModel || '');
 const models = ref<Array<{ id: string }>>([]);
 const modelsLoaded = ref(false);
-const useOmnix = ref(userSettingsStore.userSettings.meridian?.aiPanel?.omnixEnabled ?? persisted.useOmnix ?? false);
+const useOmnix = ref(userSettingsStore.userSettings.meridian?.aiPanel?.omnixEnabled ?? persisted.useOmnix ?? true);
 const omnixOnline = ref(false);
 const omnixPath = ref(userSettingsStore.userSettings.meridian?.aiPanel?.omnixPath || 'E:\\ai\\Apps\\Omnix');
 const routerEndpoint = ref(userSettingsStore.userSettings.meridian?.aiPanel?.routerEndpoint || 'http://localhost:11434/v1');
@@ -322,7 +322,8 @@ let hasGreetedThisSession = false;
     const baseUrl = (routerEndpoint.value || '').replace(/\/+$/, '');
     if (!baseUrl) return;
     try {
-      const response = await fetch(`${baseUrl}/models`);
+      const modelsUrl = baseUrl.endsWith('/v1') ? `${baseUrl}/models` : `${baseUrl}/v1/models`;
+    const response = await fetch(modelsUrl);
       if (!response.ok) return;
       const data = await response.json();
       const modelList = data.data ?? data.models ?? [];
