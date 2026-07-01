@@ -236,7 +236,7 @@ export const useQuickViewStore = defineStore('quickView', () => {
     const quickWindow = await getQuickViewWindow();
 
     if (quickWindow) {
-      const title = `Sigma File Manager | Quick View - ${getFileName(path)}`;
+      const title = `Meridian | Quick View - ${getFileName(path)}`;
       await quickWindow.setTitle(title);
 
       await emit(QUICK_VIEW_LOAD_FILE_EVENT, {
@@ -269,7 +269,7 @@ export const useQuickViewStore = defineStore('quickView', () => {
       return false;
     }
 
-    await printWindow.setTitle(`Sigma File Manager | Print - ${getFileName(path)}`);
+    await printWindow.setTitle(`Meridian | Print - ${getFileName(path)}`);
     await emit(PRINT_VIEW_LOAD_FILE_EVENT, {
       path,
       siblingPaths: null,
