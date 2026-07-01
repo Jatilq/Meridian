@@ -1,5 +1,33 @@
 # Changelog
 
+## [Meridian] — June 2026
+
+**Summary:** Topology redesign (distinct workstation/gaming tower SVGs, VRAM fill-bar gauge, stat badges, connection lines), documentation corrections (CONFIGURATION.md Cluster section, DESIGN.md Phase 11, AGENTS.md stale task list removed), README rewrite as update page.
+
+### Topology Redesign
+
+- **Device-shaped icons**: workstation/server tower silhouette with rack ears for MAMBA (primary), desktop gaming tower with angled front panel and RGB strip for BLACK (worker)
+- **VRAM fill-bar gauge**: vertical battery-style fill inside each icon, proportional to VRAM utilization
+- **Floating stat badge**: GPU util% and temperature stacked in a small dark box beside each node
+- **Monospace memory text**: `36.0GB/36.0GB (100%)` style below each icon
+- **Connection line**: dashed line with arrowheads both ends between nodes, bright/active when RPC session is running, dim/idle otherwise
+- **Launch RPC Slave** button only appears on worker nodes (not MAMBA/local)
+
+### Documentation Corrections
+
+- **CONFIGURATION.md**: rewrote Cluster section from "Phase 6 — in progress" placeholder to describe all built features (Add Worker dialog, key/password auth, Test Connection, live polling, SVG topology, combined VRAM)
+- **DESIGN.md**: updated Phase 11 section from "Ready to implement — details TBD" to reflect actual current state (9+ Tauri commands, 3-tab panel, 5 backends, deferred items list)
+- **AGENTS.md**: removed stale pre-Phase 9 task list (Serde audit, download folder, Rain onboarding) — all confirmed complete from codebase audit
+
+### README Rewrite
+
+- Added beta status badge with rationale
+- Added "What's New" section covering: topology redesign, AMD VRAM fix, HuggingFace model browser, new backends (TurboQuant, Lemonade), clusterWorkers/sshConnections split
+- Backend Manager section now has an honest deferred-features table
+- Added screenshots section with placeholder embeds pointing to `docs/screenshots/`
+
+---
+
 ## [2.1.0] - May 2026
 
 **Summary:** Navigator performance improvements, generated thumbnails, extension themes, printing, file previews, new shortcuts, address editor improvements, status center redesign, and tab/navigation polish.

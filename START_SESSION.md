@@ -24,7 +24,7 @@ Give me a one paragraph status: what phase we are on, what is done, what the nex
 **JC manages async** — he checks in when ready, not watching terminal. Never proceed on timeout for external actions.
 **Rain is the AI assistant** — gender neutral, never refers to itself as AI, warm personality.
 **9Router endpoint:** `http://localhost:20128/v1`
-**SSH key for BLACK:** `C:\Users\jatilq\.ssh\meridian_black`
+**SSH connections:** configurable in Settings → Meridian → SSH Connections (no longer hardcoded)
 **Project path:** `E:\ai\Projects\Meridian\`
 **GitHub:** `https://github.com/Jatilq/Meridian` (may have unpushed commits — check)
 
@@ -171,8 +171,7 @@ This makes Meridian completely self-contained. No manual llama.cpp setup, no com
 | 9Router | localhost:20128 | — | — | OpenAI proxy |
 | Omnix | localhost:9777 | WebGPU | — | Vision/TTS/Director |
 
-SSH key: `C:\Users\jatilq\.ssh\meridian_black`
-Username: `jatilq` on both machines
+SSH connections: configurable in Settings → Meridian → SSH Connections (no longer hardcoded)
 Models: `E:\ai\Models\`
 Apps: `E:\ai\Apps\`
 Backends: `E:\ai\Apps\backends\` (to be created by Backend Manager)

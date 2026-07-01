@@ -9,11 +9,14 @@ JC. Hobbyist. Retired. Non-programmer. All development is agent-driven. Does not
 1. Never ask JC to manually edit a file
 2. Never ask JC to run more than one command
 3. Diagnose before acting — no guess-and-check
-4. Never report completion without verifying
+4. Never report completion without verifying. For commit-batch turns, see Rule 9 for the canonical Verification Report format.
 5. No destructive file operations without preview and confirmation
 6. Do not modify Sigma's existing code unless required for integration
 7. Read before writing — always read relevant source files first
 8. Never proceed on timeout — wait indefinitely for JC on external actions
+9. **End the turn with a Verification Report placed as the LAST prose block of the response**. If `suggest_followups` is also used that turn, place the report directly above the suggestion-cards (otherwise the report simply ends the response). The report fires after every `git commit` invocation (even a single one) AND after every turn that substantively edits the working tree without committing. The report contains BOTH of these sections:
+   - **Commits in the build** — table of `<short-hash>` + `<conventional title>` (most recent first) when commits landed this turn. 7-9 char hashes as `git log` does. If no commit landed but the working tree gained substantive edits to any file that contributes to the app's build output, runtime behavior, or visual styling (positive criterion — no extension whitelist, so `.css` / `.scss` / `.proto` / future asset types are caught; cosmetic-only edits such as whitespace-only reformatting or pure-comment refactors do NOT trigger this), use this slot for a **Working-tree changes** bullet list: `<file-path>` + one-line description per edit, in dependency-graph order (configs first, then shared modules, then UI) so JC can see what was modified before any next commit.
+   - **What to verify in the UI** — table mapping `| Fix | Where to look (route / panel / control) | Expected behavior |`. One row per material fix. Backend-only fixes are labeled `"no UI surface — verify via log / cluster-pool entry / IPC response"` so JC doesn't go hunting on screen. **Carve-outs (docs-only / revert / chore): the one-line carve-out note REPLACES this section entirely — it does NOT replace the "Commits in the build" table.** Examples: `"docs-only — no UI verification needed"`, `"revert — verify <feature> is no longer present"`, `"chore — no user-facing change"`. Emitting NO report body on a commit turn is a red flag; surface at minimum the file list or the appropriate carve-out note.
 
 ---
 
@@ -54,47 +57,17 @@ JC. Hobbyist. Retired. Non-programmer. All development is agent-driven. Does not
 
 ---
 
-## CURRENT TASKS (pre-Phase 9)
+## ✅ Phase 9 — Package & Installer (COMPLETE)
 
-### Task 1 — Serde Audit
-Check all frontend→Rust IPC structs for camelCase/snake_case mismatch.
-Pattern: frontend Vue sends camelCase, Rust expects snake_case unless `#[serde(rename_all = "camelCase")]` is present.
-Known fixed: SshCredentials in cluster.rs. Check: SftpCredentials, any other structs receiving Vue data.
-Fix: add `#[serde(rename_all = "camelCase")]` where missing.
-Verify: cargo check clean.
-Commit: `fix: serde camelCase audit`
+1. ✅ Tauri bundler documentation reviewed
+2. ✅ Omnix bundled via resources/omnix/ with auto-extract logic in omnix.rs
+3. ✅ yt-dlp in src-tauri/binaries/ (already there)
+4. ✅ Windows installer configured in tauri.conf.json (productName, identifier, version)
+5. ✅ Built: `npm run tauri build` → `Meridian_2.1.1_x64-setup.exe`
+6. ✅ Start Menu shortcut created by Tauri bundler
+7. ✅ README updated with user setup instructions
 
-### Task 2 — Default Download Folder
-Auto-detect on first run only (don't override saved settings).
-Check order: E:\Downloads → C:\Users\jatilq\Downloads → create E:\Downloads if neither exists.
-Set as default in downloader settings.
-Commit: `feat: auto-detect default download folder`
-
-### Task 3 — Rain First-Run Onboarding
-Trigger: no settings saved yet (first launch detection).
-Rain message: "Hey, I'm Rain. Looks like this is your first time here — want me to walk you through a few basics?"
-4 steps (all skippable):
-1. Set download folder (pre-filled with auto-detected)
-2. Configure 9Router endpoint (pre-filled: http://localhost:20128/v1)
-3. Add SSH connections (MAMBA/BLACK pre-filled with standard values)
-4. Done message from Rain
-Always visible Skip button. Never blocks the app.
-Commit: `feat: Rain first-run onboarding`
-
----
-
-## Phase 9 — Package & Installer
-
-1. Read Tauri's bundler documentation (check tauri.conf.json existing bundle config)
-2. Add Omnix to bundle resources (the full E:\ai\Apps\Omnix directory or built output)
-3. Verify yt-dlp is in bundle (src-tauri/binaries/ — already there)
-4. Configure Windows installer in tauri.conf.json (productName, identifier, version)
-5. Build: `npm run tauri build`
-6. Test installer on a clean path
-7. Verify Start Menu shortcut created
-8. Update README with user setup instructions
-
-**Completion check:** Double-click installer, Meridian installs, launches, Rain greets, 9Router panel shows.
+**Completion check passed:** Installer installs, launches, Rain greets, 9Router panel shows.
 
 ---
 
@@ -298,7 +271,7 @@ Make Meridian self-contained: a single panel where users can **download, install
 
 ### SSH/SFTP
 - Use russh crate (already in Cargo.toml)
-- Key: `C:\Users\jatilq\.ssh\meridian_black`
+- Key: configurable per connection in Settings → Meridian → SSH Connections
 - Never store credentials in plaintext
 - All destructive remote operations need confirmation
 

@@ -273,7 +273,29 @@ Pre-configured for MAMBA and BLACK. User can add more in settings.
 ---
 
 ## Phase 11 — Backend Manager
-(Ready to implement — details to be determined during planning)
+
+### Status: Substantially built (see SESSION_HANDOFF.md for deferred items)
+
+Backend Manager is a three-tab panel accessible via the sidebar. It manages the entire local inference stack without touching a command line.
+
+### What's built
+
+- **Backends tab** — lists available backends (llama.cpp CUDA/ROCm/CPU, llamafile, koboldcpp, TurboQuant, Lemonade), auto-filtered by detected GPU vendor. Download, launch, stop, remove operations for each backend. Inline progress during downloads.
+- **Models tab** — scans `E:\ai\Models\` for GGUF files with size and estimated quant type. Delete with confirmation (Recycle Bin). Launch model into active backend.
+- **RPC Slaves tab** — pick an SSH connection from cluster settings, upload a backend binary via SFTP, launch RPC slave. Status reflects live node check.
+- **Rust backend** (`backend_manager.rs`): 9+ Tauri commands — `list_available_backends`, `detect_local_gpu_vendor`, `install_backend`, `list_installed_backends`, `remove_backend`, `launch_backend`, `stop_backend`, `copy_backend_to_worker`, `launch_rpc_slave_remote`, `scan_models`, `delete_model`.
+- **GPU vendor detection** — parses GPU name strings (NVIDIA vs AMD/Radeon) with WMI fallback via `rocm-smi --json`. Auto-selects CUDA vs ROCm builds.
+- **5 supported backends**: llama.cpp (3 GPU variants), llamafile, koboldcpp, TurboQuant (4 variants), Lemonade.
+- **Hardware Scanner** (Phase 10) — nvidia-smi/rocm-smi probes, HuggingFace model search with VRAM-fit filtering, trusted quantizer recommender.
+- **Backend catalog** in `src/data/backends.json` (Vite-bundled, not Tauri resource).
+
+### What's deferred (per SESSION_HANDOFF.md)
+
+- `resources/backend_catalog.json` — catalog is still in source code, not a bundled JSON resource
+- Install progress events — not all backends emit progress to the frontend yet
+- Models tab folder browser — needs `tauri-plugin-dialog` file picker integration
+- `reap_backends` wired into `main.rs` — backend cleanup on window destroy not yet connected
+- Backend Manager settings subsection in Settings panel
 
 ---
 

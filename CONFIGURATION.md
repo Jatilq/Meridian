@@ -79,11 +79,28 @@ Omnix's transformers.js (unsupported architecture or WebGPU memory limits).
 - **Auto-save folder:** destination for downloads (blank = prompt each time)
 - **Chunk count:** parallel download segments (default 8)
 
-## Cluster (Phase 6 — in progress)
+## Cluster Control
 
-SSH-based control of the inference cluster:
-- MAMBA `<MAMBA_IP>` (3× RTX 3060, 36GB) — primary inference, headless
-- BLACK `<BLACK_IP>` (RX 6900 XT, 16GB) — daily driver, RPC slave
-- Combined via llama.cpp RPC: ~52GB effective VRAM
+SSH-based control of the inference cluster, accessible via the Cluster Control sidebar icon.
 
-(Configuration UI documented when Phase 6 lands.)
+### Features (all built)
+
+- **Add Worker dialog** — label, host, port, username, auth method (SSH key or password)
+- **Key/password toggle** — switch between key-file and password authentication
+- **Test Connection** — verifies SSH connectivity before saving
+- **Live hardware polling** — GPU utilization, temperature, VRAM usage, CPU, RAM for every connected node
+- **SVG topology map** — workstation/server tower icons for MAMBA (primary), desktop gaming tower for workers, connection lines with RPC status
+- **Combined VRAM** — auto-summed across all connected nodes (e.g. 36 GB local + 16 GB remote = 52 GB)
+- **Launch RPC Slave** — one-click SSH launch of llama.cpp RPC server on any worker node
+- **Per-node detail cards** — CPU name/cores, RAM used/total, per-GPU breakdown with util%/VRAM/temp
+- **Empty-state onboarding** — guides users to add their first worker when no connections exist
+
+### Hardware reference
+
+| Machine | IP | CPU | GPU | VRAM | RAM |
+|---|---|---|---|---|---|
+| MAMBA | 192.168.1.67 | Xeon E5-2697v4 36c | 3× RTX 3060 | 36GB | 256GB |
+| BLACK | 192.168.1.64 | Ryzen 9 5950X 16c | RX 6900 XT | 16GB | 64GB |
+| Combined | — | — | — | 52GB | 320GB |
+
+Passwords are encrypted via Tauri's secure storage before persisting. Key files use the path on disk directly.
