@@ -14,8 +14,10 @@ static OMNIX_CHILD: Mutex<Option<Child>> = Mutex::new(None);
 /// and lets the frontend return immediately instead of blocking on npm install.
 static OMNIX_SPAWNING: AtomicBool = AtomicBool::new(false);
 
-/// Default install directory for the Omnix engine.
-const DEFAULT_OMNIX_DIR: &str = "E:\\ai\\Apps\\Omnix";
+/// Legacy fallback install directory for Omnix, used when neither
+/// `dirs::data_local()` nor a user override resolve. Preserved so
+/// installs that wrote Omnix to this path before Fix C keep finding it.
+const FALLBACK_OMNIX_DIR: &str = "E:\\ai\\Apps\\Omnix";
 
 /// Flag file to indicate npm install has been run for bundled Omnix.
 const OMNIX_NPM_DONE_MARKER: &str = ".meridian-npm-install-done";
@@ -37,7 +39,15 @@ fn mark_omnix_npm_done(dir: &Path) -> Result<(), String> {
 fn resolve_omnix_dir(app: &tauri::AppHandle, omnix_path: Option<String>) -> Result<PathBuf, String> {
     let target_dir = PathBuf::from(omnix_path
         .filter(|p| !p.trim().is_empty())
-        .unwrap_or_else(|| DEFAULT_OMNIX_DIR.to_string()));
+        .map(|p| p.to_string())
+        .unwrap_or_else(|| crate::install_paths::resolve_omnix_root(None).to_string_lossy().into_owned()));
+    let target_dir = if target_dir.as_os_str().is_empty() {
+        // Safety net: resolve_omnix_root always returns a path, but
+        // guard for the edge case of dir resolution failure.
+        PathBuf::from(FALLBACK_OMNIX_DIR)
+    } else {
+        target_dir
+    };
 
     // If target exists and has server.ts, we're done.
     if target_dir.join("server.ts").exists() {

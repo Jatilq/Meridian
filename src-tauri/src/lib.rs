@@ -24,6 +24,7 @@ mod extension_receiver;
 mod input_simulation;
 mod omnix;
 mod backend_manager;
+mod install_paths;
 mod extensions;
 mod file_operations;
 mod global_search;
@@ -426,6 +427,8 @@ pub fn run() {
             backend_manager::list_gguf_models,
             backend_manager::scan_models_recursive,
             backend_manager::hf_resolve_model_files,
+            install_paths::get_install_paths,
+            install_paths::set_install_paths,
             hardware::hardware_search_gguf_models,
             hardware::hardware_fetch_model_detail,
             sftp::sftp_read_dir,
@@ -443,6 +446,8 @@ pub fn run() {
             secure_keys::secure_store_secret,
             secure_keys::secure_get_secret,
             secure_keys::secure_delete_secret,
+            install_paths::get_install_paths,
+            install_paths::set_install_paths,
         ])
         .setup(setup_handler)
         .on_window_event(|window, event| {

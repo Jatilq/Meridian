@@ -36,8 +36,10 @@ use walkdir::WalkDir;
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager, State};
 
-/// Default Windows install root for backends.
-const DEFAULT_BACKEND_ROOT: &str = "E:\\ai\\Apps\\backends";
+/// Legacy fallback install root used when neither `dirs::data_local()`
+/// nor a user override resolve. Preserved so installs that wrote
+/// binaries to this path before Fix C keep finding them.
+const FALLBACK_BACKEND_ROOT: &str = "E:\\ai\\Apps\\backends";
 
 /// Probes have a 5s ceiling — nvidia-smi and rocm-smi are local and fast.
 const SHORT_PROBE_TIMEOUT_MS: u64 = 5_000;
@@ -582,7 +584,8 @@ pub async fn download_backend(
 
     let root = target_dir
         .filter(|p| !p.trim().is_empty())
-        .unwrap_or_else(|| DEFAULT_BACKEND_ROOT.to_string());
+        .map(|p| p.to_string())
+        .unwrap_or_else(|| crate::install_paths::resolve_backend_root(None).to_string_lossy().into_owned());
     let install_root = PathBuf::from(&root).join(kind_dir_name(&kind));
     std::fs::create_dir_all(&install_root).map_err(|e| {
         format!("Failed to create install dir {}: {}", install_root.display(), e)
@@ -1492,7 +1495,16 @@ fn backend_install_root(
 ) -> Result<PathBuf, String> {
     let root = override_dir
         .filter(|p| !p.trim().is_empty())
-        .unwrap_or_else(|| DEFAULT_BACKEND_ROOT.to_string());
+        .map(|p| p.to_string())
+        .unwrap_or_else(|| crate::install_paths::resolve_backend_root(None).to_string_lossy().into_owned());
+    // Fall-back safety: if even crate::install_paths failed and returned
+    // an empty path, use the legacy constant. Should not happen in
+    // practice (resolve_backend_root always returns something).
+    let root = if root.trim().is_empty() {
+        FALLBACK_BACKEND_ROOT.to_string()
+    } else {
+        root
+    };
     Ok(PathBuf::from(root).join(kind_dir_name(kind)))
 }
 
