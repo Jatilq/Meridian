@@ -33,7 +33,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use futures_util::StreamExt;
 use walkdir::WalkDir;
 use serde::{Deserialize, Serialize};
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 
 /// Default Windows install root for backends.
 const DEFAULT_BACKEND_ROOT: &str = "E:\\ai\\Apps\\backends";
