@@ -2,18 +2,24 @@
 // License: GNU GPLv3 or later. See the license file in the project root for more information.
 // Copyright © 2021 - present Aleksey Hoffman. All rights reserved.
 
-//! Rain agent tools (Phase 8 step 2).
+//! Rain agent tools (Phase 8 step 2; Fix E 2026-07-01).
 //!
-//! Seven tools Rain can call via OpenAI-style function calling through the
+//! Eight tools Rain can call via OpenAI-style function calling through the
 //! local AI server (Ollama, LM Studio, Lemonade, or any OpenAI-compatible
 //! endpoint). Each is a thin Tauri command that wraps an existing operation
 //! and returns a JSON string the agent loop feeds back to the model as the
 //! tool result.
 //!
-//! Read-only + create_folder execute immediately. move/rename/delete are
-//! confirmation-gated in the FRONTEND (the panel shows a confirm card before
-//! invoking the execute command); these backend commands perform the action
-//! when called, so the frontend must only call them post-confirmation.
+//! Read-only + create_folder execute immediately. move/rename/delete
+//! and write_file / run_shell_command are confirmation-gated in the
+//! FRONTEND (the panel shows a confirm card before invoking the execute
+//! command); these backend commands perform the action when called, so
+//! the frontend must only call them post-confirmation.
+//!
+//! Fix E changes: search_files has been REMOVED from the schema because
+//! it had no Rust execution path (was advertised but every Rust arm
+//! returned an error). Frontend readers retain their dedicated
+//! global_search composable / store for client-side search.
 
 use serde_json::{json, Value};
 use std::time::Duration;
@@ -114,14 +120,6 @@ pub fn rain_tool_schemas() -> Result<String, String> {
             },
             "required": ["path"]
         })),
-        tool_schema("search_files", "Search for files by name/content across a scope. Read-only.", json!({
-            "type": "object",
-            "properties": {
-                "query": { "type": "string", "description": "Search query" },
-                "scope": { "type": "string", "description": "'current' folder, 'all' drives, or a specific drive/path" }
-            },
-            "required": ["query"]
-        })),
         tool_schema("create_folder", "Create a new directory. Non-destructive; executes immediately.", json!({
             "type": "object",
             "properties": {
@@ -184,13 +182,19 @@ fn tool_schema(name: &str, description: &str, parameters: Value) -> Value {
     })
 }
 
-/// Execute a READ-ONLY tool (list_directory, read_file, search_files) plus the
-/// non-destructive create_folder. Destructive tools (move/rename/delete) are NOT
-/// handled here — the frontend gates those behind a confirmation card and calls
-/// the dedicated execute commands below. Returns a JSON string for the model.
+/// Execute a Rain tool. Read-only tools (list_directory, read_file) plus
+/// the non-destructive create_folder execute immediately. The 5 destructive
+/// tools (move_files, rename_item, delete_item, write_file, run_shell_command)
+/// ALSO execute here — the frontend must only invoke them AFTER the user
+/// has confirmed via the in-panel confirmation card. Returns a JSON string
+/// for the model.
+///
+/// Fix E: search_files has been REMOVED from the schema entirely; the model
+/// can no longer ask Rust to run a search. Frontend readers retain their
+/// dedicated global_search composable / store.
 #[tauri::command]
 pub async fn rain_run_tool(
-    _app: tauri::AppHandle,
+    app: tauri::AppHandle,
     name: String,
     args: Value,
 ) -> Result<String, String> {
@@ -220,23 +224,71 @@ pub async fn rain_run_tool(
                 Err(e) => json!({ "ok": false, "error": format!("{}", e) }),
             }
         }
-        "search_files" => {
-            // Search is driven from the frontend (global_search store); the agent
-            // loop handles this tool client-side. If the model calls it here,
-            // return a hint rather than failing.
-            json!({ "ok": false, "error": "search_files is handled client-side" })
-        }
         "write_file" => {
-            // Handled via the dedicated rain_write_file command (frontend-gated).
-            json!({ "ok": false, "error": "write_file is handled via dedicated command" })
+            // Execute via the existing dedicated command path so a single
+            // source of truth handles the file-write contract (cap, bytesWritten,
+            // error mapping). Frontend gates destructive write_file via the
+            // confirmation card before any of these tool names reach here.
+            let path = str_arg(&args, "path")?;
+            let content = str_arg(&args, "content")?;
+            let inner_json = rain_write_file(path, content).await?;
+            let inner: Value = serde_json::from_str(&inner_json).unwrap_or(Value::Null);
+            json!({
+                "ok": inner.get("ok").and_then(|v| v.as_bool()).unwrap_or(false),
+                "inner": inner,
+            })
         }
         "run_shell_command" => {
-            // Handled via the dedicated rain_run_shell_command command.
-            json!({ "ok": false, "error": "run_shell_command is handled via dedicated command" })
+            let command = str_arg(&args, "command")?;
+            let timeout_secs = args.get("timeout_secs").and_then(|v| v.as_u64());
+            let inner_json = rain_run_shell_command(app, command, timeout_secs).await?;
+            let inner: Value = serde_json::from_str(&inner_json).unwrap_or(Value::Null);
+            json!({
+                "ok": inner.get("ok").and_then(|v| v.as_bool()).unwrap_or(false),
+                "inner": inner,
+            })
+        }
+        "move_files" => {
+            let src_val = args.get("src").cloned()
+                .ok_or_else(|| "Missing required argument: src".to_string())?;
+            let src: Vec<String> = serde_json::from_value(src_val)
+                .map_err(|e| format!("Invalid 'src' array: {}", e))?;
+            let dest = str_arg(&args, "dest")?;
+            let op = crate::file_operations::move_items(src, dest, None, None);
+            file_op_result_json(&op)
+        }
+        "rename_item" => {
+            let old_path = str_arg(&args, "old")?;
+            let new_name = str_arg(&args, "new")?;
+            let op = crate::file_operations::rename_item(old_path, new_name);
+            file_op_result_json(&op)
+        }
+        "delete_item" => {
+            let path = str_arg(&args, "path")?;
+            let permanent = args.get("permanent").and_then(|v| v.as_bool()).unwrap_or(false);
+            // permanent=true → use_trash=false (skip Recycle Bin); !permanent → 
+            // use_trash=true (trash / recycle bin).
+            let op = crate::file_operations::delete_items(vec![path], !permanent);
+            file_op_result_json(&op)
         }
         other => json!({ "ok": false, "error": format!("Unknown or non-immediate tool: {}", other) }),
     };
     serde_json::to_string(&result).map_err(|e| format!("Failed to serialize tool result: {}", e))
+}
+
+/// Project a `FileOperationResult` (the move/rename/delete return shape
+/// from `file_operations.rs`) into the same `{ok, error, copied/failed/
+/// skipped count}` envelope Rain's other tool results already use. Keeps
+/// the model consistent: every Rain tool result has the same top-level
+/// shape regardless of which file-operation crate was underneath.
+fn file_op_result_json(op: &crate::file_operations::FileOperationResult) -> Value {
+    json!({
+        "ok": op.success,
+        "error": op.error,
+        "copiedCount": op.copied_count,
+        "failedCount": op.failed_count,
+        "skippedCount": op.skipped_count,
+    })
 }
 
 fn str_arg(args: &Value, key: &str) -> Result<String, String> {
@@ -244,4 +296,51 @@ fn str_arg(args: &Value, key: &str) -> Result<String, String> {
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
         .ok_or_else(|| format!("Missing required argument: {}", key))
+}
+
+// ============================================================================
+// Fix E: dedicated Tauri commands for the 3 destructive tools that previously
+// had only `rain_run_tool` placeholder arms (and thus no end-to-end path).
+// ============================================================================
+
+/// Move one or more files/folders. Frontend invokes this after the user
+/// confirms in the in-panel confirmation card (or directly when called
+/// from the dedicated invoke surface). Delegates to
+/// `file_operations::move_items` — the same engine the file-browser
+/// context menu uses, with full conflict resolution support.
+#[tauri::command]
+pub fn rain_move_files(
+    src: Vec<String>,
+    dest: String,
+) -> Result<String, String> {
+    let op = crate::file_operations::move_items(src, dest, None, None);
+    serde_json::to_string(&file_op_result_json(&op))
+        .map_err(|e| format!("Serialize: {}", e))
+}
+
+/// Rename a file or folder. `new_name` is a LEAF, not a full path.
+/// Old path remains absolute; new name is appended.
+#[tauri::command]
+pub fn rain_rename_item(
+    old_path: String,
+    new_name: String,
+) -> Result<String, String> {
+    let op = crate::file_operations::rename_item(old_path, new_name);
+    serde_json::to_string(&file_op_result_json(&op))
+        .map_err(|e| format!("Serialize: {}", e))
+}
+
+/// Delete a file or folder. `permanent = false` (default) routes the
+/// item to the OS Recycle Bin via `trash`; `permanent = true` does an
+/// unlink. Mirrors the file-browser delete context menu's surface
+/// exactly.
+#[tauri::command]
+pub fn rain_delete_item(
+    path: String,
+    permanent: Option<bool>,
+) -> Result<String, String> {
+    let permanent = permanent.unwrap_or(false);
+    let op = crate::file_operations::delete_items(vec![path], !permanent);
+    serde_json::to_string(&file_op_result_json(&op))
+        .map_err(|e| format!("Serialize: {}", e))
 }
