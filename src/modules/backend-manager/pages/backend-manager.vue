@@ -4,8 +4,9 @@ Copyright © 2021 - present Aleksey Hoffman. All rights reserved.
 -->
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { useRouter } from 'vue-router';
 import { useUserSettingsStore } from '@/stores/storage/user-settings';
 import type { MeridianBackendKind, MeridianBackendConfig, SshConnectionSetting } from '@/types/user-settings';
@@ -136,6 +137,17 @@ const tabs: { id: TabId; label: string }[] = [
   { id: 'slaves', label: 'RPC Slaves' },
   { id: 'omnix-models', label: 'Omnix Models' },
 ];
+
+// Live download progress per backend kind, driven by `backend-download-progress`
+// Tauri events emitted from backend_manager::download_backend.
+interface BackendDownloadProgressPayload {
+  kind: string;
+  downloaded: number;
+  total: number;
+  percent: number;
+}
+const downloadProgress = ref<Record<string, number>>({});
+let unlistenProgress: UnlistenFn | undefined;
 
 const activeTab = ref<TabId>('backends');
 const router = useRouter();
@@ -524,6 +536,7 @@ async function refreshBackends(): Promise<void> {
 
 async function downloadBackend(entry: BackendEntry): Promise<void> {
   busy.value[entry.id] = true;
+  downloadProgress.value[entry.id] = 0;
   const variant = getActiveVariant(entry);
   note.value[entry.id] = `Downloading ${variant.label} (${formatBytes(variant.sizeBytes)})...`;
   try {
@@ -532,6 +545,7 @@ async function downloadBackend(entry: BackendEntry): Promise<void> {
       variantId: variant.id,
       targetDir: null,
     });
+    downloadProgress.value[entry.id] = 100;
     note.value[entry.id] = `Installed → ${installDir}`;
     await refreshBackends();
   }
@@ -544,6 +558,7 @@ async function downloadBackend(entry: BackendEntry): Promise<void> {
   }
   finally {
     busy.value[entry.id] = false;
+    delete downloadProgress.value[entry.id];
   }
 }
 
@@ -705,10 +720,20 @@ watch(detected, (val) => {
   }
 });
 
-onMounted(() => {
+onMounted(async () => {
+  unlistenProgress = await listen<BackendDownloadProgressPayload>(
+    'backend-download-progress',
+    (event) => {
+      downloadProgress.value[event.payload.kind] = event.payload.percent;
+    },
+  );
   void refreshBackends();
   void refreshModels();
   void refreshOmnix();
+});
+
+onUnmounted(() => {
+  unlistenProgress?.();
 });
 </script>
 
@@ -863,7 +888,7 @@ onMounted(() => {
 
         <footer class="bm__backend-footer">
           <button
-            class="bm__btn"
+            class="bm__btn bm__btn--download"
             :disabled="
               busy[entry.id]
                 || statuses[entry.id]?.status === 'running'
@@ -871,9 +896,26 @@ onMounted(() => {
             "
             @click="downloadBackend(entry)"
           >
-            {{ statuses[entry.id]?.status === 'notInstalled' ? 'Download selected runtime' : 'Re-Download selected runtime' }}
+            <template v-if="downloadProgress[entry.id] !== undefined">
+              <span class="bm__dl-progress">
+                <span class="bm__dl-bar" :style="{ width: Math.round(downloadProgress[entry.id]) + '%' }" />
+                <span class="bm__dl-text">{{ Math.round(downloadProgress[entry.id]) }}%</span>
+              </span>
+            </template>
+            <template v-else>
+              {{ statuses[entry.id]?.status === 'notInstalled' ? 'Download selected runtime' : 'Re-Download selected runtime' }}
+            </template>
           </button>
           <button
+            v-if="statuses[entry.id]?.status === 'running'"
+            class="bm__btn bm__btn--danger"
+            :disabled="busy[entry.id]"
+            @click="startStopBackend(entry)"
+          >
+            Stop
+          </button>
+          <button
+            v-else
             class="bm__btn bm__btn--primary"
             :disabled="
               busy[entry.id]
@@ -881,7 +923,7 @@ onMounted(() => {
             "
             @click="startStopBackend(entry)"
           >
-            {{ statuses[entry.id]?.status === 'running' ? 'Stop' : 'Start' }}
+            Start
           </button>
           <button
             class="bm__btn"
@@ -1571,6 +1613,47 @@ onMounted(() => {
 
 .bm__btn--ghost {
   background: transparent;
+}
+
+.bm__btn--download {
+  position: relative;
+  overflow: hidden;
+  min-width: 160px;
+}
+
+.bm__dl-progress {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 1.4em;
+}
+
+.bm__dl-bar {
+  position: absolute;
+  inset: -4px -8px;
+  background: hsl(var(--primary) / 20%);
+  border-radius: var(--radius-sm);
+  transition: width 0.3s ease;
+  z-index: 0;
+}
+
+.bm__dl-text {
+  position: relative;
+  z-index: 1;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.bm__btn--danger {
+  border-color: hsl(0 70% 55%);
+  background: hsl(0 70% 60% / 10%);
+}
+
+.bm__btn--danger:hover:not(:disabled) {
+  background: hsl(0 70% 60% / 20%);
 }
 
 .bm__note {

@@ -30,9 +30,10 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use futures_util::StreamExt;
 use walkdir::WalkDir;
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{Manager, State};
 
 /// Default Windows install root for backends.
 const DEFAULT_BACKEND_ROOT: &str = "E:\\ai\\Apps\\backends";
@@ -459,6 +460,22 @@ fn lookup_download_by_variant(kind: &BackendKind, variant_id: &str) -> Option<&'
 }
 
 // ============================================================================
+// Progress event payload
+// ============================================================================
+
+/// Emitted during `download_backend` so the frontend can show a live
+/// progress bar. Mirrors the `binary-download-progress` pattern from
+/// `app_updater.rs`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackendDownloadProgress {
+    pub kind: String,
+    pub downloaded: u64,
+    pub total: u64,
+    pub percent: f64,
+}
+
+// ============================================================================
 // Tauri commands
 // ============================================================================
 
@@ -539,6 +556,7 @@ pub fn detect_local_gpu_vendor() -> Result<GpuVendorInfo, String> {
 /// honoured. Otherwise we fall back to vendor detection.
 #[tauri::command]
 pub async fn download_backend(
+    app: tauri::AppHandle,
     backend_kind: String,
     variant_id: Option<String>,
     target_dir: Option<String>,
@@ -594,7 +612,17 @@ pub async fn download_backend(
         }
     };
 
-    let response = reqwest::get(&resolved_url)
+    // Use a proper client with a 5-minute timeout instead of the
+    // default reqwest::get which has no timeout and buffers the entire
+    // response into memory before yielding.
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(300))
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let response = client
+        .get(&resolved_url)
+        .send()
         .await
         .map_err(|e| format!("HTTP GET failed for {}: {}", resolved_url, e))?;
     if !response.status().is_success() {
@@ -604,10 +632,33 @@ pub async fn download_backend(
             resolved_url
         ));
     }
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|e| format!("Failed to read response body: {}", e))?;
+
+    let total_size = response.content_length().unwrap_or(0);
+    let mut bytes = Vec::new();
+    let mut downloaded: u64 = 0;
+    let mut stream = response.bytes_stream();
+    let emit_kind = backend_kind.clone();
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("Stream error: {}", e))?;
+        bytes.extend_from_slice(&chunk);
+        downloaded += chunk.len() as u64;
+
+        let percent = if total_size > 0 {
+            (downloaded as f64 / total_size as f64) * 100.0
+        } else {
+            0.0
+        };
+        let _ = app.emit(
+            "backend-download-progress",
+            BackendDownloadProgress {
+                kind: emit_kind.clone(),
+                downloaded,
+                total: total_size,
+                percent,
+            },
+        );
+    }
 
     write_archive(&install_root, &bytes, entry.archive_format, &kind)?;
 
