@@ -31,6 +31,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use futures_util::StreamExt;
+use tokio::io::AsyncWriteExt;
 use walkdir::WalkDir;
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager, State};
@@ -634,33 +635,96 @@ pub async fn download_backend(
     }
 
     let total_size = response.content_length().unwrap_or(0);
-    let mut bytes = Vec::new();
-    let mut downloaded: u64 = 0;
-    let mut stream = response.bytes_stream();
     let emit_kind = backend_kind.clone();
+
+    // Spool to disk so peak RAM stays in the tens-of-MB range regardless of
+    // download size — a multi-GB GGUF would have OOMed under the previous
+    // `bytes.extend_from_slice(&chunk)` accumulator. The archive is then
+    // extracted (or renamed) from this spool below.
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let spool_path = install_root.join(format!(".downloading-{}-{}", std::process::id(), nanos));
+    let mut file = tokio::fs::File::create(&spool_path)
+        .await
+        .map_err(|e| format!("Failed to create spool file {}: {}", spool_path.display(), e))?;
+
+    let mut downloaded: u64 = 0;
+    let mut last_emitted_percent: f64 = -1.0;
+    let mut last_emitted_bytes: u64 = 0;
+    let mut stream = response.bytes_stream();
 
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("Stream error: {}", e))?;
-        bytes.extend_from_slice(&chunk);
+        file.write_all(&chunk)
+            .await
+            .map_err(|e| format!("Failed to write chunk to spool file: {}", e))?;
         downloaded += chunk.len() as u64;
 
-        let percent = if total_size > 0 {
+        let percent: f64 = if total_size > 0 {
             (downloaded as f64 / total_size as f64) * 100.0
         } else {
             0.0
         };
-        let _ = app.emit(
-            "backend-download-progress",
-            BackendDownloadProgress {
-                kind: emit_kind.clone(),
-                downloaded,
-                total: total_size,
-                percent,
-            },
+        // Throttle to ~0.5% delta / ~1MB delta so a multi-GB file does NOT
+        // flood the event bus (a 64KB chunk x thousands of iterations would
+        // otherwise pin a CPU on the UI side parsing JSON). Both rules are
+        // OR'd so a slow server (small chunks, no percent change) still emits
+        // at least once per MB downloaded.
+        let percent_delta = (percent - last_emitted_percent).abs();
+        let bytes_delta = downloaded.saturating_sub(last_emitted_bytes);
+        if percent_delta >= 0.5 || bytes_delta >= 1_048_576 {
+            let _ = app.emit(
+                "backend-download-progress",
+                BackendDownloadProgress {
+                    kind: emit_kind.clone(),
+                    downloaded,
+                    total: total_size,
+                    percent,
+                },
+            );
+            last_emitted_percent = percent;
+            last_emitted_bytes = downloaded;
+        }
+    }
+    // Flush so the spool file is fully readable from a fresh handle before
+    // we drop it — critical before extraction opens it on Windows.
+    file.flush().await.map_err(|e| format!("Failed to flush spool file: {}", e))?;
+
+    // Force-emit a final 100% event so the UI's progress bar saturates even
+    // when the last chunk didn't cross the throttle delta. When total_size
+    // is unknown (no Content-Length header), progress stays indeterminate
+    // (0%) but downstream UI marks the bar as "downloading" without %
+    // rather than stuck.
+    let _ = app.emit(
+        "backend-download-progress",
+        BackendDownloadProgress {
+            kind: emit_kind.clone(),
+            downloaded,
+            total: total_size,
+            percent: if total_size > 0 { 100.0 } else { 0.0 },
+        },
+    );
+
+    // Drop the Tokio file handle BEFORE re-opening for extraction. Windows
+    // forbids a second File on a path while another handle is open.
+    drop(file);
+
+    if let Err(e) = write_archive_from_file(&install_root, &spool_path, entry.archive_format, &kind) {
+    // Cleanup the spool on failure so the install_root doesn't accumulate
+    // orphaned `.downloading-<pid>-<nanos>` files across retries. Logged at
+    // warn rather than swallowed so disk-fill bugs surface in DIAG logs.
+    if let Err(cleanup_err) = std::fs::remove_file(&spool_path) {
+        log::warn!(
+            "Failed to remove spool {} after extraction error {}: {}",
+            spool_path.display(),
+            cleanup_err,
+            e
         );
     }
-
-    write_archive(&install_root, &bytes, entry.archive_format, &kind)?;
+    return Err(e);
+    }
 
     Ok(install_root.to_string_lossy().into_owned())
 }
@@ -1024,7 +1088,7 @@ pub fn scan_models_recursive(
 }
 
 // ============================================================================
-// HuggingFace repo → concrete file resolution
+// HuggingFace repo -> concrete file resolution
 // ============================================================================
 //
 // `hf_resolve_model_files` is the missing piece behind the Backend Manager
@@ -1060,7 +1124,7 @@ pub async fn hf_resolve_model_files(repo_id: String) -> Result<Vec<HfModelFile>,
 
     // Single-budget timeout: a stalled connect, a stalled header read, OR
     // a stalled body read all share the same wall-clock ceiling. Worst-case
-    // UX is "Resolving…" for HF_API_TIMEOUT seconds — short enough to fail
+    // UX is "Resolving..." for HF_API_TIMEOUT seconds — short enough to fail
     // fast on a dead network, long enough to absorb transient slowness.
     let work = async {
         let response = reqwest::get(&api_url)
@@ -1091,7 +1155,7 @@ pub async fn hf_resolve_model_files(repo_id: String) -> Result<Vec<HfModelFile>,
 /// Hard timeout for the HuggingFace API round-trip. A stalled connection
 /// (connect, headers, or body) must not block the UI button forever. The
 /// entire network round-trip shares this single budget so the worst-case
-/// wall-clock wait is `HF_API_TIMEOUT` seconds, not 2×.
+/// wall-clock wait is `HF_API_TIMEOUT` seconds, not 2x.
 const HF_API_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Parse the HuggingFace `GET /api/models/<repo_id>` response into a
@@ -1544,7 +1608,9 @@ fn rocm_smi_local_has_card() -> bool {
         .unwrap_or(false)
 }
 
-/// Extracts a zip / writes a binary blob to `install_root`.
+/// Extracts a zip / finalises a binary download from the spool file at
+/// `spool_path` into `install_root`. The spool is the file `download_backend`
+/// streamed to disk during the network transfer — keeps peak RAM small.
 ///
 /// Two zip flavours are supported:
 /// - `"zip"`:    llama.cpp / llama-bin-win-* archives that ship a single
@@ -1555,9 +1621,13 @@ fn rocm_smi_local_has_card() -> bool {
 /// - `"zip-flat"`: turboquant /AtomicBot-AI archives that ship files at the
 ///               zip root with no parent directory. Stripping the first
 ///               segment would discard a real filename, so we extract as-is.
-fn write_archive(
+///
+/// `zip::ZipArchive::new` accepts any `Read + Seek`; we hand it the spool
+/// `std::fs::File` directly, eliminating the previous "buffer the whole zip
+/// into RAM" bottleneck.
+fn write_archive_from_file(
     install_root: &Path,
-    bytes: &[u8],
+    spool_path: &Path,
     archive_format: &str,
     kind: &BackendKind,
 ) -> Result<(), String> {
@@ -1565,18 +1635,26 @@ fn write_archive(
 
     match archive_format {
         "binary" => {
+            // Atomic single-syscall rename — replaces any prior install of
+            // this backend with the new file. No temp files left behind.
             let target_name = platform_binary_name(kind);
             let target = install_root.join(target_name);
-            std::fs::write(&target, bytes)
-                .map_err(|e| format!("Failed to write binary {}: {}", target.display(), e))?;
+            std::fs::rename(spool_path, &target).map_err(|e| {
+                format!(
+                    "Failed to rename {} to {}: {}",
+                    spool_path.display(),
+                    target.display(),
+                    e
+                )
+            })?;
             Ok(())
         }
         "zip" | "zip-flat" => {
-            // Both flavours iterate the archive identically; only the
-            // path-mapping differs.
             let strip = matches!(archive_format, "zip");
-            let cursor = std::io::Cursor::new(bytes);
-            let mut archive = zip::ZipArchive::new(cursor)
+            let file = std::fs::File::open(spool_path).map_err(|e| {
+                format!("Failed to reopen spool {}: {}", spool_path.display(), e)
+            })?;
+            let mut archive = zip::ZipArchive::new(file)
                 .map_err(|e| format!("zip::ZipArchive::new: {}", e))?;
             for i in 0..archive.len() {
                 let mut entry = archive
@@ -1612,6 +1690,12 @@ fn write_archive(
                         .map_err(|e| format!("write extracted {}: {}", target.display(), e))?;
                 }
             }
+            // Drop the archive (closes the inner File handle) BEFORE removing
+            // the spool — Windows locks prevent remove_file on an open file.
+            drop(archive);
+            std::fs::remove_file(spool_path).map_err(|e| {
+                format!("Failed to remove spool {}: {}", spool_path.display(), e)
+            })?;
             Ok(())
         }
         other => Err(format!(
@@ -1666,11 +1750,6 @@ mod tests {
     #[test]
     fn lookup_download_finds_cuda_for_nvidia() {
         let entry = lookup_download(&BackendKind::LlamaCpp, "nvidia").unwrap();
-        // URL is now resolved at download time via the GitHub Releases API,
-        // not embedded in a const. What we CAN assert is the resolver
-        // config that will locate the CUDA asset at download time —
-        // both the substring matcher AND the required preferred prefix
-        // that disambiguates `cudart-llama-...` from `llama-b<ver>-...`.
         let matcher = entry.gh_repo_match.unwrap_or("");
         let prefix = entry.gh_repo_pref_prefix.unwrap_or("");
         assert!(
@@ -1688,11 +1767,6 @@ mod tests {
     #[test]
     fn lookup_download_finds_hip_or_rocm_for_amd() {
         let entry = lookup_download(&BackendKind::LlamaCpp, "amd").unwrap();
-        // ROCm was renamed to HIP/Radeon upstream — the resolver tries the
-        // newer suffix first, falls back to the older one. The URL is
-        // resolved at download time via GitHub API, so a hardcoded
-        // substring check would be brittle across releases; assert that
-        // BOTH names are wired into the resolver as primary / fallback.
         let primary = entry.gh_repo_match.unwrap_or("");
         let alt = entry.gh_repo_match_alt.unwrap_or("");
         let combined = format!("{} {}", primary, alt);
@@ -1714,12 +1788,6 @@ mod tests {
     #[test]
     fn lookup_download_finds_koboldcpp_for_cpu() {
         let entry = lookup_download(&BackendKind::KoboldCpp, "cpu").unwrap();
-        // URL is now resolved at runtime via the GitHub Releases API,
-        // not embedded in the const; what we CAN assert is the asset
-        // matcher hint that the resolver will use to locate the
-        // nocuda variant. The matcher must contain 'nocuda' so the
-        // no-CUDA bulk-build asset is picked over the regular
-        // CUDA-enabled exe.
         let matcher = entry.gh_repo_match.unwrap_or("");
         assert!(
             matcher.contains("nocuda"),
@@ -1750,8 +1818,6 @@ mod tests {
 
     #[test]
     fn turboquant_url_is_pinned_not_latest() {
-        // AtomicBot-AI publishes a different tag per variant; using
-        // `/releases/latest/...` would only ever resolve to one of them.
         let entry = lookup_download(&BackendKind::TurboQuant, "nvidia").unwrap();
         let url = entry.url.unwrap_or_default();
         assert!(
@@ -1810,18 +1876,11 @@ mod tests {
 
     #[test]
     fn lemonade_default_port_is_13305() {
-        // OpenAI-compatible API listens at 13305 upstream
-        // (https://github.com/lemonade-sdk/lemonade). The frontend's
-        // DEFAULT_PORTS in backend-manager.vue mirrors this constant — keep
-        // both in lockstep.
         assert_eq!(BackendKind::Lemonade.default_port(), 13305);
     }
 
     #[test]
     fn lookup_download_finds_lemonade_for_any_vendor() {
-        // Lemonade is a single-binary embeddable runtime that auto-detects
-        // hardware on startup — therefore one DOWNLOAD_TABLE row covers all
-        // vendors and `vendor_for_kind` maps every detected vendor to "all".
         for vendor in ["nvidia", "amd", "cpu"] {
             let entry = lookup_download(&BackendKind::Lemonade, vendor)
                 .expect("Lemonade lookup should always resolve");
@@ -1835,21 +1894,8 @@ mod tests {
         }
     }
 
-    /// llama.cpp's GitHub release ships BOTH `cudart-llama-bin-win-cuda-12.4-x64.zip`
-    /// (the CUDA runtime helper — NOT a llama-server build) AND
-    /// `llama-b<ver>-bin-win-cuda-12.4-x64.zip` (the actual llama-server build).
-    /// Without `gh_repo_pref_prefix = Some("llama-")`, naive substring matching
-    /// picks the cudart sibling first → install "succeeds" but the install
-    /// root contains NO `llama-server.exe` and `start_backend` then errors
-    /// with "binary not found". This test pins down that the prefix guard
-    /// actually rejects the cudart sibling and selects the llama-server build.
-    /// Without it, a future refactor that accidentally drops the prefix check
-    /// ships silently.
     #[test]
     fn pick_release_asset_rejects_cudart_bundle_for_llama_cpp() {
-        // Real asset names as observed on ggml-org/llama.cpp release `b9842`,
-        // preserved verbatim so a future accidental rename inside our
-        // substring matcher fails this test loud.
         let assets = vec![
             serde_json::json!({
                 "name": "cudart-llama-bin-win-cuda-12.4-x64.zip",
@@ -1859,8 +1905,6 @@ mod tests {
                 "name": "llama-b9842-bin-win-cuda-12.4-x64.zip",
                 "browser_download_url": "https://github.com/ggml-org/llama.cpp/releases/download/b9842/llama-b9842-bin-win-cuda-12.4-x64.zip",
             }),
-            // Sibling that doesn't match the cuda-12.4 substring at all
-            // (a .sha256 checksum or LICENSE file) — must never surface.
             serde_json::json!({
                 "name": "SHA256SUMS",
                 "browser_download_url": "https://github.com/ggml-org/llama.cpp/releases/download/b9842/SHA256SUMS",
@@ -1884,11 +1928,6 @@ mod tests {
         );
     }
 
-    /// Ordering invariant: even when the cudart bundle is listed FIRST in
-    /// the array (the order GitHub returns), the prefix guard still rejects
-    /// it. `find_map` is stable, so this test specifically catches any code
-    /// that scans forward and returns on first hit without applying the
-    /// prefix filter (the bug we are guarding against).
     #[test]
     fn pick_release_asset_rejects_cudart_even_when_listed_first() {
         let assets = vec![
@@ -1896,8 +1935,6 @@ mod tests {
                 "name": "cudart-llama-bin-win-cuda-12.4-x64.zip",
                 "browser_download_url": "https://cdn.example/cudart.zip",
             }),
-            // Sandwich a non-matching file in the middle to prove the picker
-            // walks past it.
             serde_json::json!({
                 "name": "llama-b9842-bin-win-cuda-12.4-x64.zip",
                 "browser_download_url": "https://cdn.example/llama-server.zip",
@@ -1917,16 +1954,9 @@ mod tests {
         assert!(url.ends_with("llama-server.zip"));
     }
 
-    /// Negative-control: when `gh_repo_pref_prefix` is `None`, the picker
-    /// falls back to "first substring match wins" — which is wrong for
-    /// llama.cpp but correct for cases where upstream ships only one asset
-    /// per substring (e.g. koboldcpp's `koboldcpp-nocuda` matcher). This
-    /// test pins down that the `None` branch still works so a future
-    /// "always require a prefix" refactor doesn't break koboldcpp / llamafile.
     #[test]
     fn pick_release_asset_accepts_first_match_when_no_prefix_required() {
         let assets = vec![
-            // First matching asset with no prefix constraint — wins.
             serde_json::json!({
                 "name": "koboldcpp-nocuda.exe",
                 "browser_download_url": "https://cdn.example/koboldcpp-nocuda.exe",
@@ -1936,8 +1966,6 @@ mod tests {
             .expect("no prefix constraint, first match wins");
         assert!(url.ends_with("koboldcpp-nocuda.exe"));
     }
-
-    // ----- Fix 1: list_gguf_models scanner tests -----
 
     #[test]
     fn list_gguf_models_rejects_nonexistent_path() {
@@ -1950,8 +1978,6 @@ mod tests {
 
     #[test]
     fn list_gguf_models_rejects_non_directory() {
-        // Cargo.toml is a regular file in the package root; passing it to
-        // the scanner should be rejected before any walk happens.
         let result = list_gguf_models("Cargo.toml".to_string(), Some(2));
         assert!(result.is_err(), "non-directory path should error");
     }
@@ -1973,7 +1999,6 @@ mod tests {
 
     #[test]
     fn list_gguf_models_finds_files_in_subdirectories() {
-        // Mirror JC's typical layout: `models/<vendor>/<size>/<file>.gguf`.
         let root = std::env::temp_dir().join("meridian-test-nested-gguf");
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).expect("setup: create root");
@@ -1981,7 +2006,6 @@ mod tests {
         std::fs::create_dir_all(&nested).expect("setup: create nested");
         std::fs::write(nested.join("qwen2.5-7b-instruct-q4_k_m.gguf"), b"x")
             .expect("setup: write gguf placeholder");
-        // A non-matching sibling must be ignored.
         std::fs::write(root.join("readme.txt"), b"x").expect("setup: write sibling");
         let result =
             list_gguf_models(root.to_string_lossy().to_string(), Some(6))
@@ -1995,12 +2019,8 @@ mod tests {
         assert!(result[0].size_bytes > 0);
     }
 
-    // ----- Fix #2: hf_resolve_model_files / quant scoring tests -----
-
     #[test]
     fn hf_quant_score_prefers_q4_over_fp16_over_fp32() {
-        // Higher score = more preferred. q4 tokens outrank fp16 which
-        // outranks fp32 which outranks anything with no quant token.
         let q4 = hf_quant_score("model-q4_k_m.gguf");
         let q5 = hf_quant_score("model-q5_k_m.gguf");
         let fp16 = hf_quant_score("model-fp16.gguf");
@@ -2014,7 +2034,6 @@ mod tests {
 
     #[test]
     fn hf_quant_score_is_case_insensitive() {
-        // Filenames vary in case across repos; the score must not.
         let upper = hf_quant_score("MODEL-Q4_K_M.GGUF");
         let lower = hf_quant_score("model-q4_k_m.gguf");
         assert_eq!(upper, lower);
@@ -2022,7 +2041,6 @@ mod tests {
 
     #[test]
     fn hf_quant_score_matches_int4_and_int8() {
-        // ONNX repos commonly use int4/int8 naming instead of q4/q8.
         let int4 = hf_quant_score("model_int4.onnx");
         let int8 = hf_quant_score("model_int8.onnx");
         let fp16 = hf_quant_score("model_fp16.onnx");
@@ -2030,9 +2048,6 @@ mod tests {
         assert!(int8 > fp16, "int8 should outrank fp16");
     }
 
-    // ----- parse_hf_siblings — synthetic JSON tests (no network) -----
-
-    /// Helper: build a minimal HF-API-shaped JSON body with a siblings list.
     fn hf_body(siblings: &[&str]) -> serde_json::Value {
         let entries: Vec<serde_json::Value> = siblings
             .iter()
@@ -2043,7 +2058,6 @@ mod tests {
 
     #[test]
     fn parse_hf_siblings_filters_to_model_extensions() {
-        // README, config, tokenizer must all be dropped.
         let body = hf_body(&[
             "README.md",
             "config.json",
@@ -2098,8 +2112,6 @@ mod tests {
 
     #[test]
     fn parse_hf_siblings_carries_size_bytes_when_present() {
-        // HF API includes `size` in bytes on modern responses. We surface it
-        // so the UI can show "X GB" without a HEAD request.
         let body = serde_json::json!({
             "siblings": [
                 { "rfilename": "model-q4_k_m.gguf", "size": 4_398_046_511_u64 },
@@ -2118,34 +2130,18 @@ mod tests {
         assert!(result.is_err(), "missing siblings should error");
     }
 
-    /// Empty repo IDs must error out before any HTTP work happens. The
-    /// `is_empty()` short-circuit is the first line of the function, so
-    /// this `#[tokio::test]` is deterministic even though the function is
-    /// async — no network call ever fires. Real assertion: actually invoke
-    /// the command, not the precondition of the input string.
     #[tokio::test]
     async fn hf_resolve_model_files_rejects_empty_repo() {
         let result = hf_resolve_model_files("".to_string()).await;
         assert!(result.is_err(), "empty repo id should error");
     }
 
-    /// IQ-quants must score BELOW Q4_K_M (the user-requested minimum)
-    /// and BELOW plain `model.bin`. The strong penalty means `files[0]`
-    /// is never an IQ-quant by accident — the user has to explicitly
-    /// want the smallest possible size.
     #[test]
     fn hf_quant_score_penalizes_iq_quants_below_q4_k_m() {
         let q4 = hf_quant_score("model-Q4_K_M.gguf");
         let plain = hf_quant_score("model.bin");
         assert!(q4 > 0, "precondition: Q4_K_M must score > 0 (got {})", q4);
         for name in [
-            // Trimmed to real llama.cpp variants only:
-            //   IQ1: _S, _M                            (no IQ1_XSS / IQ1_XXS)
-            //   IQ2: _XXS, _XSS, _S, _M                (no IQ2_XS — that's an IQ3 variant)
-            //   IQ3: _XXS, _XS, _S, _M, _NL
-            // Synthetic names get the same rule applied as real ones (the
-            // penalty scoring is token-based), but the fixture should mirror
-            // what a model repo actually ships.
             "model-IQ1_S.gguf",
             "model-IQ1_M.gguf",
             "model-IQ2_XXS.gguf",
@@ -2172,9 +2168,6 @@ mod tests {
         }
     }
 
-    /// IQ4 (borderline quant) gets a milder penalty than IQ1/2/3 —
-    /// validates the two-tier IQ scoring rule independently so a
-    /// regression on the heavy-but-not-light axis is caught.
     #[test]
     fn hf_quant_score_penalizes_iq4_mildly_but_below_q4() {
         let iq4 = hf_quant_score("model-IQ4_XS.gguf");
@@ -2185,7 +2178,6 @@ mod tests {
             "IQ4 (score={}) must score below Q4_K_M (score={})",
             iq4, q4
         );
-        // IQ4 still beats plain — borderline but not unusable.
         assert!(
             iq4 > plain,
             "IQ4 (score={}) must score above plain (score={})",
@@ -2193,10 +2185,6 @@ mod tests {
         );
     }
 
-    /// scan_models_recursive must walk past the 6-level cap of the
-    /// default `list_gguf_models`. Build an 8-deep nesting with a .gguf
-    /// at the bottom — the test is differential (proves the depth cap
-    /// is the reason, not just that one command happens to find it).
     #[test]
     fn scan_models_recursive_walks_past_default_depth_cap() {
         let root = std::env::temp_dir().join("meridian-test-deep-gguf");
@@ -2209,11 +2197,6 @@ mod tests {
         std::fs::write(deep.join("deep-q4_k_m.gguf"), b"x")
             .expect("write leaf");
 
-        // Negative proof: list_gguf_models(max_depth=6) must NOT find
-        // the leaf at depth 8 (root = depth 0, levels 0..7 are 8-fold
-        // nested folders, so the file sits at depth 8). If this ever
-        // starts passing, the depth cap is broken — neither command
-        // is doing the right thing yet we'd still find 1 file.
         let capped = list_gguf_models(
             root.to_string_lossy().to_string(),
             Some(6),
@@ -2225,7 +2208,6 @@ mod tests {
             capped
         );
 
-        // Positive proof: scan_models_recursive (usize::MAX) FINDS it.
         let result =
             scan_models_recursive(root.to_string_lossy().to_string())
                 .expect("recursive scan should succeed");
