@@ -5,7 +5,7 @@
 | # | Task | Status | Notes |
 |---|---|---|---|
 | 1 | Fix Omnix connection bug | ✅ Done | `b704dcc8` — async spawn + 120s/30s timeout in all 3 surfaces |
-| 2 | Commit everything | ✅ Done | 7 logical commits below, 97 total unpushed |
+| 2 | Commit + push everything | ✅ Done | 8 logical commits, all 98 pushed to `meridian/main` |
 | 3 | Wire `reap_backends` on window close | ✅ Already done | Was already wired in `lib.rs` WindowEvent::Destroyed — verified in code |
 | 4 | Fix hardcoded stat badge color | ✅ Done | `750f380b` — `#1a1a1a` → `var(--background-3)` |
 | 5 | Persistent drive usage in sidebar | ✅ Done | `750f380b` — `{{ drive.percent_used }}%` always visible beside name |
@@ -46,11 +46,7 @@
 
 ## What's Blocked / Needs Your Action
 
-1. **Push 97 commits to origin/main.** All committed locally but unpushed. Need a fresh GitHub PAT (https://github.com/settings/tokens, repo scope, classic). Push command:
-   ```
-   git remote set-url meridian https://<TOKEN>@github.com/Jatilq/Meridian.git && git push meridian main && git remote set-url meridian https://github.com/Jatilq/Meridian.git
-   ```
-   Never echo the token. Scrub remote URL immediately after push.
+1. **✅ Push completed** — all 98 commits pushed to `meridian/main`. `origin/main` (upstream Sigma) remains 98 behind, as expected — never push directly to upstream.
 
 2. **Review RAIN_EXTENSION_API.md** before implementation. It's a design proposal only — no code changes. The 4-phase plan covers: tool registry (Rust), extension loader integration, frontend permission gating, and Rain self-improvement scaffolding.
 
