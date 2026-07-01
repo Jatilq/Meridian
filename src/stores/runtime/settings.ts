@@ -170,6 +170,7 @@ export const useSettingsStore = defineStore('settings', () => {
       { default: ClusterNodesSettingsSection },
       { default: SshConnectionsSettingsSection },
       { default: FilesSection },
+      { default: InstallPathsSettingsSection },
     ] = await Promise.all([
       import('@/modules/settings/ui/categories/general/language.vue'),
       import('@/modules/settings/ui/categories/general/date-time.vue'),
@@ -203,6 +204,7 @@ export const useSettingsStore = defineStore('settings', () => {
       import('@/modules/settings/ui/categories/meridian/cluster-nodes.vue'),
       import('@/modules/settings/ui/categories/meridian/ssh-connections.vue'),
       import('@/modules/settings/ui/categories/meridian/files.vue'),
+      import('@/modules/settings/ui/categories/meridian/install-paths.vue'),
     ]);
 
     sections.value = [
@@ -413,6 +415,13 @@ export const useSettingsStore = defineStore('settings', () => {
         titleKey: 'settings.meridian.downloader.title',
         tags: 'settingsTags.downloader',
         component: markRaw(DownloaderSettingsSection),
+        category: 'meridian',
+      },
+      {
+        key: 'installPaths',
+        titleKey: 'settings.meridian.installPaths.title',
+        tags: 'settingsTags.installPaths',
+        component: markRaw(InstallPathsSettingsSection),
         category: 'meridian',
       },
       {
