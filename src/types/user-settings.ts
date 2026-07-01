@@ -248,6 +248,11 @@ export type MeridianSettings = {
   /// a Record so adding new backends in future doesn't require schema
   /// migration.
   backend: Record<MeridianBackendKind, MeridianBackendConfig>;
+  /// Optional GitHub Personal Access Token used by the Backend Manager
+  /// GitHub Releases resolver. Do NOT require a token for normal use;
+  /// the resolver attempts anonymous first and retries with this token
+  /// only on HTTP 403 (anonymous rate-limit). Empty string == no token.
+  githubToken?: string;
 };
 
 export type TextSettings = {

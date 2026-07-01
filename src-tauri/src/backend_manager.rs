@@ -557,14 +557,24 @@ pub fn detect_local_gpu_vendor() -> Result<GpuVendorInfo, String> {
 /// the catalog, e.g. `"turboquant.cuda-12.4"`), the matching row is fetched
 /// directly — bypassing GPU detection so the user's exact choice is
 /// honoured. Otherwise we fall back to vendor detection.
+///
+/// `github_token` is OPTIONAL. The GitHub Releases resolver attempts an
+/// anonymous request first; on 403 (typically rate-limit), it retries
+/// once with `Authorization: Bearer <github_token>`. A token is NOT
+/// required for normal operation — it lifts only the anonymous
+/// 60-req/hr ceiling.
 #[tauri::command]
 pub async fn download_backend(
     app: tauri::AppHandle,
     backend_kind: String,
     variant_id: Option<String>,
     target_dir: Option<String>,
+    github_token: Option<String>,
 ) -> Result<String, String> {
     let kind = parse_backend_kind(&backend_kind)?;
+    let github_token = github_token
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty());
 
     let entry = if let Some(vid) = variant_id
         .as_deref()
@@ -612,7 +622,7 @@ pub async fn download_backend(
                 "Resolving variant {} via GitHub Releases API: repo={} match={}",
                 entry.id, repo, primary
             );
-            resolve_github_release_url(repo, primary, entry.gh_repo_match_alt, entry.gh_repo_pref_prefix).await?
+            resolve_github_release_url(repo, primary, entry.gh_repo_match_alt, entry.gh_repo_pref_prefix, github_token.as_deref()).await?
         }
     };
 
@@ -1321,26 +1331,60 @@ async fn resolve_github_release_url(
     primary_match: &str,
     alt_match: Option<&str>,
     preferred_prefix: Option<&str>,
+    github_token: Option<&str>,
 ) -> Result<String, String> {
     let api_url = format!("https://api.github.com/repos/{}/releases/latest", repo);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
         .build()
         .map_err(|e| format!("Failed to build HTTP client for GitHub lookup: {}", e))?;
-    let response = client
-        .get(&api_url)
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "Meridian-BackendManager")
+
+    // First attempt: anonymous. Builds the request fresh so a second
+    // attempt with auth headers can use a different `RequestBuilder`
+    // without mutating the first.
+    let anonymous = build_github_request(&client, &api_url, None)
         .send()
         .await
         .map_err(|e| format!("GitHub API request failed for {}: {}", repo, e))?;
-    if !response.status().is_success() {
+
+    let response = if anonymous.status().as_u16() == 403 {
+        if let Some(token) = github_token {
+            log::info!(
+                "GitHub Releases API for {} returned HTTP 403 — retrying with bearer token",
+                repo
+            );
+            let authed = build_github_request(&client, &api_url, Some(token))
+                .send()
+                .await
+                .map_err(|e| format!("GitHub API retry failed for {}: {}", repo, e))?;
+            if !authed.status().is_success() {
+                return Err(format!(
+                    "GitHub Releases API for {} returned HTTP {} even with bearer token",
+                    repo,
+                    authed.status()
+                ));
+            }
+            authed
+        } else {
+            // No token configured — surface the actionable advice so the
+            // user knows where to add one.
+            return Err(format!(
+                "GitHub Releases API for {} returned HTTP 403 (anonymous rate limit). \
+                 Configure a GitHub Personal Access Token in Settings > Advanced > Install \
+                 Paths (githubToken) for elevated rate limits and retry.",
+                repo
+            ));
+        }
+    } else if !anonymous.status().is_success() {
         return Err(format!(
             "GitHub Releases API for {} returned HTTP {}",
             repo,
-            response.status()
+            anonymous.status()
         ));
-    }
+    } else {
+        anonymous
+    };
+
     let body: serde_json::Value = response
         .json()
         .await
@@ -1373,6 +1417,26 @@ async fn resolve_github_release_url(
             .unwrap_or_default(),
         preferred_prefix
     ))
+}
+
+/// Build a `GET api.github.com/.../releases/latest` request with the
+/// common headers. The optional `token` is sent as a Bearer token —
+/// nothing else is changed about the request. Hoisted out of
+/// `resolve_github_release_url` so the anonymous and auth-retry paths
+/// share the same accept / user-agent surface.
+fn build_github_request(
+    client: &reqwest::Client,
+    url: &str,
+    token: Option<&str>,
+) -> reqwest::RequestBuilder {
+    let mut req = client
+        .get(url)
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "Meridian-BackendManager");
+    if let Some(t) = token {
+        req = req.header("Authorization", format!("Bearer {}", t));
+    }
+    req
 }
 
 /// Pick the first asset whose `name` matches `needle` (case-insensitive

@@ -16,7 +16,7 @@ import {
 import { BUILTIN_NAVIGATOR_ICON_THEME_IDS } from '@/types/icon-theme';
 
 export const USER_SETTINGS_SCHEMA_VERSION_KEY = '__schemaVersion';
-export const USER_SETTINGS_SCHEMA_VERSION = 28;
+export const USER_SETTINGS_SCHEMA_VERSION = 29;
 
 export const DEFAULT_GLOBAL_SEARCH_IGNORED_PATHS = [
   '/node_modules',
@@ -675,6 +675,13 @@ async function migrateUserSettingsStep(storage: StorageAdapter, fromVersion: num
     // Users who explicitly disable it in Settings are respected on subsequent
     // launches (the toggle calls setUseOmnix(false) which persists the choice).
     await storage.set('meridian.aiPanel.omnixEnabled', true);
+  }
+
+  if (fromVersion === 28 && toVersion === 29) {
+    // Optional GitHub Personal Access Token used by Backend Manager's
+    // GitHub Releases resolver (Fix D). Backfill empty default so the
+    // anonymous path is taken until the user explicitly configures one.
+    await setDefaultStringIfMissing(storage, 'meridian.githubToken', '');
   }
 
   if (fromVersion === 22 && toVersion === 23) {
