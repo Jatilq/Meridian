@@ -145,16 +145,19 @@ function getDriveIcon(drive: {
           <TooltipTrigger as-child>
             <Button
               class="nav-sidebar-item"
-              size="icon"
+              :class="{ 'nav-sidebar-item--active': item.name === router.currentRoute.value.name }"
+              size="sm"
+              variant="ghost"
               :value="item.name"
               :is-active="item.name === router.currentRoute.value.name"
               @click="router.push({ name: item.name })"
             >
               <component
                 :is="item.icon"
-                :size="18"
+                :size="16"
                 class="nav-sidebar-item-icon"
               />
+              <span class="nav-sidebar-item-label">{{ item.title }}</span>
             </Button>
           </TooltipTrigger>
           <TooltipContent
@@ -181,16 +184,19 @@ function getDriveIcon(drive: {
           <TooltipTrigger as-child>
             <Button
               class="nav-sidebar-item"
-              size="icon"
+              :class="{ 'nav-sidebar-item--active': item.name === router.currentRoute.value.name }"
+              size="sm"
+              variant="ghost"
               :value="item.name"
               :is-active="item.name === router.currentRoute.value.name"
               @click="router.push({ name: item.name })"
             >
               <component
                 :is="item.icon"
-                :size="18"
+                :size="16"
                 class="nav-sidebar-item-icon"
               />
+              <span class="nav-sidebar-item-label">{{ item.title }}</span>
             </Button>
           </TooltipTrigger>
           <TooltipContent
@@ -247,10 +253,13 @@ function getDriveIcon(drive: {
         :key="drive.path"
       >
         <TooltipTrigger as-child>
-          <Button
+          <div
             class="nav-sidebar-drive"
-            size="icon"
+            role="button"
+            tabindex="0"
             @click="openDrive(drive.path)"
+            @keydown.enter="openDrive(drive.path)"
+            @keydown.space.prevent="openDrive(drive.path)"
           >
             <UbuntuWslIcon
               v-if="drive.drive_type === 'WSL'"
@@ -263,7 +272,13 @@ function getDriveIcon(drive: {
               :size="16"
               class="nav-sidebar-drive-icon"
             />
-          </Button>
+            <span class="nav-sidebar-drive-info">
+              <span class="nav-sidebar-drive-label">{{ drive.name }}</span>
+              <span v-if="drive.is_mounted && drive.total_space > 0" class="nav-sidebar-drive-usage">
+                {{ drive.percent_used }}%
+              </span>
+            </span>
+          </div>
         </TooltipTrigger>
         <TooltipContent
           :side="inlineEndSide"
@@ -305,75 +320,123 @@ function getDriveIcon(drive: {
 .nav-sidebar-items {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   padding: 4px;
-  gap: 12px;
+  gap: 2px;
 }
 
 .nav-sidebar-spacer {
   flex: 1;
 }
 
+.nav-sidebar-item {
+  display: flex;
+  width: 100%;
+  height: 32px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  background-color: transparent;
+  cursor: pointer;
+  color: hsl(var(--foreground) / 55%);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.nav-sidebar-item:hover {
+  background-color: hsl(var(--foreground) / 5%);
+  color: hsl(var(--foreground) / 85%);
+}
+
+.nav-sidebar-item--active,
+.nav-sidebar-item[is-active="true"] {
+  background-color: hsl(var(--primary) / 12%);
+  color: hsl(var(--primary));
+}
+
+.nav-sidebar-item--active:hover,
+.nav-sidebar-item[is-active="true"]:hover {
+  background-color: hsl(var(--primary) / 18%);
+  color: hsl(var(--primary));
+}
+
+.nav-sidebar-item-icon {
+  flex-shrink: 0;
+  stroke: currentColor;
+}
+
+.nav-sidebar-item-label {
+  font-size: 0.8rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ─── Drives section ────────────────────────────────────────────────────── */
+
 .nav-sidebar-drives {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  align-items: center;
   padding: 4px;
   padding-bottom: 12px;
-  gap: 8px;
-}
-
-.nav-sidebar-item {
-  display: flex;
-  width: 28px;
-  height: 28px;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-sm);
-  background-color: transparent;
-  cursor: pointer;
-}
-
-.nav-sidebar-item:hover {
-  background-color: hsl(var(--foreground) / 3%);
-}
-
-.nav-sidebar-item[is-active="true"] {
-  background-color: hsl(var(--foreground) / 5%);
-}
-
-.nav-sidebar-item-icon {
-  stroke: hsl(var(--icon));
-}
-
-.nav-sidebar-item[is-active="true"] .nav-sidebar-item-icon {
-  stroke: hsl(var(--primary));
+  gap: 2px;
 }
 
 .nav-sidebar-drive {
   display: flex;
-  width: 24px;
-  height: 24px;
+  width: 100%;
+  height: 28px;
   align-items: center;
-  justify-content: center;
+  gap: 8px;
+  padding: 0 10px;
   border-radius: var(--radius-sm);
   background-color: transparent;
   cursor: pointer;
+  color: hsl(var(--foreground) / 55%);
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .nav-sidebar-drive:hover {
-  background-color: hsl(var(--foreground) / 3%);
+  background-color: hsl(var(--foreground) / 5%);
+  color: hsl(var(--foreground) / 85%);
 }
 
 .nav-sidebar-drive-icon {
-  color: hsl(var(--muted-foreground));
-  stroke: hsl(var(--muted-foreground));
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  color: inherit;
+  stroke: currentColor;
 }
 
-.nav-sidebar-drive:hover .nav-sidebar-drive-icon {
-  color: hsl(var(--foreground));
-  stroke: hsl(var(--foreground));
+.nav-sidebar-drive-info {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.nav-sidebar-drive-label {
+  font-size: 0.72rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: inherit;
+}
+
+.nav-sidebar-drive-usage {
+  font-size: 0.6rem;
+  font-weight: 600;
+  white-space: nowrap;
+  color: hsl(var(--muted-foreground));
+  flex-shrink: 0;
+  min-width: max-content;
+  font-family: var(--font-mono, 'Consolas', 'Courier New', monospace);
 }
 
 </style>

@@ -30,6 +30,7 @@ interface NodeView {
   host: string;
   role: string;
   online: boolean;
+  local: boolean;
   cpu: { name: string; cores: number; utilization: number } | null;
   ram: { totalMb: number; usedMb: number; freeMb: number; utilization: number } | null;
   gpus: Array<{
@@ -54,25 +55,32 @@ interface NodeDef {
   local: boolean;
 }
 
-// Build node list from SSH connections + mark local status
+// Build node list from the hardware pool's local-machine entry plus
+// any configured cluster workers. The local machine (MAMBA) uses
+// host='local' to match the useHardwarePool composable's built-in
+// local source — without this the join in nodeViews drops MAMBA's
+// GPUs and combinedVram never includes them. (Fix 1: the old code
+// only added local when a clusterWorker had label === 'MAMBA', which
+// meant a fresh install with no workers configured saw 0 local GPUs.)
 const nodeDefs = computed<NodeDef[]>(() => {
   const conns = clusterWorkers.value || [];
-  // MAMBA is special - it's local (where Meridian runs)
-  const mambaConn = conns.find(c => c.label === 'MAMBA');
-  const nodes: NodeDef[] = [];
-
-  if (mambaConn) {
-    nodes.push({
-      id: mambaConn.host,
-      name: mambaConn.label || mambaConn.host,
-      host: mambaConn.host,
+  const nodes: NodeDef[] = [
+    {
+      id: 'local',
+      name: 'MAMBA',
+      host: 'local',
       role: 'Primary inference',
       local: true,
-    });
-  }
+    },
+  ];
 
-  // Other connections are remote
-  conns.filter(c => c.label !== 'MAMBA').forEach(c => {
+  // All cluster workers are remote. Filter out MAMBA — it's already
+  // the local-machine entry above; adding it again from workers would
+  // double-count its 3× RTX 3060 in combinedVram (36 GB × 2 = 72 GB)
+  // and show two nodes for the same physical machine.
+  conns
+    .filter(c => c.label !== 'MAMBA')
+    .forEach(c => {
     nodes.push({
       id: c.host,
       name: c.label || c.host,
@@ -107,6 +115,7 @@ const nodeViews = computed<NodeView[]>(() => {
       host: def.host,
       role: def.role,
       online: snap?.online ?? false,
+      local: def.local,
       cpu: snap?.cpu ?? null,
       ram: snap?.ram ?? null,
       gpus: snap?.gpus ?? [],
@@ -116,6 +125,7 @@ const nodeViews = computed<NodeView[]>(() => {
 });
 
 const rpcLaunching = ref(false);
+const rpcActive = ref(false);
 const rpcMessage = ref('');
 
 /** Build an SshCredentials-shaped object for one stored connection. References
@@ -132,20 +142,41 @@ function credsFromConn(conn: SshConnectionSetting | undefined) {
   };
 }
 
-// Generic RPC slave launcher. Targets the first connected worker. A
-// brand-new install has zero SSH workers, so the function guards on
-// `nodeViews.length` and exits early — the surrounding empty-state card
-// owns the UI in that case. The previous BLACK-specific lookup silently
-// no-op'd when the label was absent, which is what the screenshot bug
-// showed.
+/** Find the first non-local worker node, or null if none exist. */
+function firstWorkerNode(): NodeView | null {
+  return nodeViews.value.find(n => !n.local) ?? null;
+}
+
+/** Maximum GPU utilization across all GPUs on a node (0 if none). */
+function maxUtil(gpus: NodeView['gpus']): number {
+  return gpus.length > 0 ? Math.max(...gpus.map(g => g.utilization || 0)) : 0;
+}
+
+/** Maximum GPU temperature across all GPUs on a node, formatted string. */
+function maxTemp(gpus: NodeView['gpus']): string {
+  return gpus.length > 0 ? `${Math.max(...gpus.map(g => g.temperature || 0))}°C` : '—';
+}
+
+/** Memory text line: 36.0GB/36.0GB (100%), monospace. Returns '—' when offline. */
+function memText(node: NodeView): string {
+  if (!node.online || node.gpus.length === 0) return '—';
+  const total = node.gpus.reduce((s, g) => s + (g.memoryTotal || 0), 0);
+  const used = node.gpus.reduce((s, g) => s + (g.memoryUsed || 0), 0);
+  const pct = total > 0 ? ((used / total) * 100).toFixed(0) : '0';
+  return `${(used / 1024).toFixed(1)}GB/${(total / 1024).toFixed(1)}GB (${pct}%)`;
+}
+
+// Generic RPC slave launcher. Targets the first non-local worker (BLACK),
+// not MAMBA. A brand-new install has zero SSH workers, so the function
+// guards on `firstWorkerNode()` and exits early if none found.
 async function launchRpcSlave() {
-  if (!nodeViews.value.length) {
-    rpcMessage.value = 'No workers to launch on. Add one above first.';
+  const target = firstWorkerNode();
+  if (!target) {
+    rpcMessage.value = 'No worker nodes to launch on. Add one above first.';
     return;
   }
   rpcLaunching.value = true;
   rpcMessage.value = '';
-  const target = nodeViews.value[0];
   const conn = clusterWorkers.value?.find(c => c.host === target.host);
   if (!conn) {
     rpcMessage.value = `No SSH connection found for ${target.name}. Re-add the worker.`;
@@ -157,17 +188,18 @@ async function launchRpcSlave() {
       creds: credsFromConn(conn),
       rpcCommand: 'llama-server --rpc 0.0.0.0:50052',
     });
-    rpcMessage.value = out || `RPC slave launch sent to ${target.name}.`;
+    rpcMessage.value = out || `RPC slave launched on ${target.name}.`;
+    rpcActive.value = true;
   } catch (error) {
     rpcMessage.value = `Failed: ${error}`;
+    rpcActive.value = false;
   } finally {
     rpcLaunching.value = false;
   }
 }
 
-// Template label helper. Empty when there are no workers — that's the
-// empty-state branch (button hidden via v-if), not a derelict label.
-const firstWorkerName = computed(() => nodeViews.value[0]?.name ?? '');
+const firstWorkerName = computed(() => firstWorkerNode()?.name ?? '');
+
 
 // ----- Add Worker dialog (Fix 4) -----
 interface WorkerForm {
@@ -294,6 +326,13 @@ function gb(mb: number): string {
   return (mb / 1024).toFixed(1);
 }
 
+/** Average VRAM utilization percentage across all GPUs. */
+function vramUtil(gpus: NodeView['gpus']): number {
+  const totalMb = gpus.reduce((s, g) => s + (g.memoryTotal || 0), 0);
+  const usedMb = gpus.reduce((s, g) => s + (g.memoryUsed || 0), 0);
+  return totalMb > 0 ? Math.round((usedMb / totalMb) * 100) : 0;
+}
+
 onMounted(() => {
   window.addEventListener('keydown', onDialogKeydown);
 });
@@ -306,90 +345,147 @@ onUnmounted(() => {
 <template>
   <div class="cluster">
     <div class="cluster__header">
-      <h1 class="cluster__title">Cluster Control</h1>
+      <h1 class="cluster__title">Topology</h1>
       <div class="cluster__summary">
         Combined VRAM: <strong class="cluster__vram-value">{{ combinedVram }}</strong>
       </div>
     </div>
 
+    <div class="cluster__section-header">NETWORK TOPOLOGY</div>
+
     <template v-if="nodeViews.length">
-      <!-- Topology Map -->
+      <!-- Topology Map — scaled 1.65× for visual dominance.
+           Vertical 2-node layout. Name labels ABOVE each icon.
+           Stat badge BESIDE icon (same row, vertically centered).
+           Horizontal VRAM fill-bar near bottom of each icon.
+           Connection line with chevron arrowheads, bright when RPC active.
+           Monospace throughout, accent color from theme.
+           viewBox 400×580 accommodates 2 nodes at 260px spacing. -->
       <div class="cluster__topology">
       <svg
-        viewBox="0 0 600 200"
+        viewBox="0 0 400 580"
         class="cluster__topology-svg"
         xmlns="http://www.w3.org/2000/svg"
       >
-        <!-- Connection line -->
-        <line
-          v-if="nodeViews.length > 1"
-          x1="150"
-          y1="100"
-          :x2="150 + (nodeViews.length - 1) * 180"
-          y2="100"
-          class="cluster__connection-line"
-        />
-        <text
-          v-if="nodeViews.length > 1"
-          x="250"
-          y="90"
-          class="cluster__connection-label"
-        >
-          LAN
-        </text>
+        <defs>
+          <marker id="arrow-down" markerWidth="10" markerHeight="10" refX="10" refY="0" orient="auto">
+            <polygon points="0,-5 10,0 0,5" fill="currentColor" />
+          </marker>
+          <marker id="arrow-up" markerWidth="10" markerHeight="10" refX="0" refY="0" orient="auto">
+            <polygon points="10,-5 0,0 10,5" fill="currentColor" />
+          </marker>
+        </defs>
 
-        <!-- Node cards -->
+        <!-- ================================================================ -->
+        <!-- Connection line: MAMBA (top) ↔ BLACK (bottom)                   -->
+        <!-- ================================================================ -->
+        <g v-if="nodeViews.length > 1">
+          <line
+            x1="120" y1="197"
+            x2="120" y2="288"
+            class="cluster__conn-line"
+            :class="{ 'cluster__conn-line--active': rpcActive }"
+            marker-start="url(#arrow-up)"
+            marker-end="url(#arrow-down)"
+          />
+          <rect x="102" y="227" width="36" height="16" rx="4" class="cluster__conn-badge-bg" />
+          <text x="120" y="238" text-anchor="middle" class="cluster__conn-badge">RPC</text>
+        </g>
+
+        <!-- ================================================================ -->
+        <!-- Per-node groups. Each node at y = idx * 260.                    -->
+        <!-- Icon group scaled 1.65× around its center (120, 96) via nested  -->
+        <!-- transform, so all icon-element coordinates stay original.        -->
+        <!-- ================================================================ -->
         <g
           v-for="(node, idx) in nodeViews"
           :key="node.host"
+          :transform="`translate(0, ${idx * 260})`"
         >
-          <rect
-            :x="idx * 180 + 20"
-            y="40"
-            width="140"
-            height="120"
-            rx="6"
-            class="cluster__node-svg-card"
+          <title>{{ node.name }} ({{ node.host }})
+{{ node.online ? 'Online' : 'Offline' }}
+CPU: {{ node.cpu?.name ?? 'N/A' }} · {{ node.cpu?.cores ?? '?' }} cores
+RAM: {{ node.ram ? (node.ram.usedMb/1024).toFixed(1) + '/' + (node.ram.totalMb/1024).toFixed(1) + 'GB' : 'N/A' }}
+GPU{{ node.gpus.length > 1 ? 's: ' : ': ' }}{{ node.gpus.length > 0 ? node.gpus.map(g => g.name + ' (' + (g.memoryUsed/1024).toFixed(1) + '/' + (g.memoryTotal/1024).toFixed(1) + 'GB)').join(', ') : 'None' }}</title>
+
+          <!-- === Name label ABOVE icon === -->
+          <text x="120" y="0" text-anchor="middle" class="cluster__node-label-name">{{ node.name }}</text>
+          <text x="120" y="16" text-anchor="middle" class="cluster__node-label-host">{{ node.host }}</text>
+
+          <!-- === Device icon — scaled 1.65× around original center (100, 58)
+               then positioned at viewBox center (120, 96). Pattern:
+               translate(destX, destY) scale(s) translate(-origX, -origY) -->
+          <g
+            transform="translate(120, 96) scale(1.65) translate(-100, -58)"
+            class="cluster__tower-icon"
             :class="{
-              'cluster__node-svg-card--online': node.online,
-              'cluster__node-svg-card--offline': !node.online,
+              'cluster__tower-icon--online': node.online,
+              'cluster__tower-icon--offline': !node.online,
             }"
-          />
+          >
+            <!-- Icon elements at original coordinates; 1.65× scaling
+                 applied uniformly by the parent transform. -->
+            <g v-if="idx === 0">
+              <rect x="64" y="4" width="10" height="18" rx="2" class="cluster__rack-ear" />
+              <rect x="126" y="4" width="10" height="18" rx="2" class="cluster__rack-ear" />
+              <rect x="74" y="8" width="52" height="100" rx="3" class="cluster__tower-body" />
+              <rect x="82" y="16" width="36" height="3" rx="1" class="cluster__icon-slot" />
+              <rect x="82" y="24" width="36" height="3" rx="1" class="cluster__icon-slot" />
+              <rect x="82" y="32" width="36" height="3" rx="1" class="cluster__icon-slot" />
+              <rect x="82" y="44" width="36" height="8" rx="1" class="cluster__icon-drive" />
+              <rect x="82" y="58" width="36" height="8" rx="1" class="cluster__icon-drive" />
+              <rect x="82" y="74" width="36" height="3" rx="1" class="cluster__icon-slot" />
+              <rect x="82" y="82" width="36" height="3" rx="1" class="cluster__icon-slot" />
+              <rect x="82" y="90" width="36" height="3" rx="1" class="cluster__icon-slot" />
+              <circle cx="100" cy="97" r="2" class="cluster__icon-led" />
+            </g>
+
+            <g v-else>
+              <polygon points="76,14 80,8 120,8 124,14 124,104 76,104" class="cluster__tower-body" />
+              <rect x="76" y="14" width="3" height="90" class="cluster__rgb-strip" />
+              <polygon points="86,20 114,20 118,26 86,26" class="cluster__icon-slot" />
+              <polygon points="86,32 114,32 118,38 86,38" class="cluster__icon-slot" />
+              <polygon points="86,44 114,44 118,50 86,50" class="cluster__icon-slot" />
+              <rect x="84" y="60" width="32" height="8" rx="1" class="cluster__icon-drive" />
+              <rect x="84" y="78" width="32" height="14" rx="2" class="cluster__icon-psu" />
+              <circle cx="118" cy="97" r="3" class="cluster__icon-led" />
+            </g>
+
+            <!-- VRAM fill-bar (also inside scaled group, keeps position) -->
+            <g v-if="node.online && node.gpus.length > 0">
+              <rect x="80" y="95" width="40" height="6" rx="2" class="cluster__vram-fill-bg" />
+              <rect
+                x="80" y="95"
+                :width="40 * vramUtil(node.gpus) / 100"
+                height="6"
+                rx="2"
+                class="cluster__vram-fill"
+              />
+            </g>
+          </g>
+
+          <!-- === Indicator dot (left of icon, vertically centered) === -->
           <circle
-            :cx="idx * 180 + 30"
-            cy="55"
-            r="5"
-            class="cluster__dot-svg"
-            :class="node.online ? 'cluster__dot-svg--on' : 'cluster__dot-svg--off'"
+            cx="46"
+            cy="120"
+            r="6"
+            class="cluster__dot-indicator"
+            :class="node.online ? 'cluster__dot-indicator--on' : 'cluster__dot-indicator--off'"
           />
-          <text
-            :x="idx * 180 + 40"
-            y="58"
-            class="cluster__node-name-svg"
-          >
-            {{ node.name }}
-          </text>
-          <text
-            :x="idx * 180 + 40"
-            y="78"
-            class="cluster__node-host-svg"
-          >
-            {{ node.host }}
-          </text>
-          <text
-            :x="idx * 180 + 40"
-            y="98"
-            class="cluster__node-gpu-svg"
-          >
-            {{ node.gpus.length > 0 ? node.gpus[0].name : 'No GPU' }}
-          </text>
-          <text
-            :x="idx * 180 + 40"
-            y="118"
-            class="cluster__node-vram-svg"
-          >
-            {{ node.gpus.length > 0 ? `${gb(node.gpus[0].memoryUsed)}/${gb(node.gpus[0].memoryTotal)}GB` : '—' }}
-          </text>
+
+          <!-- === Stat badge (right of icon, vertically centered) === -->
+          <g v-if="node.online && node.gpus.length > 0" transform="translate(175, 101)">
+            <rect x="0" y="0" width="72" height="38" rx="5" class="cluster__stat-bg" />
+            <text x="36" y="15" text-anchor="middle" class="cluster__stat-text">{{ maxUtil(node.gpus) }}%</text>
+            <text x="36" y="29" text-anchor="middle" class="cluster__stat-text">{{ maxTemp(node.gpus) }}</text>
+          </g>
+          <g v-else transform="translate(175, 109)">
+            <rect x="0" y="0" width="72" height="22" rx="5" class="cluster__stat-bg" />
+            <text x="36" y="15" text-anchor="middle" class="cluster__stat-text">Offline</text>
+          </g>
+
+          <!-- === Memory text below icon === -->
+          <text x="120" y="185" text-anchor="middle" class="cluster__mem-text">{{ memText(node) }}</text>
         </g>
       </svg>
 
@@ -457,22 +553,21 @@ onUnmounted(() => {
             <span class="cluster__hw-label">GPU</span>
             <span class="cluster__hw-value">No GPU data</span>
           </div>
+          <!-- Per-node Launch RPC Slave button — only on worker nodes (non-local), not on MAMBA -->
+          <div v-if="!node.local" class="cluster__node-actions">
+            <button
+              class="cluster__launch"
+              :disabled="rpcLaunching"
+              @click="launchRpcSlave"
+            >
+              {{ rpcLaunching ? 'Launching…' : `Launch RPC Slave on ${node.name}` }}
+            </button>
+          </div>
         </template>
         <div v-else class="cluster__offline">
           {{ node.error ? `Offline — ${node.error}` : 'Offline (no connection)' }}
         </div>
       </div>
-    </div>
-
-    <div class="cluster__actions">
-      <button
-        class="cluster__launch"
-        :disabled="rpcLaunching"
-        @click="launchRpcSlave"
-      >
-        {{ rpcLaunching ? 'Launching…' : firstWorkerName ? `Launch RPC Slave on ${firstWorkerName}` : 'Launch RPC Slave' }}
-      </button>
-      <span v-if="rpcMessage" class="cluster__msg">{{ rpcMessage }}</span>
     </div>
     </template>
 
@@ -682,19 +777,20 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+/* ── Topology page — uses global Meridian design system from vars.css
+     (near-black bg, teal accent, white text, green status, thin borders).
+     Only topology-specific values are kept as local variables.
+   ──────────────────────────────────────────────────────────────────────── */
+
 .cluster {
+  --clr-accent-dim: hsl(8, 50%, 15%); /* dark coral fill for tower body */
+
   display: flex;
   flex-direction: column;
   gap: 1rem;
   padding: 1.5rem;
-  /* Page-level no-scroll container. The active tab's inner list is the
-     only scroll region. Previous `height: 100%; overflow-y: auto` made
-     .cluster AND .cluster__nodes BOTH scroll targets — wheel events
-     split between them and the inner list's `max-height: calc(100vh - ...)`
-     cap was usually larger than the actual remaining space, so its
-     bottom got clipped under .cluster's `overflow: auto` boundary
-     instead of being reachable via scroll. `flex: 1; min-height: 0`
-     claims the full router-view-wrapper height without bleeding past it. */
+  background: var(--background);
+  color: var(--foreground);
   flex: 1;
   min-height: 0;
   overflow: hidden;
@@ -708,83 +804,194 @@ onUnmounted(() => {
 
 .cluster__title {
   font-size: 1.25rem;
-  font-weight: 600;
-  color: hsl(var(--foreground));
+  font-weight: 700;
+  color: var(--foreground);
 }
 
 .cluster__summary {
-  color: hsl(var(--muted-foreground));
+  color: var(--muted-foreground);
   font-size: 0.875rem;
 }
 
 .cluster__vram-value {
-  color: #c9a84c;
-  font-weight: 600;
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.cluster__section-header {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  padding: 0.5rem 0 0.25rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.75rem;
 }
 
 .cluster__topology {
-  margin-bottom: 1rem;
   position: relative;
+  background: var(--background-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 1rem 1rem 0.5rem;
+  margin-bottom: 1rem;
 }
 
 .cluster__topology-svg {
   width: 100%;
-  height: 160px;
-  background: #1e1e1e;
-  border-radius: var(--radius-sm);
-  border: 1px solid hsl(var(--border));
+  height: min(55vh, 480px);
+  display: block;
 }
 
-.cluster__connection-line {
-  stroke: hsl(var(--primary) / 40%);
+.cluster__conn-line {
+  stroke: var(--border);
+  color: var(--border);
   stroke-width: 2;
-  stroke-dasharray: 4 2;
+  stroke-dasharray: 5 4;
+  transition: stroke 0.3s ease, opacity 0.3s ease, color 0.3s ease;
+  opacity: 0.3;
+}
+.cluster__conn-line--active {
+  stroke: var(--primary);
+  color: var(--primary);
+  stroke-dasharray: none;
+  opacity: 1;
 }
 
-.cluster__connection-label {
-  fill: hsl(var(--muted-foreground));
-  font-size: 10px;
-  text-anchor: middle;
-}
-
-.cluster__node-svg-card {
-  fill: hsl(var(--background-2));
-  stroke: hsl(var(--border));
+.cluster__conn-badge-bg {
+  fill: var(--background-3);
+  stroke: var(--primary);
   stroke-width: 1;
 }
 
-.cluster__node-svg-card--online {
-  stroke: #c9a84c;
-  stroke-width: 1.5;
+.cluster__conn-badge {
+  fill: var(--muted-foreground);
+  font-size: 10px;
+  font-family: var(--font-mono, 'Consolas', 'Courier New', monospace);
+  font-weight: 600;
+  text-anchor: middle;
+  dominant-baseline: central;
 }
 
-.cluster__dot-svg {
+/* Arrowhead markers use fill="currentColor" in the SVG definition —
+   they inherit the color of the referencing <line> element. The line's
+   `color` CSS property is set via .cluster__conn-line / --active so
+   the marker fill automatically changes when rpcActive toggles. */
+
+/* Tower icon shared */
+.cluster__tower-icon {
+  transition: opacity 0.2s ease;
+}
+.cluster__tower-icon--online {
+  opacity: 1;
+}
+.cluster__tower-icon--offline {
+  opacity: 0.25;
+}
+
+.cluster__tower-body {
+  fill: var(--background-3);
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.cluster__tower-icon--online .cluster__tower-body {
+  fill: var(--clr-accent-dim);
+  stroke: var(--primary);
+  stroke-width: 2;
+}
+
+/* MAMBA rack ears */
+.cluster__rack-ear {
+  fill: var(--background-3);
+  stroke: var(--border);
+  stroke-width: 0.8;
+}
+
+/* Gaming tower RGB strip — uses accent color */
+.cluster__rgb-strip {
+  fill: var(--clr-accent-dim);
+}
+.cluster__tower-icon--online .cluster__rgb-strip {
+  fill: var(--primary);
+}
+
+/* Slot / drive / PSU filler — dark against near-black bg */
+.cluster__icon-slot {
+  fill: rgba(0, 0, 0, 0.35);
+  stroke: none;
+}
+.cluster__icon-drive {
+  fill: rgba(0, 0, 0, 0.3);
+  stroke: var(--border);
+  stroke-width: 0.5;
+}
+.cluster__icon-psu {
+  fill: rgba(0, 0, 0, 0.25);
+  stroke: var(--border);
+  stroke-width: 0.5;
+}
+.cluster__icon-led {
+  fill: #22c55e;
+}
+
+/* Online/offline indicator dot — fully opaque green/gray */
+.cluster__dot-indicator {
+  transition: fill 0.2s ease;
+}
+.cluster__dot-indicator--on {
+  fill: #22c55e;
+  stroke: none;
+}
+.cluster__dot-indicator--off {
   fill: #6b7280;
+  stroke: none;
 }
 
-.cluster__dot-svg--on {
-  fill: #34d399;
+/* Node name ABOVE icon — large, bold, white (section-heading weight) */
+.cluster__node-label-name {
+  fill: var(--foreground);
+  font-size: 20px;
+  font-weight: 800;
+  font-family: var(--font-mono, 'Consolas', 'Courier New', monospace);
+  letter-spacing: 0.02em;
+}
+.cluster__node-label-host {
+  fill: var(--muted-foreground);
+  font-size: 12px;
+  font-family: var(--font-mono, 'Consolas', 'Courier New', monospace);
 }
 
-.cluster__node-name-svg {
-  fill: hsl(var(--foreground));
+/* Memory text: monospace, accent color, large enough to read at a glance */
+.cluster__mem-text {
+  fill: var(--primary);
+  font-size: 14px;
+  font-weight: 700;
+  font-family: var(--font-mono, 'Consolas', 'Courier New', monospace);
+  /* Fully opaque — pops against near-black bg. */
+}
+
+/* Floating stat badge — dark panel, thin subtle border */
+.cluster__stat-bg {
+  fill: var(--background-3);
+  stroke: var(--primary);
+  stroke-width: 1;
+}
+.cluster__stat-text {
+  fill: #fff;
   font-size: 11px;
   font-weight: 600;
+  font-family: var(--font-mono, 'Consolas', 'Courier New', monospace);
 }
 
-.cluster__node-host-svg {
-  fill: hsl(var(--muted-foreground));
-  font-size: 10px;
+/* VRAM fill-bar gauge — uses accent color, bold fill */
+.cluster__vram-fill-bg {
+  fill: rgba(0, 0, 0, 0.4);
 }
-
-.cluster__node-gpu-svg {
-  fill: hsl(var(--muted-foreground));
-  font-size: 10px;
-}
-
-.cluster__node-vram-svg {
-  fill: hsl(var(--foreground));
-  font-size: 10px;
+.cluster__vram-fill {
+  fill: var(--primary);
+  transition: width 0.3s ease;
+  /* Fully opaque — no blend-into-background. */
 }
 
 .cluster__add-worker {
@@ -797,9 +1004,9 @@ onUnmounted(() => {
   font-size: 0.75rem;
   padding: 0.25rem 0.5rem;
   border-radius: var(--radius-sm);
-  border: 1px solid hsl(var(--primary));
-  background: hsl(var(--primary) / 10%);
-  color: hsl(var(--foreground));
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted-foreground);
   cursor: pointer;
 }
 
@@ -809,39 +1016,29 @@ onUnmounted(() => {
   gap: 0.75rem;
   /* The ONLY scroll container in this page. `flex: 1; min-height: 0`
      claims the leftover vertical space inside .cluster, AND
-     `max-height` enforces a concrete cap so the list scrolls reliably
-     even when the upstream height chain is unconstrained. 100vh /
-     100dvh cascade follows the "modern wins last-decl" pattern —
-     mobile webviews: dvh constrains; Tauri desktop: both units
-     evaluate identically so cascade is effectively a no-op there.
-     320 cap is empirically tight against the topology-heavy chrome:
+     `max-height` enforces a concrete cap so the list scrolls reliably.
+     Updated for the scaled-topology era:
        page padding top (.cluster)   24px
-       header                         40px
-       gap (header → topology)        16px
-       topology SVG                  160px  (the dominant chart)
-       gap (topology → nodes)         16px
-     Subtotal above section ≈ 256px. Add window-toolbar (32, in
-     router-view above .cluster): ~288px above the section's top
-     edge. At 100vh=720, available=432, cap=400 (32px tighter) → cap
-     kicks in early. At 100vh=1080, available=792, cap=760 (32px
-     tighter) → cap still wins. .cluster has overflow:hidden, so
-     without this cap the nodes list bleeds past .cluster's bottom
-     and gets clipped at the viewport edge — that's the bug this
-     cap prevents. Add Worker modal teleports to document body so
-     its height doesn't shift .cluster layout. */
+       section header                  0px
+       cluster__topology panel padding 16px
+       topology SVG               min(55vh, 480px)
+       margin-bottom                  16px
+     At 55vh with 720px viewport = 396px. Cap = min(55vh, 480px) + ~150
+     for header/gap/padding ≈ 600px overhead. Using 680 as a generous
+     upper bound so even at 480px SVG height the cards have room. */
   flex: 1;
   min-height: 0;
-  max-height: calc(100vh - var(--window-toolbar-height, 48px) - 320px);
-  max-height: calc(100dvh - var(--window-toolbar-height, 48px) - 320px);
+  max-height: calc(100vh - var(--window-toolbar-height, 48px) - 680px);
+  max-height: calc(100dvh - var(--window-toolbar-height, 48px) - 680px);
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
 
 .cluster__node {
-  border: 1px solid hsl(var(--border));
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 0.75rem 1rem;
-  background: hsl(var(--background-2));
+  background: var(--background-2);
 }
 
 .cluster__node-head {
@@ -856,16 +1053,15 @@ onUnmounted(() => {
   border-radius: 50%;
 }
 
-.cluster__dot--on { background: #34d399; }
+.cluster__dot--on { background: hsl(var(--success)); }
 .cluster__dot--off { background: #6b7280; }
 
-.cluster__node-name { font-weight: 600; color: hsl(var(--foreground)); }
-.cluster__node-host { color: hsl(var(--muted-foreground)); font-size: 0.8rem; }
+.cluster__node-name { font-weight: 700; color: var(--foreground); }
+.cluster__node-host { color: var(--muted-foreground); font-size: 0.8rem; }
 
 .cluster__node-role {
-  color: hsl(var(--muted-foreground));
+  color: var(--muted-foreground);
   font-size: 0.75rem;
-  font-style: italic;
 }
 
 .cluster__hw-row {
@@ -880,11 +1076,11 @@ onUnmounted(() => {
   flex-shrink: 0;
   width: 40px;
   font-weight: 600;
-  color: hsl(var(--muted-foreground));
+  color: var(--muted-foreground);
 }
 
 .cluster__hw-value {
-  color: hsl(var(--foreground));
+  color: var(--foreground);
 }
 
 .cluster__refresh {
@@ -892,9 +1088,9 @@ onUnmounted(() => {
   font-size: 0.75rem;
   padding: 0.2rem 0.5rem;
   border-radius: var(--radius-sm);
-  border: 1px solid hsl(var(--border));
+  border: 1px solid var(--border);
   background: transparent;
-  color: hsl(var(--foreground));
+  color: var(--muted-foreground);
   cursor: pointer;
 }
 
@@ -905,39 +1101,47 @@ onUnmounted(() => {
   gap: 0.4rem;
 }
 
-.cluster__gpu-name { font-size: 0.85rem; color: hsl(var(--foreground)); }
+.cluster__gpu-name { font-size: 0.85rem; color: var(--foreground); }
 
 .cluster__gpu-stats {
   display: flex;
   gap: 1rem;
   font-size: 0.8rem;
-  color: hsl(var(--muted-foreground));
+  color: var(--muted-foreground);
 }
 
 .cluster__offline {
   margin-top: 0.5rem;
   font-size: 0.8rem;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--destructive));
 }
 
-.cluster__actions {
+.cluster__node-actions {
+  margin-top: 0.75rem;
   display: flex;
   align-items: center;
   gap: 1rem;
 }
 
 .cluster__launch {
-  padding: 0.5rem 1rem;
+  padding: 0.4rem 0.85rem;
   border-radius: var(--radius-sm);
-  border: 1px solid hsl(var(--primary));
-  background: hsl(var(--primary) / 10%);
-  color: hsl(var(--foreground));
+  border: 1px solid var(--primary);
+  background: var(--primary);
+  color: #ffffff;
   cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  transition: opacity 0.15s ease;
 }
 
-.cluster__launch:disabled { opacity: 0.5; cursor: default; }
+.cluster__launch:disabled { opacity: 0.4; cursor: default; }
 
-.cluster__msg { font-size: 0.8rem; color: hsl(var(--muted-foreground)); }
+.cluster__launch:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.cluster__msg { font-size: 0.8rem; color: var(--muted-foreground); }
 
 /* ============== Add Worker modal ============== */
 .cluster-modal {
@@ -956,11 +1160,11 @@ onUnmounted(() => {
   max-height: 90vh;
   display: flex;
   flex-direction: column;
-  background: hsl(var(--background-2));
-  border: 1px solid hsl(var(--border));
+  background: var(--background-2);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md, 8px);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
-  color: hsl(var(--foreground));
+  color: var(--foreground);
   overflow: hidden;
 }
 
@@ -969,8 +1173,8 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 0.875rem 1rem;
-  border-bottom: 1px solid hsl(var(--border));
-  background: hsl(var(--background));
+  border-bottom: 1px solid var(--border);
+  background: var(--background);
 }
 
 .cluster-modal__title {
@@ -978,9 +1182,9 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.5rem;
   font-size: 1rem;
-  font-weight: 600;
+  font-weight: 700;
   margin: 0;
-  color: hsl(var(--foreground));
+  color: var(--foreground);
 }
 
 .cluster-modal__close {
@@ -990,14 +1194,14 @@ onUnmounted(() => {
   background: transparent;
   border: 0;
   padding: 0.25rem;
-  color: hsl(var(--muted-foreground));
+  color: var(--muted-foreground);
   cursor: pointer;
   border-radius: var(--radius-sm);
 }
 
 .cluster-modal__close:hover {
-  background: hsl(var(--background));
-  color: hsl(var(--foreground));
+  background: var(--background);
+  color: var(--foreground);
 }
 
 .cluster-modal__body {
@@ -1011,8 +1215,8 @@ onUnmounted(() => {
   justify-content: flex-end;
   gap: 0.5rem;
   padding: 0.75rem 1rem;
-  border-top: 1px solid hsl(var(--border));
-  background: hsl(var(--background));
+  border-top: 1px solid var(--border);
+  background: var(--background);
 }
 
 .cluster-modal__btn {
@@ -1025,28 +1229,28 @@ onUnmounted(() => {
 }
 
 .cluster-modal__btn:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
 .cluster-modal__btn--ghost {
   background: transparent;
-  border-color: hsl(var(--border));
-  color: hsl(var(--foreground));
+  border-color: var(--border);
+  color: var(--foreground);
 }
 
 .cluster-modal__btn--ghost:hover:not(:disabled) {
-  background: hsl(var(--background));
+  background: var(--background);
 }
 
 .cluster-modal__btn--primary {
-  background: hsl(var(--primary));
-  color: hsl(var(--primary-foreground, hsl(var(--background))));
-  border-color: hsl(var(--primary));
+  background: var(--primary);
+  color: #ffffff;
+  border-color: var(--primary);
 }
 
 .cluster-modal__btn--primary:hover:not(:disabled) {
-  filter: brightness(1.1);
+  opacity: 0.85;
 }
 
 .cluster-form {
@@ -1074,7 +1278,7 @@ onUnmounted(() => {
 }
 
 .cluster-form__label {
-  color: hsl(var(--muted-foreground));
+  color: var(--muted-foreground);
   font-size: 0.75rem;
 }
 
@@ -1082,30 +1286,30 @@ onUnmounted(() => {
   width: 100%;
   padding: 0.35rem 0.55rem;
   font-size: 0.85rem;
-  background: hsl(var(--background));
-  border: 1px solid hsl(var(--border));
+  background: var(--background);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  color: hsl(var(--foreground));
+  color: var(--foreground);
   outline: none;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .cluster-form__input:focus {
-  border-color: hsl(var(--primary));
-  box-shadow: 0 0 0 3px hsl(var(--primary) / 20%);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary);
 }
 
 .cluster-form__input::placeholder {
-  color: hsl(var(--muted-foreground));
-  opacity: 0.65;
+  color: var(--muted-foreground);
+  opacity: 0.5;
 }
 
 .cluster-form__toggle {
   display: inline-flex;
   border-radius: var(--radius-sm);
   overflow: hidden;
-  border: 1px solid hsl(var(--border));
-  background: hsl(var(--background));
+  border: 1px solid var(--border);
+  background: var(--background);
   align-self: flex-start;
 }
 
@@ -1117,23 +1321,24 @@ onUnmounted(() => {
   font-size: 0.8rem;
   background: transparent;
   border: 0;
-  color: hsl(var(--muted-foreground));
+  color: var(--muted-foreground);
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
 }
 
 .cluster-form__toggle-btn + .cluster-form__toggle-btn {
-  border-left: 1px solid hsl(var(--border));
+  border-left: 1px solid var(--border);
 }
 
 .cluster-form__toggle-btn:hover {
-  background: hsl(var(--background-2));
-  color: hsl(var(--foreground));
+  background: var(--background-2);
+  color: var(--foreground);
 }
 
 .cluster-form__toggle-btn--active {
-  background: hsl(var(--primary) / 18%);
-  color: hsl(var(--foreground));
+  background: var(--clr-accent-dim);
+  border-bottom: 2px solid var(--primary);
+  color: var(--foreground);
   font-weight: 600;
 }
 
@@ -1151,16 +1356,16 @@ onUnmounted(() => {
   gap: 0.25rem;
   padding: 0.35rem 0.65rem;
   font-size: 0.8rem;
-  background: hsl(var(--background));
-  border: 1px solid hsl(var(--border));
+  background: var(--background);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  color: hsl(var(--foreground));
+  color: var(--foreground);
   cursor: pointer;
 }
 
 .cluster-form__test-btn:hover:not(:disabled) {
-  background: hsl(var(--background-2));
-  border-color: hsl(var(--primary) / 40%);
+  background: var(--background-2);
+  border-color: var(--primary);
 }
 
 .cluster-form__test-btn:disabled {
@@ -1170,15 +1375,15 @@ onUnmounted(() => {
 
 .cluster-form__test-result {
   font-size: 0.8rem;
-  color: hsl(var(--muted-foreground));
+  color: var(--muted-foreground);
 }
 
 .cluster-form__test-result--ok {
-  color: #34d399;
+  color: hsl(var(--success));
 }
 
 .cluster-form__test-result--err {
-  color: #f87171;
+  color: hsl(var(--destructive));
 }
 
 /* Modal transition */
@@ -1209,8 +1414,8 @@ onUnmounted(() => {
   padding: 2.5rem 1.5rem;
   margin: 1.5rem 0;
   text-align: center;
-  background: hsl(var(--background-2));
-  border: 1px dashed hsl(var(--border));
+  background: var(--background-2);
+  border: 1px dashed var(--border);
   border-radius: var(--radius-md);
   flex: 1;
   min-height: 280px;
@@ -1222,23 +1427,23 @@ onUnmounted(() => {
   justify-content: center;
   width: 64px;
   height: 64px;
-  color: hsl(var(--muted-foreground));
-  background: hsl(var(--background-3));
-  border: 2px dashed hsl(var(--border));
+  color: var(--muted-foreground);
+  background: var(--background-3);
+  border: 2px dashed var(--border);
   border-radius: 50%;
 }
 
 .cluster__empty-title {
   margin: 0;
   font-size: 1.25rem;
-  font-weight: 600;
-  color: hsl(var(--foreground));
+  font-weight: 700;
+  color: var(--foreground);
 }
 
 .cluster__empty-text {
   margin: 0;
   font-size: 0.9rem;
-  color: hsl(var(--muted-foreground));
+  color: var(--muted-foreground);
   max-width: 480px;
   line-height: 1.5;
 }
@@ -1248,8 +1453,8 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.4rem;
   padding: 0.6rem 1.2rem;
-  background: hsl(var(--primary));
-  color: hsl(var(--primary-foreground, hsl(var(--background))));
+  background: var(--primary);
+  color: #ffffff;
   border: 0;
   border-radius: var(--radius-sm);
   font-size: 0.95rem;
@@ -1260,19 +1465,18 @@ onUnmounted(() => {
 }
 
 .cluster__empty-cta:hover:not(:disabled) {
-  filter: brightness(1.1);
+  opacity: 0.85;
 }
 
 .cluster__empty-cta:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
 .cluster__empty-hint {
   margin: 0.5rem 0 0;
   font-size: 0.75rem;
-  color: hsl(var(--muted-foreground));
-  font-style: italic;
+  color: var(--muted-foreground);
   max-width: 540px;
   line-height: 1.4;
 }
@@ -1280,7 +1484,7 @@ onUnmounted(() => {
 .cluster__empty-hint code {
   font-family: var(--font-mono, monospace);
   font-size: 0.7rem;
-  background: hsl(var(--background-3));
+  background: var(--background-3);
   padding: 0.1rem 0.35rem;
   border-radius: var(--radius-sm);
 }
