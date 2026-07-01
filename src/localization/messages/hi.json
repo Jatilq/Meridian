@@ -2,7 +2,8 @@
   "app": {
     "name": "सिग्मा फ़ाइल प्रबंधक",
     "description": "एक मुफ़्त, खुला स्रोत, उन्नत, आधुनिक फ़ाइल प्रबंधक ऐप है, जो GNU GPLv3 या उसके बाद के संस्करण के तहत लाइसेंस प्राप्त है।",
-    "copyright": "कॉपीराइट © 2021 - वर्तमान एलेक्सी हॉफमैन। सर्वाधिकार सुरक्षित।"
+    "copyright": "कॉपीराइट © 2021 - वर्तमान एलेक्सी हॉफमैन। सर्वाधिकार सुरक्षित।",
+    "builtOn": "Built on Sigma File Manager by Aleksey Hoffman — github.com/aleksey-hoffman/sigma-file-manager"
   },
   "units": {
     "px": "पिक्सल"
@@ -22,7 +23,11 @@
     "dashboard": "डैशबोर्ड",
     "notes": "टिप्पणियाँ",
     "settings": "सेटिंग्स",
-    "extensions": "एक्सटेंशन"
+    "extensions": "एक्सटेंशन",
+    "topology": "Topology",
+    "hardware": "Model Search",
+    "backend-manager": "Backend Manager",
+    "rain-cli": "Rain CLI"
   },
   "language": {
     "language": "भाषा"
@@ -33,7 +38,8 @@
     "tagged": "टैग",
     "emptyFavorites": "कोई पसंदीदा नहीं",
     "emptyTagged": "कोई टैग किया गया आइटम नहीं",
-    "unknownTagGroup": "अज्ञात टैग"
+    "unknownTagGroup": "अज्ञात टैग",
+    "remote": "Remote (SSH)"
   },
   "placeholders": {
     "noDrivesFound": "कोई ड्राइव नहीं मिली",
@@ -445,6 +451,32 @@
       "downloader": {
         "title": "Downloader",
         "description": "Configure download settings"
+      },
+      "ssh": {
+        "title": "SSH Connections",
+        "description": "Configure remote SSH/SFTP connections for the file browser",
+        "label": "Label",
+        "host": "Host",
+        "port": "Port",
+        "username": "Username",
+        "keyPath": "Private key path",
+        "add": "Add connection",
+        "remove": "Remove"
+      },
+      "cluster": {
+        "title": "Cluster Nodes",
+        "description": "Register SSH-accessible workers for distributed inference. Cluster Control and Backend Manager read this list to show the topology, run hardware probes, and launch llama.cpp RPC slaves.",
+        "label": "Label",
+        "host": "Host",
+        "port": "Port",
+        "username": "Username",
+        "keyPath": "Private key path",
+        "add": "Add node",
+        "remove": "Remove"
+      },
+      "files": {
+        "title": "Files",
+        "description": "Shared folders used by the AI panel, hardware scanner, and backend manager"
       }
     }
   },
@@ -493,7 +525,10 @@
     "extensions": "एक्सटेंशन, प्लगइन्स, ऐडऑन, कॉन्फ़िगरेशन, सेटिंग्स",
     "infoPanelPreview": "info, panel, preview, image, thumbnail, memory, original, video, mute, autoplay",
     "aiPanel": "ai, artificial intelligence, panel, chat, endpoint, model, omnix",
-    "downloader": "downloader, download, queue, history, yt-dlp, save folder"
+    "downloader": "downloader, download, queue, history, yt-dlp, save folder",
+    "files": "files, models, folder, models folder, gguf, ai, path, save location",
+    "ssh": "ssh, sftp, remote, worker, connection, key, password, cluster",
+    "clusterNodes": "cluster, nodes, workers, mamba, black, distributed, inference, llama.cpp, rpc, slave, pool, topology, cluster control, backend manager"
   },
   "drag": {
     "holdShiftToChangeMode": "मोड बदलने के लिए [Shift] दबाए रखें",
@@ -1017,7 +1052,40 @@
     "showOnUpdate": "ऐप अपडेट पर चेंजलॉग दिखाएं",
     "viewChangelog": "चेंजलॉग देखें",
     "current": "मौजूदा",
-    "selectVersion": "संस्करण चुनें"
+    "selectVersion": "संस्करण चुनें",
+    "whatsNew": {
+      "badge": "Meridian v{version}",
+      "title": "Welcome to Meridian",
+      "description": "Your local-first AI workstation is ready. Here's what's new in this release.",
+      "viewFullChangelog": "View full changelog",
+      "gotIt": "Got it"
+    },
+    "feature": {
+      "rain": {
+        "title": "Rain — AI assistant built in",
+        "description": "A warm, capable companion that helps you search, organize, and manage your files."
+      },
+      "cluster": {
+        "title": "Cluster Control — multi-node GPU pooling",
+        "description": "Pool VRAM across MAMBA, BLACK, and any worker you add over SSH."
+      },
+      "sftp": {
+        "title": "SSH/SFTP Browser — remote machines as local drives",
+        "description": "Browse, transfer, and manage remote filesystems right next to local panes."
+      },
+      "downloader": {
+        "title": "Smart Downloader — yt-dlp powered",
+        "description": "Queue downloads with pause, resume, cancel, and browser-extension capture."
+      },
+      "vision": {
+        "title": "Vision & TTS — Omnix powered",
+        "description": "Analyze selected images and speak responses with local Omnix inference."
+      },
+      "agent": {
+        "title": "Agent Mode — Rain can act",
+        "description": "Move, rename, and delete files through natural-language commands with confirmation cards."
+      }
+    }
   },
   "extensions": {
     "subtitle": "समुदाय से एक्सटेंशन ब्राउज़ करें और प्रबंधित करें",
@@ -1180,5 +1248,65 @@
     "replaceShareDialogTitle": "वर्तमान शेयर बदलें?",
     "replaceShareDialogDescription": "फ़ाइलें पहले से ही नेटवर्क पर साझा की जा रही हैं. वर्तमान शेयर बंद कर दिया जाएगा और उसके स्थान पर नया शेयर ले लिया जाएगा।",
     "replaceShareDialogConfirm": "प्रतिस्थापित करें"
+  },
+  "aiPanel": {
+    "title": "Rain",
+    "endpointPlaceholder": "Endpoint URL (e.g. http://localhost:11434/v1)",
+    "endpointUrl": "Endpoint URL",
+    "model": "Model",
+    "omnixEnabled": "Use Omnix",
+    "defaultModel": "Default model",
+    "you": "You",
+    "assistant": "Rain",
+    "searchScope": "Search",
+    "scopeCurrent": "Current folder",
+    "scopeAll": "All drives",
+    "confirmMoveTitle": "Move these items?",
+    "confirmRenameTitle": "Rename files?",
+    "confirmDeleteTitle": "Delete files?",
+    "confirmDeletePermanentTitle": "Permanently delete?",
+    "confirmDeleteFolderWarning": "This folder is not empty ({count} item(s) inside).",
+    "placeholder": "Ask anything about your files, or give a command.",
+    "inputPlaceholder": "Type a message…",
+    "confirmOrganizeTitle": "Organize files?",
+    "confirmOrganizeDescription": "Organize files by {criteria}?",
+    "organized": "Files organized",
+    "confirmRenameDescription": "Rename files using {pattern}?",
+    "renamed": "Files renamed",
+    "confirmDeleteDescription": "Delete {count} item(s)?",
+    "deleted": "Files deleted",
+    "onboarding": {
+      "intro": "Hey, I'm Rain. I'm built into Meridian to help you manage your files. I can work right now with basic features, or connect to an AI model for smarter responses. What sounds right?",
+      "localServer": "I have a local AI server",
+      "apiKey": "I have an API key",
+      "basicFeatures": "Start with basic features",
+      "localEndpoint": "What's your endpoint URL?",
+      "apiIntro": "Choose your provider and paste your API key. It will be stored securely.",
+      "apiKeyPlaceholder": "Paste API key",
+      "saveApiKey": "Save securely and continue",
+      "basicIntro": "No problem — I'll use my built-in engine for now. You can always add a model later in Settings.",
+      "downloadFolder": "Where should downloads go?",
+      "done": "You're all set. Ask me anything.",
+      "skip": "Skip",
+      "connect": "Connect"
+    }
+  },
+  "downloader": {
+    "title": "Downloader",
+    "urlPlaceholder": "Paste a URL to download…",
+    "add": "Add",
+    "test": "Test",
+    "testTooltip": "Enqueue a known small public MP4 to verify downloads work",
+    "queue": "Queue",
+    "history": "History",
+    "emptyQueue": "No active downloads",
+    "emptyHistory": "No download history",
+    "autoSaveFolder": "Auto-save folder",
+    "statusDownloading": "Downloading",
+    "statusPaused": "Paused",
+    "statusCompleted": "Completed",
+    "statusFailed": "Failed",
+    "statusCancelled": "Cancelled",
+    "statusPending": "Pending"
   }
 }
