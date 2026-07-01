@@ -540,10 +540,22 @@ async function downloadBackend(entry: BackendEntry): Promise<void> {
   const variant = getActiveVariant(entry);
   note.value[entry.id] = `Downloading ${variant.label} (${formatBytes(variant.sizeBytes)})...`;
   try {
+    // Read the user-configured GitHub PAT from the user-settings store. The
+    // Rust side (backend_manager::download_backend / resolve_github_release_url)
+    // lets `Option<String>` resolve `null` AND an empty/whitespace string to
+    // None, so passing `null` here is the explicit no-token signal — anonymous
+    // resolution is taken on the Rust side. When the user has configured a
+    // token in Settings → Meridian → Backend Manager, the same anonymous call
+    // retries with a bearer Authorization header on HTTP 403 (Fix D).
+    const rawToken = userSettingsStore.userSettings.meridian?.githubToken;
+    const githubToken = typeof rawToken === 'string' && rawToken.trim().length > 0
+      ? rawToken.trim()
+      : null;
     const installDir = await invoke<string>('download_backend', {
       backendKind: entry.id,
       variantId: variant.id,
       targetDir: null,
+      githubToken,
     });
     downloadProgress.value[entry.id] = 100;
     note.value[entry.id] = `Installed → ${installDir}`;
