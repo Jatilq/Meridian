@@ -168,11 +168,12 @@ async function runAgentLoop(
     tools = [];
   }
 
-  const DESTRUCTIVE = new Set(['move_files', 'rename_item', 'delete_item']);
+  const DESTRUCTIVE = new Set(['move_files', 'rename_item', 'delete_item', 'write_file', 'run_shell_command']);
   const MAX_ITERATIONS = 10;
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
-    const res = await fetch(`${routerBase}/v1/chat/completions`, {
+    const chatUrl = routerBase.endsWith('/v1') ? `${routerBase}/chat/completions` : `${routerBase}/v1/chat/completions`;
+    const res = await fetch(chatUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(model ? { 'X-Model-Id': model } : {}) },
       body: JSON.stringify({
@@ -319,6 +320,15 @@ async function executeDestructiveTool(name: string, args: Record<string, unknown
       await invoke('delete_items', { files: [args.path], permanent: args.permanent === true });
       return JSON.stringify({ ok: true, deleted: args.path });
     }
+    if (name === 'write_file') {
+      return await invoke<string>('rain_write_file', { path: String(args.path), content: String(args.content) });
+    }
+    if (name === 'run_shell_command') {
+      return await invoke<string>('rain_run_shell_command', {
+        command: String(args.command),
+        timeoutSecs: (args.timeout_secs as number) ?? 30,
+      });
+    }
   }
   catch (error) {
     return JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) });
@@ -368,6 +378,8 @@ async function maybeRememberFromTurn(prompt: string, finalText: string): Promise
   // After the turn, ask the model to extract any durable fact worth saving to
   // long-term memory (preferences, recurring paths, conventions). Cheap, bounded,
   // and best-effort — never blocks or surfaces errors to the user.
+  // NOTE: only runs when a router endpoint is configured (Omnix native API does
+  // not support the OpenAI tool calling format needed for memory extraction).
   try {
     const routerBase = (aiPanelStore.routerEndpoint || '').replace(/\/+$/, '');
     if (!routerBase) return;
@@ -375,7 +387,8 @@ async function maybeRememberFromTurn(prompt: string, finalText: string): Promise
 
     const extractionPrompt = `You are Rain's memory extractor. Given the latest exchange, decide if there is ONE durable fact worth remembering long-term about the user or their files (a preference, a frequently used path, a naming convention, a recurring workflow). If yes, reply with a single short line starting with "MEMORY:" (for a fact about the user/their habits) or "FAVORITE:" (for a path/model/preference used repeatedly). If nothing is worth saving, reply exactly "NONE". Do not explain.\n\nUser: ${prompt}\nRain: ${finalText}`;
 
-    const res = await fetch(`${routerBase}/v1/chat/completions`, {
+    const chatUrl = routerBase.endsWith('/v1') ? `${routerBase}/chat/completions` : `${routerBase}/v1/chat/completions`;
+    const res = await fetch(chatUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(model ? { 'X-Model-Id': model } : {}) },
       body: JSON.stringify({
@@ -439,11 +452,10 @@ async function handleSend() {
   aiPanelStore.setLoading(true);
 
   try {
-    // Revised architecture: Omnix handles ONLY vision (+ TTS/Director).
-    // ALL text inference goes to the local AI server (OpenAI-compatible).
-    // Vision is used when an image is selected and Omnix is online;
-    // everything else is text.
-    const omnixVisionReady = aiPanelStore.useOmnix && aiPanelStore.omnixOnline;
+    // Three-path architecture:
+    // 1. Omnix + image → Omnix vision API
+    // 2. Omnix → Omnix native /api/text (always works, no tool calling)
+    // 3. Router endpoint → OpenAI-compatible agent loop with tool calling
     const routerBase = (aiPanelStore.routerEndpoint || '').replace(/\/+$/, '');
     const model = aiPanelStore.selectedModel || undefined;
     const currentPath = aiPanelStore.currentPath;
@@ -469,10 +481,45 @@ async function handleSend() {
       + (aiPanelStore.memoryText ? `\n\n=== MEMORY (what you've learned) ===\n${aiPanelStore.memoryText}` : '')
       + (aiPanelStore.favoritesText ? `\n\n=== FAVORITES (noticed preferences) ===\n${aiPanelStore.favoritesText}` : '');
 
-    let response: Response;
-    if (omnixVisionReady && hasImage) {
+    // ── Omnix-first with startup wait ──────────────────────────────────
+    // If Omnix is enabled but not yet online, start it and wait up to 8 s.
+    // This is the critical path: on fresh installs with zero config, Omnix
+    // is the ONLY engine that can respond. The router fallback requires an
+    // explicitly-configured endpoint (connectionMode !== 'basic').
+    if (aiPanelStore.useOmnix && !aiPanelStore.omnixOnline) {
+      console.debug('[ai-panel] Omnix offline — attempting spawn...');
+      try {
+        await spawnOmnix();
+        console.debug('[ai-panel] spawn_omnix returned Ok');
+      } catch (spawnErr) {
+        console.error('[ai-panel] spawn_omnix failed:', spawnErr);
+      }
+      // First launch: npm install can take 60-120s. Wait up to 120s.
+      // Retries (background process already spawned): wait 30s.
+      const waitSecs = OMNIX_SPAWN_WAITED ? 30 : 120;
+      OMNIX_SPAWN_WAITED = true;
+      for (let s = 0; s < waitSecs; s++) {
+        await new Promise(r => setTimeout(r, 1000));
+        try {
+          const online = await invoke<boolean>('get_omnix_status');
+          if (online) {
+            console.debug(`[ai-panel] Omnix online after ${s + 1}s`);
+            aiPanelStore.setOmnixOnline(true);
+            break;
+          }
+        } catch (statusErr) {
+          console.debug('[ai-panel] get_omnix_status error:', statusErr);
+        }
+      }
+      if (!aiPanelStore.omnixOnline) {
+        console.warn(`[ai-panel] Omnix did not come online within ${waitSecs}s`);
+      }
+    }
+
+    const isRouterExplicit = routerBase && aiPanelStore.connectionMode !== 'basic';
+
+    if (aiPanelStore.useOmnix && aiPanelStore.omnixOnline && hasImage) {
       // Vision: send the image file to Omnix as multipart via the Rust command
-      // (the /api/vision contract requires multipart/form-data, not JSON).
       const imageFile = selectedFiles.find((file: string) => {
         const ext = file.split('.').pop()?.toLowerCase();
         return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(ext || '');
@@ -489,23 +536,65 @@ async function handleSend() {
           handleIntentConfirmation(parsed);
         }
       }
-      catch {
-        // response was not JSON, leave as plain text
-      }
+      catch { /* response was not JSON, leave as plain text */ }
       aiPanelStore.setLoading(false);
       return;
     }
-    else {
-      // Text inference -> Local AI server via the Rain agent loop (tool calling).
-      if (!routerBase) {
-        throw new Error('Local AI server endpoint not configured. Set it in Settings.');
-      }
-      const finalText = await runAgentLoop(routerBase, model, systemPrompt, prompt);
-      aiPanelStore.addMessage('assistant', finalText);
-      await maybeSpeak(finalText);
-      // Step 5 (memory auto-append) runs after the turn — see maybeRememberFromTurn.
-      void maybeRememberFromTurn(prompt, finalText);
+    else if (aiPanelStore.useOmnix && aiPanelStore.omnixOnline) {
+      // Text inference via Omnix native API (no tool calling — but always works).
+      const omnixText = await invoke<string>('omnix_text', {
+        prompt: `${systemPrompt}\n\nUser: ${prompt}`,
+        systemPrompt,
+        temperature: aiPanelStore.temperature,
+        maxTokens: aiPanelStore.maxTokens,
+        topP: aiPanelStore.topP,
+      });
+      aiPanelStore.addMessage('assistant', omnixText);
+      await maybeSpeak(omnixText);
       aiPanelStore.setLoading(false);
+      return;
+    }
+    else if (isRouterExplicit) {
+      // Full agent loop with tool calling (requires an explicitly-configured endpoint).
+      try {
+        const finalText = await runAgentLoop(routerBase, model, systemPrompt, prompt);
+        aiPanelStore.addMessage('assistant', finalText);
+        await maybeSpeak(finalText);
+        void maybeRememberFromTurn(prompt, finalText);
+        aiPanelStore.setLoading(false);
+        return;
+      }
+      catch {
+        // Router fetch failed — check one last time if Omnix came online
+        try {
+          const online = await invoke<boolean>('get_omnix_status');
+          if (online) {
+            aiPanelStore.setOmnixOnline(true);
+            const omnixText = await invoke<string>('omnix_text', {
+              prompt: `${systemPrompt}\n\nUser: ${prompt}`,
+              systemPrompt,
+              temperature: aiPanelStore.temperature,
+              maxTokens: aiPanelStore.maxTokens,
+              topP: aiPanelStore.topP,
+            });
+            aiPanelStore.addMessage('assistant', omnixText);
+            await maybeSpeak(omnixText);
+            aiPanelStore.setLoading(false);
+            return;
+          }
+        }
+        catch { /* Omnix also unreachable */ }
+        aiPanelStore.addMessage('assistant', 'Could not reach your AI server and Omnix is not running. Start your local server or enable Omnix in Settings.');
+        aiPanelStore.setLoading(false);
+        return;
+      }
+    }
+    else {
+      // No AI reached. Show a helpful message — never a raw fetch error.
+      const hint = aiPanelStore.useOmnix
+        ? 'Rain is warming up. Hang tight — I\'ll try again in a moment...'
+        : 'No AI endpoint is configured. Enable Omnix in Settings to get started right away.';
+      aiPanelStore.addMessage('assistant', hint);
       return;
     }
   }
@@ -622,11 +711,15 @@ async function checkOmnixStatus() {
       aiPanelStore.setOmnixOnline(false);
     }
   }
-  // local AI server health (text inference backend) — probe /v1/models.
+  // Local AI server health (text inference backend) — probe /v1/models.
+  // Only probes a configured router endpoint; Omnix health is already checked
+  // via get_omnix_status above and Omnix uses its native API for text, not
+  // the OpenAI-compatible format.
   const routerBase = (aiPanelStore.routerEndpoint || '').replace(/\/+$/, '');
   if (routerBase) {
     try {
-      const res = await fetch(`${routerBase}/v1/models`, { method: 'GET' });
+      const modelsUrl = routerBase.endsWith('/v1') ? `${routerBase}/models` : `${routerBase}/v1/models`;
+      const res = await fetch(modelsUrl, { method: 'GET' });
       aiPanelStore.setRouterOnline(res.ok);
     }
     catch {
@@ -642,8 +735,8 @@ async function spawnOmnix() {
   try {
     await invoke('spawn_omnix', { omnixPath: aiPanelStore.omnixPath || null });
   }
-  catch {
-    // ignore spawn errors
+  catch (error) {
+    console.error('[ai-panel] spawn_omnix error:', error);
   }
 }
 
@@ -687,6 +780,9 @@ onUnmounted(() => {
 
 const confirmTitle = computed(() => confirmDialogData.value?.title || '');
 const confirmDescription = computed(() => confirmDialogData.value?.description || '');
+
+// Tracks whether we've already waited for Omnix once (so retries use a shorter timeout)
+let OMNIX_SPAWN_WAITED = false;
 </script>
 
 <template>

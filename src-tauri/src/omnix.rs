@@ -4,11 +4,15 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Child;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::fs;
 use tauri::Manager;
 
 static OMNIX_CHILD: Mutex<Option<Child>> = Mutex::new(None);
+/// True while a background spawn is in progress. Prevents duplicate spawns
+/// and lets the frontend return immediately instead of blocking on npm install.
+static OMNIX_SPAWNING: AtomicBool = AtomicBool::new(false);
 
 /// Default install directory for the Omnix engine.
 const DEFAULT_OMNIX_DIR: &str = "E:\\ai\\Apps\\Omnix";
@@ -85,56 +89,109 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Non-blocking spawn: returns immediately so the frontend can start
+/// polling `get_omnix_status`. All heavy work (npm install, electron
+/// extraction, process spawn) runs on a background thread.
 #[tauri::command]
-pub fn spawn_omnix(app: tauri::AppHandle, omnix_path: Option<String>) -> Result<(), String> {
-    let dir = resolve_omnix_dir(&app, omnix_path)?;
-
-    // Check if npm install is needed (no node_modules or marker file missing)
-    let needs_npm = !dir.join("node_modules").exists() || !omnix_npm_done(&dir);
-
-    if needs_npm {
-        // Run npm install to populate node_modules
-        let npm_result = std::process::Command::new("npm")
-            .current_dir(&dir)
-            .arg("install")
-            .output()
-            .map_err(|e| format!("Failed to run npm install: {}", e))?;
-
-        if !npm_result.status.success() {
-            let stderr = String::from_utf8_lossy(&npm_result.stderr);
-            return Err(format!("npm install failed: {}", stderr));
+pub async fn spawn_omnix(app: tauri::AppHandle, omnix_path: Option<String>) -> Result<(), String> {
+    // Already running? Nothing to do.
+    {
+        let guard = OMNIX_CHILD.lock().map_err(|e| format!("Mutex error: {}", e))?;
+        if guard.is_some() {
+            log::info!("[omnix] already running, skipping spawn");
+            return Ok(());
         }
-
-        // Mark that we've done npm install
-        mark_omnix_npm_done(&dir)?;
     }
 
-    // Launch the Electron desktop app (hidden/standalone) rather than bare
-    // `node server.ts`. Only the Electron-hosted Chromium renderer provides the
-    // WebGPU compute worker that Vision/TTS require; a plain-node launch starts
-    // in "Standalone mode" with no relay and every request fails with
-    // "No compute worker connected".
-    let electron = Path::new("node_modules")
-        .join("electron")
-        .join("dist")
-        .join("electron.exe");
-    if !dir.join(&electron).exists() {
-        return Err(format!(
-            "Omnix Electron runtime not installed at {}. npm install may have failed.",
-            dir.display()
-        ));
-    }
-
-    let mut guard = OMNIX_CHILD.lock().map_err(|e| format!("Mutex error: {}", e))?;
-    if guard.is_some() {
+    // A background spawn is already in progress? Return immediately so the
+    // frontend can start its health-poll loop.
+    if OMNIX_SPAWNING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+        log::info!("[omnix] spawn already in progress, returning immediately");
         return Ok(());
     }
-    let child = std::process::Command::new(dir.join(&electron))
-        .current_dir(&dir)
-        .arg(".")
-        .spawn()
-        .map_err(|e| format!("Failed to spawn omnix: {}", e))?;
-    *guard = Some(child);
+
+    log::info!("[omnix] spawn_omnix called with path={:?} (non-blocking)", omnix_path);
+
+    // All heavy work on a blocking thread — the frontend never waits for this.
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = (|| -> Result<PathBuf, String> {
+            let dir = resolve_omnix_dir(&app, omnix_path.clone())?;
+            log::info!("[omnix] resolved dir: {}", dir.display());
+
+            // npm install if needed. On Windows, `Command::new("npm")` often
+            // fails because npm is a .cmd shim. Wrapping in `cmd /c` is reliable.
+            let has_node_modules = dir.join("node_modules").exists();
+            let needs_npm = !has_node_modules || !omnix_npm_done(&dir);
+            log::info!("[omnix] needs_npm={} (has_node_modules={}, marker={})", needs_npm, has_node_modules, omnix_npm_done(&dir));
+
+            if needs_npm && !has_node_modules {
+                // Only run npm install when node_modules is completely missing.
+                // If node_modules exists but the marker is gone, just re-create
+                // the marker (the deps are already installed).
+                log::info!("[omnix] running npm install in {} (background thread)", dir.display());
+                let npm_result = std::process::Command::new("cmd")
+                    .current_dir(&dir)
+                    .args(["/c", "npm", "install"])
+                    .output()
+                    .map_err(|e| format!("Failed to run npm install: {}", e))?;
+
+                if !npm_result.status.success() {
+                    let stderr = String::from_utf8_lossy(&npm_result.stderr);
+                    log::error!("[omnix] npm install failed: {}", stderr);
+                    return Err(format!("npm install failed: {}", stderr));
+                }
+                log::info!("[omnix] npm install succeeded");
+                mark_omnix_npm_done(&dir)?;
+            } else if needs_npm && has_node_modules {
+                // node_modules exists but marker is missing — just mark it done.
+                log::info!("[omnix] node_modules exists but marker missing, creating marker");
+                mark_omnix_npm_done(&dir)?;
+            }
+
+            // Check electron binary
+            let electron = Path::new("node_modules")
+                .join("electron")
+                .join("dist")
+                .join("electron.exe");
+            let electron_path = dir.join(&electron);
+            log::info!("[omnix] electron binary: {} (exists={})", electron_path.display(), electron_path.exists());
+            if !electron_path.exists() {
+                log::error!("[omnix] Electron binary not found at {}", electron_path.display());
+                return Err(format!(
+                    "Omnix Electron runtime not installed at {}. npm install may have failed.",
+                    dir.display()
+                ));
+            }
+
+            // Spawn the Electron process
+            let mut guard = OMNIX_CHILD.lock().map_err(|e| format!("Mutex error: {}", e))?;
+            if guard.is_some() {
+                log::info!("[omnix] already running (child exists in lock), skipping spawn");
+                return Ok(dir);
+            }
+            log::info!("[omnix] spawning electron from {}", electron_path.display());
+            let child = std::process::Command::new(&electron_path)
+                .current_dir(&dir)
+                .arg(".")
+                .spawn()
+                .map_err(|e| {
+                    log::error!("[omnix] spawn failed: {}", e);
+                    format!("Failed to spawn omnix: {}", e)
+                })?;
+            log::info!("[omnix] spawned successfully, pid={}", child.id());
+            *guard = Some(child);
+            Ok(dir)
+        })();
+
+        OMNIX_SPAWNING.store(false, Ordering::SeqCst);
+        match &result {
+            Ok(dir) => log::info!("[omnix] background spawn complete for {}", dir.display()),
+            Err(e) => log::error!("[omnix] background spawn failed: {}", e),
+        }
+        // Error is NOT propagated — the frontend doesn't await this. It relies
+        // on `get_omnix_status` to detect success/failure via the health endpoint.
+    });
+
     Ok(())
 }
 
@@ -151,8 +208,17 @@ pub fn kill_omnix() -> Result<(), String> {
 #[tauri::command]
 pub async fn get_omnix_status() -> Result<bool, String> {
     match reqwest::get("http://localhost:9777/api/health").await {
-        Ok(response) => Ok(response.status().is_success()),
-        Err(_) => Ok(false),
+        Ok(response) => {
+            let ok = response.status().is_success();
+            if !ok {
+                log::debug!("[omnix] health check returned status {}", response.status());
+            }
+            Ok(ok)
+        }
+        Err(e) => {
+            log::trace!("[omnix] health check failed: {}", e);
+            Ok(false)
+        }
     }
 }
 
