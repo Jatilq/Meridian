@@ -261,7 +261,7 @@ All pre-Phase 9 + Phase 9 + Phase 10 tasks implemented. Rain CLI UX polish + Omn
 
 1. Stack: Tauri 2 + Vue 3 + Rust. NOT Electron.
 2. Omnix: separate hidden Electron process. Never embed as webview.
-3. Rain: gender neutral, never breaks character, never says "I am an AI"
+3. Rain: direct and dry when it matters, never breaks character, never says "I am an AI"
 4. All frontend→Rust structs: `#[serde(rename_all = "camelCase")]`
 5. Credentials: never hardcode, never plaintext, Tauri safeStorage or `secure-keys.json` for SSH passwords
 6. Destructive operations: always confirmation dialog

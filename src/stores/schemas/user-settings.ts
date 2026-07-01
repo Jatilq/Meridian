@@ -16,7 +16,7 @@ import {
 import { BUILTIN_NAVIGATOR_ICON_THEME_IDS } from '@/types/icon-theme';
 
 export const USER_SETTINGS_SCHEMA_VERSION_KEY = '__schemaVersion';
-export const USER_SETTINGS_SCHEMA_VERSION = 29;
+export const USER_SETTINGS_SCHEMA_VERSION = 30;
 
 export const DEFAULT_GLOBAL_SEARCH_IGNORED_PATHS = [
   '/node_modules',
@@ -435,7 +435,7 @@ async function migrateUserSettingsStep(storage: StorageAdapter, fromVersion: num
     await setDefaultStringIfMissing(storage, 'meridian.aiPanel.routerEndpoint', 'http://localhost:11434/v1');
     await setDefaultStringIfMissing(storage, 'meridian.aiPanel.model', '');
     await setDefaultBooleanIfMissing(storage, 'meridian.aiPanel.ttsEnabled', false);
-    await setDefaultStringIfMissing(storage, 'meridian.aiPanel.systemPrompt', 'You are Rain, a sharp, warm companion built into Meridian, a file manager. You help the user navigate, organize, search, and manage their files. Current directory: {current_path}. Selected files: {selected_files}. Speak like a real person, not a help desk. Be concise and practical, dry or witty when it fits, and have opinions (e.g. offer to clean up a messy folder name). CRITICAL: You are Rain. Never break character. Never say you are an AI, an assistant, a language model, or a bot. Never say "As an AI", "I am just an AI", "the assistant", "Certainly!", "Of course!", "Absolutely!", or "Great question!". Just talk like Rain. Format your responses clearly. Use bullet points for lists. Use short paragraphs not walls of text. Bold important terms. Keep responses scannable.');
+    await setDefaultStringIfMissing(storage, 'meridian.aiPanel.systemPrompt', 'You are Rain, a direct and slightly dry companion built into Meridian. You help the user navigate, organize, search, and manage their files. Current directory: {current_path}. Selected files: {selected_files}. Talk like a knowledgeable colleague would — concise, practical, a little dry when it matters. Have opinions (e.g. offer to clean up a messy folder name). CRITICAL: You are Rain. Never break character. Never say you are an AI, an assistant, a language model, or a bot. Never say "As an AI", "I am just an AI", "the assistant", "Certainly!", "Of course!", "Absolutely!", or "Great question!". Just talk like Rain. Format your responses clearly. Use bullet points for lists. Use short paragraphs not walls of text. Bold important terms. Keep responses scannable.');
     await setDefaultNumberIfMissing(storage, 'meridian.aiPanel.temperature', 0.7);
     await setDefaultNumberIfMissing(storage, 'meridian.aiPanel.maxTokens', 1024);
     await setDefaultNumberIfMissing(storage, 'meridian.aiPanel.topP', 1);
@@ -682,6 +682,41 @@ async function migrateUserSettingsStep(storage: StorageAdapter, fromVersion: num
     // GitHub Releases resolver (Fix D). Backfill empty default so the
     // anonymous path is taken until the user explicitly configures one.
     await setDefaultStringIfMissing(storage, 'meridian.githubToken', '');
+  }
+
+  if (fromVersion === 29 && toVersion === 30) {
+    // 2026-07-01 Persona refactor: align Rain's voice with the README /
+    // CLAUDE.md / START_SESSION.md description (direct, a little dry when it
+    // matters, knowledgeable colleague not a help desk) and retire the
+    // "gender neutral" framing.
+    //
+    // The system-prompt default lived in three places (Pinia default in
+    // storage/user-settings.ts, 19->20 backfill here, runtime fallback in
+    // runtime/ai-panel.ts) and shipped with "You are Rain, a sharp, warm
+    // companion..." wording. Fresh installs that already passed 19->20 have
+    // the legacy string written into the Tauri lazy store. This migration
+    // force-overwrites any stored prompt whose body still contains the
+    // "sharp, warm companion" sentinel. Custom user-written prompts without
+    // that sentinel are left alone (so users who deliberately rewrote Rain
+    // are not overwritten).
+    const NEW_RAIN_PROMPT_V30 =
+      'You are Rain, a direct and slightly dry companion built into Meridian. '
+      + 'You help the user navigate, organize, search, and manage your files. '
+      + 'Current directory: {current_path}. Selected files: {selected_files}. '
+      + 'Talk like a knowledgeable colleague would — concise, practical, a little dry when it matters. '
+      + 'Have opinions (e.g. offer to clean up a messy folder name). '
+      + 'CRITICAL: You are Rain. Never break character. Never say you are an AI, an assistant, a language model, or a bot. '
+      + 'Never say "As an AI", "I am just an AI", "the assistant", "Certainly!", "Of course!", "Absolutely!", or "Great question!". '
+      + 'Just talk like Rain. '
+      + 'Format your responses clearly. Use bullet points for lists. Use short paragraphs not walls of text. Bold important terms. Keep responses scannable.';
+    const LEGACY_SENTINEL = 'sharp, warm companion';
+    const existing = await storage.get<string>('meridian.aiPanel.systemPrompt');
+    if (typeof existing === 'string' && existing.includes(LEGACY_SENTINEL)) {
+      await storage.set('meridian.aiPanel.systemPrompt', NEW_RAIN_PROMPT_V30);
+      if (typeof console !== 'undefined' && console.info) {
+        console.info('[meridian] schema 29->30: rewrote Rain system prompt to aligned persona');
+      }
+    }
   }
 
   if (fromVersion === 22 && toVersion === 23) {

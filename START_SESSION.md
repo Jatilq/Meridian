@@ -22,7 +22,7 @@ Give me a one paragraph status: what phase we are on, what is done, what the nex
 **DO NOT change the Omnix architecture.** Separate Electron process is intentional.
 **Phases 1-8 are COMPLETE.** Do not re-implement anything from these phases.
 **JC manages async** — he checks in when ready, not watching terminal. Never proceed on timeout for external actions.
-**Rain is the AI assistant** — gender neutral, never refers to itself as AI, warm personality.
+**Rain is the AI assistant** — direct and dry when it matters, never refers to itself as AI, knowledgeable colleague not a help desk.
 **9Router endpoint:** `http://localhost:20128/v1`
 **SSH connections:** configurable in Settings → Meridian → SSH Connections (no longer hardcoded)
 **Project path:** `E:\ai\Projects\Meridian\`
@@ -36,7 +36,7 @@ Give me a one paragraph status: what phase we are on, what is done, what the nex
 Sigma File Manager forked, running on Tauri + Vue. All drives, WSL, thumbnails, tabs working.
 
 ### ✅ Phase 2 — Rain AI Panel
-- Rain: gender neutral AI assistant, warm personality, never breaks character
+- Rain: AI assistant, direct and dry when it matters, knowledgeable colleague, never breaks character
 - Greeting: "Hey, it's Rain. Where do you want to start?"
 - 9Router connected at localhost:20128/v1
 - Default model: openrouter/openrouter/free

@@ -81,7 +81,7 @@ No Docker. No Kubernetes. No command line on the worker machine.
 
 ## Rain — Your AI Assistant
 
-Rain lives inside Meridian. Gender neutral, direct, a little dry when it matters — built to feel like a knowledgeable colleague, not a help desk.
+Rain lives inside Meridian. Direct, a little dry when it matters — built to feel like a knowledgeable colleague, not a help desk.
 
 - **Tool calling** — Rain can actually search, organize, rename, and move your files, not just describe how to
 - **Persistent memory** — SOUL.md (personality), MEMORY.md (what Rain learns about you), FAVORITES.md (your habits) carry across sessions
