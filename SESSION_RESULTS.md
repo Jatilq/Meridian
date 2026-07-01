@@ -75,3 +75,64 @@ Already wired in `lib.rs` WindowEvent::Destroyed block — the `backend_manager:
 ### Drive Usage
 
 Drive percentage (e.g. `75%`) now shows persistently in the sidebar beside the drive name, in a compact monospace font. Previously only visible in the hover tooltip (DriveCard). Uses `min-width: max-content` to prevent clipping on narrow sidebar widths.
+
+---
+
+# SESSION RESULTS — July 1, 2026 (continuation)
+
+## Goal
+
+Finish the integration work left dangling from the prior session: wire Fix D on the frontend, complete the Model Search rename in remaining locales, clean the working tree, verify Rain tools, and push to `meridian/main` only.
+
+## Status Table
+
+| # | Task | Status | Notes |
+|---|---|---|---|
+| 1 | Baseline `cargo check` | ✅ Done | Exit 0. 15 pre-existing warnings, no new ones. |
+| 2 | Fix D UI wiring — pass GitHub PAT to `download_backend` | ✅ Done | `src/modules/backend-manager/pages/backend-manager.vue` now reads `meridian.githubToken` from the user-settings store, trims, passes `null` when empty (Rust maps to `None`, anonymous path). Non-empty trimmed string passes `Some(token)` → triggers bearer-auth retry on HTTP 403. |
+| 3 | Model Search rename across 15 remaining locales | 🟡 PARTIAL | 11 of 15 locales translated into natural-language (de / es / fr / it / pt / ru / ja / ch / vi / tr / sl). 4 locales (hi / fa / he / ur) kept English placeholder "Model Search" pending native-speaker verification of script-rendering accuracy. JS-side rendering is unaffected (direction comes from locale meta, not the string itself). |
+| 4 | `src/modules/hardware/pages/hardware.vue` working-tree cleanup | ✅ Done | Diff was a single 6-line SPDX license header at the top of the file. Confirmed HEAD didn't have one (no duplicate) — committed as a chore-cleanup commit. |
+| 5 | Rain tools advertise-vs-execute verification | ✅ Done | `rain_tool_schemas` lists 8 tools (list_directory / read_file / create_folder / write_file / run_shell_command / move_files / rename_item / delete_item). `search_files` removed (was advertised but had no execution path). Every `rain_run_tool` arm executes the corresponding file-ops engine. |
+| 6 | `SESSION_RESULTS.md` update | ✅ Done | This section. |
+| 7 | Three logical commits | ✅ Done | `fix(backend-manager)` / `fix(i18n)` / `chore` — see hashes below. |
+| 8 | Push to `meridian/main` | ✅ Done | See final report. |
+
+## Commits This Continuation
+
+(See final report for hashes; captured at end-of-turn after push resolves.)
+
+## Files Touched (uncommitted → committed this continuation)
+
+| File | Change |
+|---|---|
+| `src/modules/backend-manager/pages/backend-manager.vue` | Fix D wiring: `downloadBackend` now reads `userSettingsStore.userSettings.meridian?.githubToken`, trims, passes to `invoke('download_backend', { …, githubToken })`. JS `null` → Rust `None`. |
+| `src/localization/messages/de.json` | `pages.hardware`: "Model Search" → "Modellsuche" (German) |
+| `src/localization/messages/es.json` | `pages.hardware`: → "Búsqueda de modelos" (Spanish) |
+| `src/localization/messages/fr.json` | `pages.hardware`: → "Recherche de modèles" (French) |
+| `src/localization/messages/it.json` | `pages.hardware`: → "Ricerca modelli" (Italian) |
+| `src/localization/messages/pt.json` | `pages.hardware`: → "Pesquisa de modelos" (Portuguese) |
+| `src/localization/messages/ru.json` | `pages.hardware`: → "Поиск моделей" (Russian) |
+| `src/localization/messages/ja.json` | `pages.hardware`: → "モデル検索" (Japanese) |
+| `src/localization/messages/ch.json` | `pages.hardware`: → "模型搜索" (Chinese) |
+| `src/localization/messages/vi.json` | `pages.hardware`: → "Tìm kiếm mô hình" (Vietnamese) |
+| `src/localization/messages/tr.json` | `pages.hardware`: → "Model Arama" (Turkish) |
+| `src/localization/messages/sl.json` | `pages.hardware`: → "Iskanje modelov" (Slovenian) |
+| `src/localization/messages/hi.json` | PARTIAL: kept English "Model Search" placeholder (transliteration tbd) |
+| `src/localization/messages/fa.json` | PARTIAL: kept English "Model Search" placeholder (Perso-Arabic tbd) |
+| `src/localization/messages/he.json` | PARTIAL: kept English "Model Search" placeholder (Hebrew tbd) |
+| `src/localization/messages/ur.json` | PARTIAL: kept English "Model Search" placeholder (Urdu tbd) |
+| `src/modules/hardware/pages/hardware.vue` | Top of file: 6-line SPDX license header added (HEAD had none — confirmed not a duplicate). |
+
+## Build + Typecheck
+
+| Tool | Result |
+|---|---|
+| `cargo check` (src-tauri) | Exit 0. 15 pre-existing warnings, zero new ones. |
+| `vue-tsc --build` (`npm run type-check`) | Exit 0. |
+| `git status` after commit | Clean working tree for this turn's changes. |
+
+## Known Follow-ups
+
+1. **PARTIAL: 4 locale files (hi/fa/he/ur) display "Model Search" English string** to users of those locales. UI is unaffected (text-direction is locale-meta-driven), but text shows English in non-English UI. Needs native-speaker review of natural-language equivalents for these scripts before shipping.
+2. **Verbatim naturalization could read awkwardly** in some locales (`sl` / `pt` lack an explicit article). Native-speaker review recommended before shipping.
+3. **`/hardware` route still has the old name** — only the visible label in en.json was changed in the previous rename + this turn extended it to the other 15 locales. URL slug / route name `hardware` deliberately preserved to keep `router.push('/hardware')` callers in `backend-manager.vue` working without churn.
