@@ -1326,6 +1326,14 @@ pub fn reap_backends(registry: &BackendRegistry) -> Result<(), String> {
 // `reqwest::get` works without further discovery round-trips. Mirrors
 // the asset-picking pattern in `app_updater.rs::pick_release_installer_asset`
 // (the upstream installer updater).
+// GitHub Releases API status codes that trigger a bearer-token retry in
+// `resolve_github_release_url`. GitHub's primary rate-limit is signaled
+// by 403; secondary (abuse-detection) rate-limit is signaled by 429 with
+// a `Retry-After` header. Both trigger the same retry path because both
+// indicate "back off OR use auth." A user-supplied PAT lifts both
+// ceilings to 5000/hr (verified against api.github.com 2026-07-01).
+const GITHUB_RATELIMIT_STATUS_CODES: &[u16] = &[403, 429];
+
 async fn resolve_github_release_url(
     repo: &str,
     primary_match: &str,
@@ -1347,11 +1355,13 @@ async fn resolve_github_release_url(
         .await
         .map_err(|e| format!("GitHub API request failed for {}: {}", repo, e))?;
 
-    let response = if anonymous.status().as_u16() == 403 {
+    let anonymous_status = anonymous.status().as_u16();
+    let response = if GITHUB_RATELIMIT_STATUS_CODES.contains(&anonymous_status) {
         if let Some(token) = github_token {
             log::info!(
-                "GitHub Releases API for {} returned HTTP 403 — retrying with bearer token",
-                repo
+                "GitHub Releases API for {} returned HTTP {} — retrying with bearer token",
+                repo,
+                anonymous_status
             );
             let authed = build_github_request(&client, &api_url, Some(token))
                 .send()
@@ -1368,12 +1378,13 @@ async fn resolve_github_release_url(
         } else {
             // No token configured — surface the actionable advice so the
             // user knows where to add one.
-            return Err(format!(
-                "GitHub Releases API for {} returned HTTP 403 (anonymous rate limit). \
-                 Configure a GitHub Personal Access Token in Settings > Advanced > Install \
-                 Paths (githubToken) for elevated rate limits and retry.",
-                repo
-            ));
+                return Err(format!(
+                    "GitHub Releases API for {} returned HTTP {} (rate limit). \
+                     Configure a GitHub Personal Access Token in Settings > Advanced > Install \
+                     Paths (githubToken) for elevated rate limits and retry.",
+                    repo,
+                    anonymous_status
+                ));
         }
     } else if !anonymous.status().is_success() {
         return Err(format!(
@@ -2299,5 +2310,29 @@ mod tests {
             "found path was {:?}",
             result[0].path
         );
+    }
+
+    #[test]
+    fn github_ratelimit_status_codes_include_403_and_429_only() {
+        // Bearer retry should fire on BOTH primary (HTTP 403) and
+        // secondary (HTTP 429) rate-limit signals. Statuses like 401,
+        // 404, 5xx carry different semantics and must NOT trigger a
+        // retry — they would mask real failures (bad credentials, dead
+        // repo, upstream outage) as "rate limit" errors.
+        assert!(
+            GITHUB_RATELIMIT_STATUS_CODES.contains(&403),
+            "403 (primary rate-limit) must trigger bearer retry"
+        );
+        assert!(
+            GITHUB_RATELIMIT_STATUS_CODES.contains(&429),
+            "429 (secondary rate-limit) must trigger bearer retry"
+        );
+        for code in [200u16, 204, 301, 400, 401, 404, 500, 502, 503] {
+            assert!(
+                !GITHUB_RATELIMIT_STATUS_CODES.contains(&code),
+                "status code {} must NOT trigger bearer retry",
+                code
+            );
+        }
     }
 }
