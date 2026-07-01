@@ -45,14 +45,22 @@ export default defineConfig({
   envPrefix: ['VITE_', 'TAURI_ENV_*'],
   clearScreen: false, // Prevent vite from obscuring rust errors
   server: {
-    port: 5173,
+    // Windows + Hyper-V / WSL2 / Docker Desktop permanently reserve TCP
+    // 5134-5233 on this host (confirmed via `netsh int ipv4 show
+    // excludedportrange protocol=tcp`). 5173 + 5174 both fall in that
+    // range, so Vite fails with EACCES on BOTH `127.0.0.1` and `::1`.
+    // 1420 binds clean on this host (live curl http=200). Strict-port
+    // preserves fail-loud if 1420 is also taken. The HMR override
+    // mirrors to 1421 to dodge the same reserved range when
+    // `TAURI_DEV_HOST` env override is in use.
+    port: 1420,
     strictPort: true,
-    host: host || false,
+    host: host || '127.0.0.1',
     hmr: host
       ? {
           protocol: 'ws',
           host,
-          port: 5174,
+          port: 1421,
         }
       : undefined,
     watch: {

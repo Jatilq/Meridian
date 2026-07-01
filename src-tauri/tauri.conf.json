@@ -5,7 +5,7 @@
   "identifier": "com.meridian.app",
   "build": {
     "frontendDist": "../dist",
-    "devUrl": "http://localhost:5173",
+    "devUrl": "http://127.0.0.1:1420",
     "beforeDevCommand": "E:\\ai\\apps\\pinokio\\bin\\miniconda\\pkgs\\nodejs-22.21.1-he453025_2\\npm.cmd run dev",
     "beforeBuildCommand": "E:\\ai\\apps\\pinokio\\bin\\miniconda\\pkgs\\nodejs-22.21.1-he453025_2\\npm.cmd run build"
   },
