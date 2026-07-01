@@ -11,10 +11,18 @@ import { AI_PANEL_PROVIDER_URLS } from '@/types/user-settings';
 
 const STORAGE_KEY = 'meridian-ai-panel';
 
+// `useOmnix` is NOT in this persisted shape any more (Omnix-on-boot fix).
+// Earlier this struct round-tripped a parallel-source-of-truth boolean
+// into the WebView2 localStorage, but that could override the Pinia
+// default at first paint before the lazy-store migrations ran. The Pinia
+// literal + the 22 → 23 + 27 → 28 force-setting migrations are now the
+// sole source of truth, so writing `useOmnix` to localStorage is dead
+// code (write-only-no-reader) and gets dropped here alongside its
+// sibling references in `loadPersistedState`, `persistState`, and the
+// individual setter callers.
 interface PersistedAiPanelState {
   endpoint: string;
   selectedModel: string;
-  useOmnix: boolean;
 }
 
 function loadPersistedState(): Partial<PersistedAiPanelState> {
@@ -26,7 +34,6 @@ function loadPersistedState(): Partial<PersistedAiPanelState> {
     return {
       endpoint: typeof data.endpoint === 'string' ? data.endpoint : 'http://localhost:11434',
       selectedModel: typeof data.selectedModel === 'string' ? data.selectedModel : '',
-      useOmnix: typeof data.useOmnix === 'boolean' ? data.useOmnix : false,
     };
   }
   catch {
@@ -37,7 +44,6 @@ function loadPersistedState(): Partial<PersistedAiPanelState> {
 function persistState(state: {
   endpoint: string;
   selectedModel: string;
-  useOmnix: boolean;
 }) {
   if (typeof window === 'undefined') return;
   try {
@@ -60,7 +66,22 @@ const endpoint = ref(userSettingsStore.userSettings.meridian?.aiPanel?.endpointU
 const selectedModel = ref(userSettingsStore.userSettings.meridian?.aiPanel?.model || persisted.selectedModel || '');
 const models = ref<Array<{ id: string }>>([]);
 const modelsLoaded = ref(false);
-const useOmnix = ref(userSettingsStore.userSettings.meridian?.aiPanel?.omnixEnabled ?? persisted.useOmnix ?? true);
+// Fix Omnix-on-boot (issue: 'toggle OFF / Offline / No models loaded' on fresh install).
+//
+// The localStorage fallback `?? persisted.useOmnix ?? true` is removed
+// here. The previous chain treated the `meridian-ai-panel` localStorage
+// entry's `useOmnix` boolean as a parallel source of truth, but that
+// localStorage lives in the WebView2 store (LOCALAPPDATA\com.meridian.app\
+// EBWebView\) which is NOT cleared by the Rust-side user-data wipe the
+// rest of Meridian uses — and it can override the Pinia default
+// (`omnixEnabled: true`) on first paint before the lazy-store hydration
+// runs. The newer chain reads only from the Pinia store, and the two
+// force-setting migrations (22 → 23 + 27 → 28 in
+// `schemas/user-settings.ts`) guarantee `true` on every install path,
+// including ones that migrated from an older `false`. `persisted` is
+// still imported and persists `endpoint` + `selectedModel`, so the
+// removal is a single-line drop with no other call-site impact.
+const useOmnix = ref(userSettingsStore.userSettings.meridian?.aiPanel?.omnixEnabled ?? true);
 const omnixOnline = ref(false);
 const omnixPath = ref(userSettingsStore.userSettings.meridian?.aiPanel?.omnixPath || 'E:\\ai\\Apps\\Omnix');
 const routerEndpoint = ref(userSettingsStore.userSettings.meridian?.aiPanel?.routerEndpoint || 'http://localhost:11434/v1');
@@ -248,19 +269,19 @@ let hasGreetedThisSession = false;
     models.value = [];
     userSettingsStore.userSettings.meridian.aiPanel.endpointUrl = value;
     userSettingsStore.setUserSettingsStorage('meridian.aiPanel.endpointUrl', value);
-    persistState({ endpoint: value, selectedModel: selectedModel.value, useOmnix: useOmnix.value });
+    persistState({ endpoint: value, selectedModel: selectedModel.value });
   }
   function setSelectedModel(value: string) {
     selectedModel.value = value;
     userSettingsStore.userSettings.meridian.aiPanel.model = value;
     userSettingsStore.setUserSettingsStorage('meridian.aiPanel.model', value);
-    persistState({ endpoint: endpoint.value, selectedModel: value, useOmnix: useOmnix.value });
+    persistState({ endpoint: endpoint.value, selectedModel: value });
   }
   function setUseOmnix(value: boolean) {
     useOmnix.value = value;
     userSettingsStore.userSettings.meridian.aiPanel.omnixEnabled = value;
     userSettingsStore.setUserSettingsStorage('meridian.aiPanel.omnixEnabled', value);
-    persistState({ endpoint: endpoint.value, selectedModel: selectedModel.value, useOmnix: value });
+    persistState({ endpoint: endpoint.value, selectedModel: selectedModel.value });
     // Auto-start / stop the Omnix engine to match the toggle (Step 4).
     if (value) {
       invoke('spawn_omnix', { omnixPath: omnixPath.value || null })
@@ -360,6 +381,26 @@ let hasGreetedThisSession = false;
       models.value = [];
     },
   );
+
+  // Fix Omnix-on-boot (continued): `spawn_omnix` was only reached
+  // inside `setUseOmnix(true)` — i.e. after the user manually clicked
+  // the toggle. On a freshly installed Meridian the Pinia default
+  // resolves `useOmnix = true` at first paint but no click ever fires,
+  // so the bundled Omnix lives at `E:\ai\Apps\Omnix\` (extracted by
+  // `resolve_omnix_dir`), its `npm install` never runs, its Electron
+  // process never spawns, and `get_omnix_status` polls
+  // `http://localhost:9777/api/health` against nothing → permanent
+  // "Offline / No models loaded". Firing `spawn_omnix` here, once at
+  // store construction, makes Rain's "zero-config" promise hold. The
+  // Rust side guards against duplicate spawns via the `OMNIX_CHILD`
+  // static, so re-entry on second store construction (e.g. view
+  // remount) is safe and cheap.
+  if (useOmnix.value) {
+    invoke('spawn_omnix', { omnixPath: omnixPath.value || null })
+      .catch((error: unknown) => {
+        console.error('Boot-time spawn_omnix failed:', error);
+      });
+  }
 
   return {
     isOpen, isLoading, messages, input, endpoint, selectedModel, models, modelsLoaded,
