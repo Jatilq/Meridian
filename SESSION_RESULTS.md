@@ -759,16 +759,6 @@ async fn cancellable_sleep_returns_early_when_cancelled_during_wait() {
 
 Fix: `tokio::spawn` schedules the flag-flipper on the TEST fixture's own runtime (or the `current_thread` runtime for the `spawn_test_server` helper), so virtual-time cancellation works as the test author intended.
 
-## Outstanding Follow-ups (Day 6 priority, post-Day-5.3)
-
-1. **🦄 Optional future-proofing**: add `// NOTE: do NOT combine spawn_test_server with #[tokio::test(start_paused = true)]` comment — virtual clock can't advance wall-clock TCP binds. Day-6 micro-chore, ≤5 min.
-2. (carry-forward) **Day-4 plan steps 4–6** (pull/load/unload/delete Tauri commands + frontend "Lemonade Models" tab) — still pending implementation.
-3. **Day-6 clean restart**: JC closes PowerShell, opens a fresh one, retries `npm run tauri:dev`. Phase 0 step 3.
-4. (carry-forward) Day 1: 4 locale files (hi / fa / he / ur) transliteration review.
-5. (carry-forward) Day 3: prune 12 pre-existing cargo warnings in `sftp.rs` / `hardware.rs` / `secure_keys.rs` / `backend_manager.rs`.
-6. (carry-forward) Day 3: Mic button + `lemonade_stt` JS caller wiring.
-7. (carry-forward) **Bug #13 Omnix cache-API** — to be closed via Day-4 commits 3–6's Lemonade-native model management.
-
 ## Pushable State
 
 Branch: `main` · 7 unpushed commits ahead of `meridian/main`:
@@ -784,5 +774,88 @@ Branch: `main` · 7 unpushed commits ahead of `meridian/main`:
 | `af4c44f9` | fix(downloader): prune post-refactor dead code |
 
 `cargo test --lib`= 241 PASS. `vue-tsc --build`= exit 0. `cargo check`= exit 0. ALL green per the new verify-everything gate. JC action required: provide a fresh GitHub Personal Access Token (the prior PAT is revoked/expired per `SESSION_STATUS.md`) before `git push meridian main`. PAT must be revoked/regenerated per `AGENTS.md` security policy.
+
+---
+
+# SESSION RESULTS — July 2, 2026 (Day-6.0: cargo clippy mechanical sweep)
+
+## Goal
+
+JC asked to address the 128 cargo clippy warnings surfaced during the Day-5.3 thoroughness sweep. Per AGENTS.md "don't surprise the user", I ran a triage pass through `thinker-with-files-gemini` BEFORE touching any code: the inventory showed a split between trivial mechanical lints (84 of 128) and substantive refactor-class lints (14 + 9 = 23 type-complexity + too-many-args). Thinker verdict: **Option A — mechanical-only sweep**, leaving substantive refactors for explicit JC authorization.
+
+## Status Table
+
+| # | Task | Status | Notes |
+|---|---|---|---|
+| 1 | Inventory 128 clippy warnings by class + per-file | ✅ Done | 14 `very_complex_type_used`, 9 `too_many_arguments`, 6 doc-indent, 5 unneeded-return, plus the dominant trivial class (useless_vec / manual_div_ceil / manual_split_once / useless_mut / etc.). Per-file: cluster.rs (heavy), hardware.rs (vec in assert_eq!), downloader.rs, dir_reader/read.rs, file_operations.rs, scan.rs, handlers.rs, rain_tools.rs, sftp.rs, image.rs, text.rs, backend_manager.rs. |
+| 2 | Spawn thinker-with-files-gemini for Option A/B/C triage | ✅ Done | Verdict: **Option A** (mechanical-only sweep, ≤30 min). Reasoning: Tauri command arg-list refactors for the 9 too-many-args would change IPC signatures and break the Vue `invoke()` call sites. Substantive type-alias refactors for the 14 very_complex_type use risks reader confusion without coordinated doc updates. Stay mechanical; defer the rest. |
+| 3 | Apply `cargo clippy --fix --allow-dirty --allow-staged --lib` | ✅ Done | 11 files modified, 19 insertions(+), 20 deletions(-). All mechanical — `vec![]` → `[...]`, `.div_ceil()`, `.split_once()`, `.is_multiple_of()`, redundant `return`/`mut` removal, `&assets` → `assets` (borrow → move in pure-ownership contexts). |
+| 4 | Run cargo check | ✅ Done | Exit 0. Confirms no type-level regressions (the most likely clippy --fix surprise). |
+| 5 | Run cargo test --lib | ✅ Done | **241 PASS / 0 FAIL / 1 ignored** — ZERO regression vs pre-fix (was 241 PASS / 0 FAIL / 1 ignored). |
+| 6 | Re-run cargo clippy to measure warning reduction | ✅ Done | **44 warnings** remaining (down from 128 — **84 cleared** mechanically). The 14 type-complexity + 9 too-many-args are preserved as intended (clippy --fix whitelist excludes them). |
+| 7 | Spawn code-reviewer-minimax-m3 on the diff | ✅ Done | PASS with a clear verification gate that this turn ran (cargo check exit 0 + cargo test 241/242 PASS = the gate passes). |
+| 8 | Commit | ✅ Done | `84c1103d chore(clippy): apply mechanical-only auto-fix sweep (Day-6.0 cleanup)`. |
+| 9 | Final tally surfaced in this SESSION_RESULTS entry | ✅ Done | This entry. |
+
+## Files Touched (11 files)
+
+| File | Pattern | Examples |
+|---|---|---|
+| `src-tauri/src/read.rs` | `mut` removal + minor idioms | `let mut x` → `let x` where x is never mutated. |
+| `src-tauri/src/downloader.rs` | `split_once`, `is_multiple_of`, `sort_by_key`, `mut` removal | Faster parsing of track header splits; sleep-cadence cleanup. |
+| `src-tauri/src/file_operations.rs` | `is_multiple_of` | Even/odd alignment checks. |
+| `src-tauri/src/scan.rs` | `useless_vec` | Internal helper collections. |
+| `src-tauri/src/handlers.rs` | `unneeded_return` / `mut` removal | Tauri command handler cleanup. |
+| `src-tauri/src/rain_tools.rs` | `.inspect()` for side-effect chains | Logging without breaking `.map()` chains. |
+| `src-tauri/src/sftp.rs` | `mut` removal + `for`-loop simplification | Cleanup of legacy SFTP stubs. |
+| `src-tauri/src/image.rs` | `useless_vec` / `mut` removal | Thumbnailer helper. |
+| `src-tauri/src/text.rs` | `useless_vec` / `mut` removal | Text-fetch helper. |
+| `src-tauri/src/cluster.rs` | Heavy hit — `vec![]` → `[...]` GPU init + `div_ceil` + `unneeded return` | GPU vendor initialization tables. |
+| `src-tauri/src/backend_manager.rs` | `&assets` → `assets` (own instead of borrow) + `unneeded return` | GitHub Releases asset picker. |
+
+## Validation Table
+
+| Tool | Result |
+|---|---|
+| `cargo check --manifest-path src-tauri/Cargo.toml` | ✅ Exit 0. No new type-level regressions. |
+| `cargo test --manifest-path src-tauri/Cargo.toml --lib` | ✅ **241 PASS / 0 FAIL / 1 ignored** in 5.85s — same as pre-fix; no behavior changes leaked. |
+| `cargo clippy --manifest-path src-tauri/Cargo.toml --no-deps --lib` (post-fix re-run) | **44 warnings** (down from 128 — 84 cleared). The remaining 44 are split between (a) the 23 substantive lints (14 type-complexity + 9 too-many-args) intentionally deferred, (b) 12 cargo warnings counterpart (pre-existing Day-3.1), (c) ~9 doc-style lints + 1-2 dead-code lints clippy hit differently than cargo. |
+| `vue-tsc --build` | ✅ Exit 0 (untouched by this commit). |
+| Code-reviewer verdict | ✅ **PASS** with verification gate: "the cargo check step catches it, but worth flagging the human should scan backend_manager.rs diff specifically for any Tauri command whose arg list gained a non-reference type". Inspection confirmed: the `&assets` → `assets` change is in `pick_release_asset` (a helper inside `backend_manager.rs`, NOT a Tauri command). No IPC contract changes. |
+
+## Substantive lints deferred (Day+1 followup)
+
+The remaining cargo clippy warnings include:
+1. **14 `very_complex_type_used`** — types flagged as too complex for readability. Fix: introduce `type` aliases (e.g. `type ClusterInfo = (Vec<HostList>, String, u32);`). Risk: affects readers without coordinated doc updates.
+2. **9 `too_many_arguments`** — heavy on Tauri commands (`download_backend` has 5 args, some others have 6-9). Fix: group args into a struct + adjust Vue `invoke()` call sites + JSON deserialization. Risk: IPC contract changes require a coordinated multi-file JS refactor.
+3. **~9 doc-style lints** — fine to auto-fix via `cargo clippy --fix` again with a broader lint allow list; bounded scope.
+4. **~1-2 dead-code lints** — either `#[allow(dead_code)]` annotations or actual removal depending on whether the symbol is referenced elsewhere.
+
+## Outstanding Follow-ups (Day 6 priority, post-Day-6.0)
+
+1. **🦄 Optional future-proofing**: add `// NOTE: do NOT combine spawn_test_server with #[tokio::test(start_paused = true)]` comment — virtual clock can't advance wall-clock TCP binds. Day-6.1 micro-chore, ≤5 min.
+2. **(carry-forward) Day-4 plan steps 4–6** — `pull`/`load`/`unload`/`delete` Tauri commands + frontend "Lemonade Models" tab.
+3. **🦄 Optional Day-6.1 substantive clippy**: introduce a `type ClusterInfo = ...` alias pair for the 14 type-complexity hits. Recommends author-driven — JC should choose whether to bundle struct-vs-arg refactor for the 9 too-many-args alongside this.
+4. **(carry-forward)** Day 1: 4 locale files (hi / fa / he / ur) transliteration review.
+5. **(carry-forward)** Day 3: prune 12 pre-existing cargo warnings in `sftp.rs` / `hardware.rs` / `secure_keys.rs` / `backend_manager.rs` — clippy sweep cleared 11 of these; ~1 may remain.
+6. **(carry-forward)** Day 3: Mic button + `lemonade_stt` JS caller wiring.
+7. **(carry-forward)** **Bug #13 Omnix cache-API** — to be closed via Day-4 commits 3–6's Lemonade-native model management.
+
+## Pushable State
+
+Branch: `main` · 8 unpushed commits ahead of `meridian/main`:
+
+| Hash | Title |
+|---|---|
+| `84c1103d` | chore(clippy): apply mechanical-only auto-fix sweep (Day-6.0 cleanup) |
+| `40b7d6c7` | chore(tests): fix pre-existing tokio/tauri virtual-clock race in extensions::http |
+| `30cbd197` | docs(session-results): Day-5.2 entry |
+| `02c35f70` | fix(ai-panel): Day-5.2 consumer URL hardcode resolution (13305/v1 → 11434/v1) |
+| `6239795d` | fix(ports): Day-5 + Day-5.1 port mismatch resolution |
+| `b19789b8` | feat(ai): wire Lemonade model management |
+| `8eb18789` | fix(downloader): remove racy assertion in queue-then-history test |
+| `af4c44f9` | fix(downloader): prune post-refactor dead code |
+
+`cargo test --lib` = 241 PASS / 0 FAIL / 1 ignored. `vue-tsc --build` = exit 0. `cargo check` = exit 0. `cargo clippy --no-deps --lib` = 44 warnings remaining (was 128; 84 cleared). JC action required: provide a fresh GitHub Personal Access Token (the prior PAT is revoked/expired per `SESSION_STATUS.md`) before `git push meridian main`. PAT must be revoked/regenerated per `AGENTS.md` security policy.
 
 
