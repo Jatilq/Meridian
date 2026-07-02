@@ -702,4 +702,87 @@ Committed as `02c35f70` — `fix(ai-panel): Day-5.2 consumer URL hardcode resolu
 6. (carry-forward) Day 3: Mic button + `lemonade_stt` JS caller wiring.
 7. (carry-forward) **Bug #13 Omnix cache-API** — to be closed via Day-4 commits 3–6's Lemonade-native model management.
 
+---
+
+# SESSION RESULTS — July 2, 2026 (Day-5.3: tokio/tauri virtual-clock race fix + 241/242 PASS)
+
+## Goal
+
+`cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture` (full library, asked by JC as the "proceed with followups" + "again cargo test and cargo tappy" gate) exposed 2 PRE-EXISTING flakes in `src-tauri/src/extensions/http.rs::tests` that are unrelated to Day-5.2's port fix but blocking the user's "everything green before push" posture. Surface-or-fix decision surfaced via thinker-with-files-gemini (Option (i): fix immediately, ≤2 minutes, zero risk to production paths).
+
+## Status Table
+
+| # | Task | Status | Notes |
+|---|---|---|---|
+| 1 | `cargo test --lib --nocapture` (full library, 242 tests) | ✅ Done | **241 PASS / 0 FAIL / 1 ignored** in 5.85s. (Pre-fix: 239 PASS / 2 FAIL / 1 ignored.) The 2 newly-passing tests are exactly the 2 targeted by this commit. |
+| 2 | Diagnose 2 failing tests with grounded root-cause analysis | ✅ Done | Both `cancellable_sleep_returns_early_when_cancelled_during_wait` + `run_with_retry_aborts_backoff_when_flag_flips_mid_sleep` use `#[tokio::test(start_paused = true)]` virtual clock AND `tauri::async_runtime::spawn` for the flag-flipper task. Verdicted by thinker-with-files-gemini (option i: fix immediately) as a pre-existing tokio/tauri async-runtime coordination bug. |
+| 3 | Spawn code-reviewer on the proposed swap (`tauri::async_runtime::spawn` → `tokio::spawn` × 3 sites) | ✅ Done | **PASS** with 1 non-blocking observation about `spawn_test_server` helper: a future `start_paused = true` on the end-to-end tests using `tokio::net::TcpListener::bind` would hang forever (virtual clock never advances wall-clock I/O). Future-proofing `// NOTE: do NOT combine with start_paused = true` comment recommended but not required for this commit (the swap works under the current `flavor = "current_thread"` runtime). |
+| 4 | Apply fix | ✅ Done | `src-tauri/src/extensions/http.rs`: 3-line swap of `tauri::async_runtime::spawn` → `tokio::spawn` in 3 test sites (2 `#[tokio::test(start_paused = true)]` + 1 `spawn_test_server` helper). All sites are inside `#[cfg(test)] mod tests`. Production code (`cancellable_sleep`, `run_with_retry`, `stream_response_to_file_with_limit`, etc.) is untouched. |
+| 5 | Re-validate | ✅ Done | `cargo test --lib`= exit 0, 241/242 PASS, errors=0, ignored=1. `cargo check`= exit 0 (12 pre-existing warnings unchanged from prior sessions). |
+| 6 | Commit | ✅ Done | `40b7d6c7 chore(tests): fix pre-existing tokio/tauri virtual-clock race in extensions::http`. Diff stat: 1 file changed, 3 insertions(+), 3 deletions(-). |
+| 7 | Code-reviewer PASS verdict | ✅ Done | PASS with one non-blocking observation about `spawn_test_server` helper + future paused-time hazard. |
+
+## Files Touched
+
+| File | Change |
+|---|---|
+| `src-tauri/src/extensions/http.rs` | 3 sites: `tauri::async_runtime::spawn(async move { ... });` → `tokio::spawn(async move { ... });` (all in `#[cfg(test)] mod tests`). Production code paths unaffected. |
+
+## Validation Table
+
+| Tool | Result |
+|---|---|
+| `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture` (full library) | **241 PASS / 0 FAIL / 1 ignored** in 5.85s. Pre-fix: 239 PASS / 2 FAIL / 1 ignored. |
+| `cargo test --manifest-path src-tauri/Cargo.toml --lib extensions::http` (targeted) | 22 PASS / 0 FAIL / 1 ignored. |
+| `cargo check` (src-tauri) | Exit 0. 12 pre-existing warnings in sftp.rs / hardware.rs / secure_keys.rs / backend_manager.rs unchanged. |
+| `vue-tsc --build` (`npm run type-check`) | Exit 0 (untouched; not affected by this commit). |
+
+## Diagnostic detail
+
+The 2 failing tests both spawn a flag-flipper task that should trigger early cancellation:
+
+```rust
+#[tokio::test(start_paused = true)]
+async fn cancellable_sleep_returns_early_when_cancelled_during_wait() {
+    let flag = Arc::new(AtomicBool::new(false));
+    let flag_for_task = flag.clone();
+    tauri::async_runtime::spawn(async move {        // ← bug
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        flag_for_task.store(true, Ordering::SeqCst);
+    });
+    // ... cancellable_sleep(Duration::from_secs(60), Some(&flag)).await;
+    // asserts: cancelled == true AND elapsed < 1s
+}
+```
+
+`tokio::test(start_paused = true)` runs the test on a `Runtime` with virtual time that ONLY advances when there is no pending work. The polling loop in `cancellable_sleep` waits in 50ms chunks via `tokio::time::sleep` — so virtual time advances 50ms at a time during the loop. But `tauri::async_runtime::spawn` schedules the flag-flipper on Tauri's GLOBAL runtime, which is multi-threaded and does NOT honour the test fixture's virtual clock. The flag-flipper therefore runs on wall-clock time while the main task runs on virtual time — they're invisible to each other during the test.
+
+Fix: `tokio::spawn` schedules the flag-flipper on the TEST fixture's own runtime (or the `current_thread` runtime for the `spawn_test_server` helper), so virtual-time cancellation works as the test author intended.
+
+## Outstanding Follow-ups (Day 6 priority, post-Day-5.3)
+
+1. **🦄 Optional future-proofing**: add `// NOTE: do NOT combine spawn_test_server with #[tokio::test(start_paused = true)]` comment — virtual clock can't advance wall-clock TCP binds. Day-6 micro-chore, ≤5 min.
+2. (carry-forward) **Day-4 plan steps 4–6** (pull/load/unload/delete Tauri commands + frontend "Lemonade Models" tab) — still pending implementation.
+3. **Day-6 clean restart**: JC closes PowerShell, opens a fresh one, retries `npm run tauri:dev`. Phase 0 step 3.
+4. (carry-forward) Day 1: 4 locale files (hi / fa / he / ur) transliteration review.
+5. (carry-forward) Day 3: prune 12 pre-existing cargo warnings in `sftp.rs` / `hardware.rs` / `secure_keys.rs` / `backend_manager.rs`.
+6. (carry-forward) Day 3: Mic button + `lemonade_stt` JS caller wiring.
+7. (carry-forward) **Bug #13 Omnix cache-API** — to be closed via Day-4 commits 3–6's Lemonade-native model management.
+
+## Pushable State
+
+Branch: `main` · 7 unpushed commits ahead of `meridian/main`:
+
+| Hash | Title |
+|---|---|
+| `40b7d6c7` | chore(tests): fix pre-existing tokio/tauri virtual-clock race in extensions::http |
+| `30cbd197` | docs(session-results): Day-5.2 entry |
+| `02c35f70` | fix(ai-panel): Day-5.2 consumer URL hardcode resolution (13305/v1 → 11434/v1) |
+| `6239795d` | fix(ports): Day-5 + Day-5.1 port mismatch resolution |
+| `b19789b8` | feat(ai): wire Lemonade model management |
+| `8eb18789` | fix(downloader): remove racy assertion in queue-then-history test |
+| `af4c44f9` | fix(downloader): prune post-refactor dead code |
+
+`cargo test --lib`= 241 PASS. `vue-tsc --build`= exit 0. `cargo check`= exit 0. ALL green per the new verify-everything gate. JC action required: provide a fresh GitHub Personal Access Token (the prior PAT is revoked/expired per `SESSION_STATUS.md`) before `git push meridian main`. PAT must be revoked/regenerated per `AGENTS.md` security policy.
+
 
