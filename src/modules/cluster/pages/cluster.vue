@@ -718,26 +718,33 @@ onUnmounted(() => {
    board keeps the visual depth that the SVG dot pattern used to provide.
    ────────────────────────────────────────────────────────────────────────── */
 .cluster {
-  /* ── Per-node accent tokens ─────────────────────────────────────────── */
-  /* Hex coordinates so consumers can compose them via
-     `hsl(var(--cluster-node-X-accent) / N%)`. */
-  --cluster-node-mamba-accent: 174 80% 45%;      /* Teal / cyan */
-  --cluster-node-mamba-bg-from: hsl(174 80% 45% / 0.20);
-  --cluster-node-mamba-bg-to:   hsl(174 80% 45% / 0.04);
-  --cluster-node-mamba-border:  hsl(174 80% 45% / 0.55);
-  --cluster-node-mamba-glow:    hsl(174 80% 45% / 0.40);
+  /* ── Per-node accent tokens ───────────────────────────────────────── */
+  /* Source-of-truth tokens live in src/styles/exo.css on :root. We
+     shadow them here (under the cluster namespace) so the rest of
+     this scoped <style> block keeps its existing selector names
+     `--cluster-node-mamba-accent` etc. unchanged — but the actual
+     HSL values now flow from the global exo.css definition, so a
+     single retune of `--exo-accent-mamba` propagates to both this
+     panel AND any settings sub-panel using `.exo-card--mamba`.
+     Drift between the two came up during the per-host-accent code
+     review (2026-07-01); this is the lockstep fix. */
+  --cluster-node-mamba-accent:    var(--exo-accent-mamba);
+  --cluster-node-mamba-bg-from:   hsl(var(--exo-accent-mamba) / 0.20);
+  --cluster-node-mamba-bg-to:     hsl(var(--exo-accent-mamba) / 0.04);
+  --cluster-node-mamba-border:    hsl(var(--exo-accent-mamba) / 0.55);
+  --cluster-node-mamba-glow:      hsl(var(--exo-accent-mamba) / 0.40);
 
-  --cluster-node-black-accent: 348 83% 58%;      /* Coral / red */
-  --cluster-node-black-bg-from: hsl(348 83% 58% / 0.20);
-  --cluster-node-black-bg-to:   hsl(348 83% 58% / 0.04);
-  --cluster-node-black-border:  hsl(348 83% 58% / 0.55);
-  --cluster-node-black-glow:    hsl(348 83% 58% / 0.40);
+  --cluster-node-black-accent:    var(--exo-accent-black);
+  --cluster-node-black-bg-from:   hsl(var(--exo-accent-black) / 0.20);
+  --cluster-node-black-bg-to:     hsl(var(--exo-accent-black) / 0.04);
+  --cluster-node-black-border:    hsl(var(--exo-accent-black) / 0.55);
+  --cluster-node-black-glow:      hsl(var(--exo-accent-black) / 0.40);
 
-  --cluster-node-default-accent: 280 80% 65%;   /* Magenta / violet */
-  --cluster-node-default-bg-from: hsl(280 80% 65% / 0.20);
-  --cluster-node-default-bg-to:   hsl(280 80% 65% / 0.04);
-  --cluster-node-default-border:  hsl(280 80% 65% / 0.55);
-  --cluster-node-default-glow:    hsl(280 80% 65% / 0.40);
+  --cluster-node-default-accent:  var(--exo-accent-violet);
+  --cluster-node-default-bg-from: hsl(var(--exo-accent-violet) / 0.20);
+  --cluster-node-default-bg-to:   hsl(var(--exo-accent-violet) / 0.04);
+  --cluster-node-default-border:  hsl(var(--exo-accent-violet) / 0.55);
+  --cluster-node-default-glow:    hsl(var(--exo-accent-violet) / 0.40);
 
   display: flex;
   flex-direction: column;

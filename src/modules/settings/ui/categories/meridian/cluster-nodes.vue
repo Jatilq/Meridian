@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useUserSettingsStore } from '@/stores/storage/user-settings';
 import { storeSshPassword, clearSshPassword } from '@/utils/ssh-connections';
+import { hostThemeKey } from '@/utils/exo-theme';
 import type { SshConnectionSetting, SshAuthMethod } from '@/types/user-settings';
 
 const { t } = useI18n();
@@ -131,48 +132,39 @@ async function setAuthMethod(index: number, method: SshAuthMethod) {
     :icon="ServerIcon"
   >
     <div class="cluster-nodes-settings">
-      <div
+      <article
         v-for="(conn, index) in connections"
         :key="index"
-        class="cluster-nodes-settings__card"
+        class="exo-card"
+        :class="`exo-card--${hostThemeKey(conn.label || conn.host)}`"
       >
-        <div class="cluster-nodes-settings__row">
-          <div class="cluster-nodes-settings__field">
-            <label class="cluster-nodes-settings__label">{{ t('settings.meridian.cluster.label') }}</label>
-            <Input
-              :model-value="conn.label"
-              placeholder="MAMBA"
-              @update:model-value="(v) => updateField(index, 'label', v)"
-            />
-          </div>
-          <div class="cluster-nodes-settings__field">
-            <label class="cluster-nodes-settings__label">{{ t('settings.meridian.cluster.host') }}</label>
-            <Input
-              :model-value="conn.host"
-              placeholder="192.168.1.67"
-              @update:model-value="(v) => updateField(index, 'host', v)"
-            />
-          </div>
-          <div class="cluster-nodes-settings__field cluster-nodes-settings__field--port">
-            <label class="cluster-nodes-settings__label">{{ t('settings.meridian.cluster.port') }}</label>
-            <Input
-              :model-value="String(conn.port)"
-              placeholder="22"
-              @update:model-value="(v) => updateField(index, 'port', v)"
-            />
-          </div>
+        <!-- Tile: ServerIcon themed from the row's accent token. Falls
+             back to a gradient block when the host doesn't match any
+             known machine. The LED inside the tile reflects whether
+             a password is currently encrypted (i.e. the connection is
+             configured end-to-end). -->
+        <div class="exo-tile" aria-hidden="true">
+          <ServerIcon :size="28" class="exo-tile__icon" />
+          <span
+            class="exo-tile__led"
+            :class="{ 'exo-tile__led--installed': conn.passwordSecureKey || conn.keyPath }"
+          />
         </div>
-        <div class="cluster-nodes-settings__row">
-          <div class="cluster-nodes-settings__field">
-            <label class="cluster-nodes-settings__label">{{ t('settings.meridian.cluster.username') }}</label>
-            <Input
-              :model-value="conn.username"
-              placeholder="username"
-              @update:model-value="(v) => updateField(index, 'username', v)"
-            />
-          </div>
-          <div class="cluster-nodes-settings__field cluster-nodes-settings__field--auth">
-            <label class="cluster-nodes-settings__label">Auth method</label>
+
+        <!-- Identity: connection label (gradient title) + user@host:port (mono sub). -->
+        <div class="exo-identity">
+          <span class="exo-identity__title">{{ conn.label || 'New worker' }}</span>
+          <span class="exo-identity__sub">
+            {{ conn.username || 'user' }}@{{ conn.host || 'host' }}:{{ conn.port }}
+          </span>
+        </div>
+
+        <!-- Specs: 2-up grid with auth-method toggle (left) + key/password field (right).
+             The key/password field swaps via v-if so the username/key-or-password pair
+             always fits a single row at standard widths. -->
+        <div class="exo-specs exo-specs--two-col">
+          <div class="exo-specs__field">
+            <label class="exo-specs__label">Auth method</label>
             <div class="cluster-nodes-settings__toggle">
               <button
                 type="button"
@@ -196,28 +188,21 @@ async function setAuthMethod(index: number, method: SshAuthMethod) {
               </button>
             </div>
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            class="cluster-nodes-settings__remove"
-            :title="t('settings.meridian.cluster.remove')"
-            @click="removeConnection(index)"
-          >
-            <Trash2Icon :size="16" />
-          </Button>
-        </div>
-        <div class="cluster-nodes-settings__row">
-          <div v-if="conn.authMethod === 'key'" class="cluster-nodes-settings__field cluster-nodes-settings__field--wide">
-            <label class="cluster-nodes-settings__label">{{ t('settings.meridian.cluster.keyPath') }}</label>
-            <Input
-              :model-value="conn.keyPath"
-              placeholder="C:\Users\name\.ssh\id_ed25519"
-              @update:model-value="(v) => updateField(index, 'keyPath', v)"
-            />
-          </div>
-          <div v-else class="cluster-nodes-settings__field cluster-nodes-settings__field--wide">
-            <label class="cluster-nodes-settings__label">Password</label>
-            <div class="cluster-nodes-settings__password-row">
+          <div class="exo-specs__field">
+            <label v-if="conn.authMethod === 'key'" class="exo-specs__label">
+              Key file path
+            </label>
+            <label v-else class="exo-specs__label">
+              Password
+            </label>
+            <div v-if="conn.authMethod === 'key'" class="cluster-nodes-settings__row">
+              <Input
+                :model-value="conn.keyPath"
+                placeholder="C:\Users\name\.ssh\id_ed25519"
+                @update:model-value="(v) => updateField(index, 'keyPath', v)"
+              />
+            </div>
+            <div v-else class="cluster-nodes-settings__password-row">
               <input
                 type="password"
                 class="cluster-nodes-settings__password-input"
@@ -239,7 +224,22 @@ async function setAuthMethod(index: number, method: SshAuthMethod) {
             </div>
           </div>
         </div>
-      </div>
+
+        <!-- Actions: Trash only. (Test + Save are on the modal launched from
+             Cluster Control's "Add Worker" CTA, not the settings panel —
+             keeping this row lean so the trash button has space to breathe.) -->
+        <div class="exo-actions">
+          <Button
+            variant="ghost"
+            size="icon"
+            class="exo-actions__btn exo-actions__btn--danger"
+            :title="t('settings.meridian.cluster.remove')"
+            @click="removeConnection(index)"
+          >
+            <Trash2Icon :size="16" />
+          </Button>
+        </div>
+      </article>
 
       <Button
         variant="secondary"
@@ -254,66 +254,23 @@ async function setAuthMethod(index: number, method: SshAuthMethod) {
 </template>
 
 <style scoped>
-/* Intentionally co-named with the SSH Connections settings page so the
-   styles are 1:1 compatible. Both settings pages have the same form UX
-   and live in the same Settings → Meridian category; sharing a style
-   block keeps visual consistency without copy-pasting the entire <style>
-   block into a shared CSS file. The prefix `cluster-nodes-settings__`
-   is unique enough not to collide with `ssh-settings__` rules. */
 .cluster-nodes-settings {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.75rem;
 }
 
-.cluster-nodes-settings__card {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  padding: 0.75rem;
-  border: 1px solid hsl(var(--border));
-  border-radius: var(--radius-sm);
-}
-
-.cluster-nodes-settings__row {
-  display: flex;
-  align-items: flex-end;
-  gap: 0.5rem;
-}
-
-.cluster-nodes-settings__field {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 0.25rem;
-  min-width: 0;
-}
-
-.cluster-nodes-settings__field--port {
-  flex: 0 0 70px;
-}
-
-.cluster-nodes-settings__field--auth {
-  flex: 0 0 auto;
-}
-
-.cluster-nodes-settings__field--wide {
-  flex: 2;
-}
-
-.cluster-nodes-settings__label {
-  color: hsl(var(--muted-foreground));
-  font-size: 0.75rem;
-}
-
+/* Auth-method toggle group (used inside the specs column of each card).
+   Co-named with the older dedicated styles so the day-1 settings UI
+   still matches wherever it might be consumed outside this card. */
 .cluster-nodes-settings__toggle {
   display: inline-flex;
   border-radius: var(--radius-sm);
   overflow: hidden;
   border: 1px solid hsl(var(--border));
   background: hsl(var(--background));
+  align-self: flex-start;
 }
-
 .cluster-nodes-settings__toggle-btn {
   display: inline-flex;
   align-items: center;
@@ -324,35 +281,43 @@ async function setAuthMethod(index: number, method: SshAuthMethod) {
   border: 0;
   color: hsl(var(--muted-foreground));
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease;
+  font-family: inherit;
 }
-
 .cluster-nodes-settings__toggle-btn + .cluster-nodes-settings__toggle-btn {
   border-left: 1px solid hsl(var(--border));
 }
-
 .cluster-nodes-settings__toggle-btn:hover {
-  background: hsl(var(--button-hover, var(--background-2)));
+  background: hsl(var(--foreground) / 5%);
   color: hsl(var(--foreground));
 }
-
 .cluster-nodes-settings__toggle-btn--active {
-  background: hsl(var(--primary) / 15%);
+  background: hsl(var(--primary) / 18%);
   color: hsl(var(--foreground));
   font-weight: 600;
+  border-bottom: 2px solid hsl(var(--primary));
 }
 
+/* Single-row container when keyPath auth is selected — keeps the row
+   compact inside the 2-up grid. */
+.cluster-nodes-settings__row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+/* Password-then-input row with an "Encrypted" status indicator. */
 .cluster-nodes-settings__password-row {
   display: flex;
   align-items: center;
   gap: 0.5rem;
 }
-
 .cluster-nodes-settings__password-input {
   flex: 1;
   width: 100%;
-  padding: 0.35rem 0.55rem;
-  font-size: 0.85rem;
+  padding: 0.45rem 0.55rem;
+  font-size: 0.8rem;
+  font-family: var(--font-mono, monospace);
   background: hsl(var(--background));
   border: 1px solid hsl(var(--border));
   border-radius: var(--radius-sm);
@@ -360,22 +325,16 @@ async function setAuthMethod(index: number, method: SshAuthMethod) {
   outline: none;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
-
 .cluster-nodes-settings__password-input:focus {
-  border-color: hsl(var(--primary));
-  box-shadow: 0 0 0 3px hsl(var(--primary) / 20%);
+  border-color: hsl(var(--rt-accent, var(--primary)));
+  box-shadow: 0 0 0 3px hsl(var(--rt-accent, var(--primary)) / 20%);
 }
-
 .cluster-nodes-settings__password-status {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
   font-size: 0.7rem;
   color: #34d399;
-  flex-shrink: 0;
-}
-
-.cluster-nodes-settings__remove {
   flex-shrink: 0;
 }
 
