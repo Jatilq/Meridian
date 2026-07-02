@@ -16,7 +16,7 @@ import {
 import { BUILTIN_NAVIGATOR_ICON_THEME_IDS } from '@/types/icon-theme';
 
 export const USER_SETTINGS_SCHEMA_VERSION_KEY = '__schemaVersion';
-export const USER_SETTINGS_SCHEMA_VERSION = 32;
+export const USER_SETTINGS_SCHEMA_VERSION = 33;
 
 export const DEFAULT_GLOBAL_SEARCH_IGNORED_PATHS = [
   '/node_modules',
@@ -789,6 +789,25 @@ async function migrateUserSettingsStep(storage: StorageAdapter, fromVersion: num
     }
     if (typeof console !== 'undefined' && console.info) {
       console.info('[meridian] schema 31->32: demoted Omnix to opt-in (Lemonade is now Tier-1 default)');
+    }
+  }
+
+  if (fromVersion === 32 && toVersion === 33) {
+    // Phase-11 day-4 pivot: add Lemonade management config so the new
+    // `lemonade_manager` Rust module + "Lemonade Models" sidebar entry
+    // (Commit 1+2 of the day-4 plan) can read a default install location
+    // and port. The keys live on the existing `meridian.backend.lemonade`
+    // slot (currently `{}`) and add three management-side fields.
+    //
+    // setDefaultStringIfMissing / setDefaultNumberIfMissing preserve any
+    // user-set value. Users who relocated Lemonade to a custom directory
+    // keep that directory; new installs land at the path that matches JC's
+    // actual bundled install at `E:\ai\Apps\lemonade_server`.
+    await setDefaultStringIfMissing(storage, 'meridian.backend.lemonade.installDir', 'E:\\ai\\Apps\\lemonade_server');
+    await setDefaultNumberIfMissing(storage, 'meridian.backend.lemonade.backendPort', 13305);
+    await setDefaultStringIfMissing(storage, 'meridian.backend.lemonade.apiTokenKey', '');
+    if (typeof console !== 'undefined' && console.info) {
+      console.info('[meridian] schema 32->33: seeded meridian.backend.lemonade management config (installDir / backendPort / apiTokenKey)');
     }
   }
 }

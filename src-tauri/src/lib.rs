@@ -24,6 +24,7 @@ mod extension_receiver;
 mod input_simulation;
 mod omnix;
 mod lemonade_extras;
+mod lemonade_manager;
 mod backend_manager;
 mod install_paths;
 mod extensions;
@@ -418,6 +419,7 @@ pub fn run() {
             lemonade_extras::lemonade_stt,
             lemonade_extras::lemonade_tts,
             lemonade_extras::lemonade_image,
+            lemonade_manager::lemonade_get_health,
             cluster::check_node_status,
             cluster::get_gpu_stats,
             cluster::launch_rpc_slave,

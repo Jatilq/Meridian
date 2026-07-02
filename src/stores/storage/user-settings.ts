@@ -244,7 +244,17 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
         'llamafile': {},
         'koboldcpp': {},
         'turboquant': {},
-        'lemonade': {},
+        // Phase-11 day-4: management config for the new `lemonade_manager`
+        // Rust module + the "Lemonade Models" sidebar entry. installDir is
+        // JC's actual bundled install path; backendPort matches the
+        // OpenAI-compat port that `lemonade_extras.rs` already defaults to;
+        // apiTokenKey is empty by default (Lemonade only requires a token
+        // when launched with --api-key; resolve via secure_keys.rs when set).
+        'lemonade': {
+          installDir: 'E:\\ai\\Apps\\lemonade_server',
+          backendPort: 13305,
+          apiTokenKey: '',
+        },
       },
     },
   });

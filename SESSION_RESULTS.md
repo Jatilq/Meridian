@@ -204,3 +204,259 @@ Finish the Phase-11 day-2 pivot: install Lemonade as the new Tier-1 AI backend (
 2. **Unused-element compile warnings** in `lemonade_extras.rs` (16 warnings, all "unused variable" in test scope + the `reqwest::Client::builder()` build result). Non-blocking; flagged for cleanup in the next session.
 3. The 4 locale files still showing English "Model Search" string (from Day 1) — still pending native-speaker transliteration review.
 
+---
+
+# SESSION RESULTS — July 1, 2026 (Day 3: Day-2 Cleanup + Test Race Fix)
+
+## Goal
+
+Verify the day-2 Lemonade-as-Tier-1 pivot actually compiles cleanly (the previous SESSION_RESULTS note "16 warnings, mostly unused imports in the new module" was inaccurate — they were scattered across older unmodified files, NOT in `lemonade_extras.rs`), commit the uncommitted day-2 work as a coherent unit, prune dead-code warnings the code-reviewer flagged as a blocker, and fix a pre-existing test race that was masked by the day-2 noise. Persist a clean recovery handoff so a future session can pick up exactly here.
+
+## Status Table
+
+| # | Task | Status | Notes |
+|---|---|---|---|
+| 1 | Verify day-2 state: `cargo check` + `vue-tsc` + `cargo test --lib downloader` | ✅ Done | cargo check exit 0 (12 warnings in pre-existing files: sftp.rs × 5, secure_keys.rs × 1, hardware.rs × 3, backend_manager.rs × 3 = 12 total; ZERO warnings introduced into `lemonade_extras.rs`). vue-tsc exit 0. cargo test 5/6 in downloader module (1 pre-existing race in `start_download_persists_to_queue_then_history`). |
+| 2 | Commit uncommitted day-2 work as one coherent unit | ✅ Done | `50b6e8d3 feat(ai): promote Lemonade to Tier-1, demote Omnix to opt-in (Phase 11 day-2)` |
+| 3 | Code-reviewer verdict on day-2 commit | ✅ Done | PASS. One blocking concern: `add_bearer_header` (download.rs:36) is dead code. Also flagged 4 other downloader.rs warnings that landed in the same commit (`DownloadQueueState`, `DownloaderDb::remove`, `get_qt_downloader_status`, `mut` at line 776). |
+| 4 | Prune dead-code warnings introduced in day-2's heavy downloader.rs refactor | ✅ Done | `af4c44f fix(downloader): prune post-refactor dead code` — wired `apply_hf_bearer` → `add_bearer_header` (one-line delegation), deleted `DownloadQueueState` struct (superseded by `DownloaderState`), deleted `DownloaderDb::remove` method (no callers), deleted `get_qt_downloader_status` Tauri command (never registered in `lib.rs::invoke_handler!`). |
+| 5 | Re-verify after cleanup | ✅ Done | `cargo check`: 0 downloader.rs warnings (12 pre-existing in other files unchanged). `cargo test --lib downloader`: 5/6 (same single pre-existing race). `vue-tsc` exit 0. |
+| 6 | Fix pre-existing test race in `start_download_persists_to_queue_then_history` | ✅ Done | Root cause: `start_download` returns the cloned queued item (status=Downloading) before its bg task has any `.await` points, then spawns the actual transfer. Race was: `assert_eq!(item.status, Completed)` ran against the clone, not the DB row. |
+| 7 | Verify test fix | ✅ Done | `cargo test --lib downloader`: 6/6 PASS. |
+| 8 | Code-reviewer verdict on test fix | ✅ Done | PASS. Confirmed poll helper's 10s timeout is appropriate, helper sensibly placed in tests module, no hang risk. |
+| 9 | Persist this recovery log to `SESSION_RESULTS.md` | ✅ Done | This entry. |
+
+## Commits This Session
+
+| Hash | Title |
+|---|---|
+| `8eb18789` | fix(downloader): remove racy assertion in queue-then-history test |
+| `af4c44f` | fix(downloader): prune post-refactor dead code |
+| `50b6e8d3` | feat(ai): promote Lemonade to Tier-1, demote Omnix to opt-in (Phase 11 day-2) |
+
+## Files Touched This Session
+
+| File | Change |
+|---|---|
+| `src-tauri/src/downloader.rs` (4 edits in `af4c44f`, 1 helper + 1 assertion fix in `8eb18789`) | Wired `apply_hf_bearer` to delegate to `add_bearer_header`; deleted `DownloadQueueState` struct (~line 134); deleted `DownloaderDb::remove` method (~line 264); deleted `get_qt_downloader_status` Tauri command (~line 428); added `poll_until_history_completed(data_dir, id) -> DownloadItem` helper inside `#[cfg(test)] mod tests` (POLL_INTERVAL=50ms, POLL_TIMEOUT=10s); replaced the 2 racing assertions in `start_download_persists_to_queue_then_history` to read the polled DB record rather than the cloned return value. |
+| `SESSION_RESULTS.md` | Appended this Day-3 entry. |
+
+JS/Vue side unchanged this session. All day-2 Vue changes (ai-panel.vue, rain-cli.vue, rain-cli-slide-in.vue, settings/.../ai-panel.vue, 14 locale files) were already in uncommitted state at session start and committed atomically as part of 50b6e8d3.
+
+## Validation Table
+
+| Tool | Result | Notes |
+|---|---|---|
+| `cargo check` (src-tauri) | Exit 0. | 12 warnings remain in pre-existing files (sftp.rs / secure_keys.rs / hardware.rs / backend_manager.rs). 0 warnings in day-2 files. |
+| `vue-tsc --build` (`npm run type-check`) | Exit 0. | No frontend type errors. |
+| `cargo test --lib downloader` | 6/6 PASS. | All 4 `apply_hf_bearer_*` tests + `parses_ytdlp_progress_lines` + `cancel_stops_in_flight_download` + `start_download_persists_to_queue_then_history`. |
+| `npm test` (vitest, full) | 1741/1761. | 20 pre-existing failures in upstream sibling "Sigma File manager repo files\sigma-file-manager-..." paths, unrelated to this session. |
+| `npm run build` (vite) | Exit 0. | (Verified at start of session before commits landed.) |
+
+## Recovery Context for a Future Session
+
+### Stack (unchanged)
+- Base: Sigma File Manager (Tauri 2 + Vue 3 + Rust).
+- AI stack: Lemonade (Tier-1 default, port 13305) + 9Router (`http://localhost:20128/v1`) + Omnix Electron (port 9777, OPT-IN only since day-2).
+- Cluster: MAMBA (192.168.1.67, 3× RTX 3060, 36GB) + BLACK (192.168.1.64, RX 6900 XT, 16GB) = 52GB combined.
+- Models: `E:\ai\Models\`. Apps: `E:\ai\Apps\`. Backends: `E:\ai\Apps\backends\`.
+
+### Schema state
+`USER_SETTINGS_SCHEMA_VERSION = 32`. Three recent migrations in the lazy-store chain:
+- 30 → 31: rewrote Ollama URL → Lemonade (`http://localhost:13305/v1`) when matching exact-equal.
+- 31 → 32: force-set `omnixEnabled = false` (day-2 demote), reap-kill any orphaned Electron via `await invoke('kill_omnix')` (try-catch safe so migration never fails).
+
+### Day-2 Lemonade-as-Tier-1 wiring (50b6e8d3)
+- New Tauri commands in `src-tauri/src/lemonade_extras.rs`:
+  - `lemonade_tts(text, voice?, model?, endpoint?) -> Vec<u8>` — OpenAI-compat `/v1/audio/speech`, returns raw audio bytes.
+  - `lemonade_stt(audio_base64, filename, model?, language?, endpoint?) -> String` — Whisper multipart `/v1/audio/transcriptions`.
+  - `lemonade_image(image_path, prompt?, model?, endpoint?) -> String` — chat-completions with inline `image_url` data URL.
+  - All accept an `endpoint` override; `resolve_base()` strips trailing `/v1` + `/` + whitespace; default base = `http://localhost:13305`.
+- `ai-panel.vue::maybeSpeak` branches on `(useOmnix && omnixOnline)` — Omnix Kokoro (legacy, Web Audio float-samples) vs Lemonade TTS (Blob → `<audio>` via `URL.createObjectURL`). New `else if (hasImage)` Lemonade vision branch sits next to the legacy Omnix one.
+- Hint copy in `rain-cli.vue` + `rain-cli-slide-in.vue` + `settings/ui/categories/meridian/ai-panel.vue` uses a 2-variant pattern that points at Backend Manager / Lemonade first, then Omnix as legacy fallback.
+
+### Cleanup commit (af4c44f)
+- `apply_hf_bearer` now delegates to `add_bearer_header` — Bearer contract lives in exactly one place; whitespace-only tokens (`Some(" ")`) no longer emit a malformed `Bearer ` header that intermediaries may drop.
+- 4 dead symbols removed from `downloader.rs`: `DownloadQueueState`, `DownloaderDb::remove`, `get_qt_downloader_status`, and the inline implementation of `apply_hf_bearer` (it now just calls `add_bearer_header`).
+
+### Test race fix (8eb18789)
+- Added `poll_until_history_completed(data_dir, id) -> DownloadItem` helper. POLL_INTERVAL=50ms, POLL_TIMEOUT=10s (panics with informative message on timeout).
+- `start_download_persists_to_queue_then_history` reads the polled DB record (truth) instead of the cloned return value. Downstream assertions on queue + history tables are unchanged.
+
+## Pushable State at End of Session
+
+- Branch: `main`
+- Ahead of `meridian/main`: **7 commits** (4 from prior session + 3 from this session: 50b6e8d3, af4c44f, 8eb18789).
+- JC action required: `git push meridian main` (single command per AGENTS.md). PAT scrub policy from earlier issues still applies — PAT shared in chat history should be revoked/regenerated.
+- Working tree should be clean EXCEPT for this Day-3 SESSION_RESULTS.md update (uncommitted but harmless — append-only documentation).
+
+## Outstanding Follow-ups (for the next session — priority order)
+
+1. **🦄 Mic button + `lemonade_stt` wiring** (Day-3 of Phase 11). Confirmed via code-search: ZERO existing `MediaRecorder` / `getUserMedia` / `micButton` / `recordAudio` references anywhere in `src/`. Net-new UI work: Mic icon button next to AI panel input → `MediaRecorder.start()` → `ondataavailable` → `btoa(blob)` → `invoke('lemonade_stt', { audioBase64, filename: 'recording.webm' })` → set input value to transcribed text. Recording indicator (pulsing dot) + stop button. Lemonade returns raw Whisper text per the Rust command. Substantial enough that it should be confirmed with JC before building.
+
+2. **Prune 12 pre-existing cargo warnings** in `sftp.rs` (5 dead fns: `sftp_mkdir`/`rename`/`delete`/`download`/`upload`), `secure_keys.rs` (`secure_resolve_api_key` unused), `hardware.rs` (3 unused consts: `DEFAULT_TRUSTED_QUANTIZERS` / `DEFAULT_QUANT_ALLOWLIST` / `PARAM_BUCKETS`), `backend_manager.rs` (1 unused `Manager` import + 1 unused `binary_path` field). Pre-date day-2. Easiest cleanup: delete (none of them are wired on the Vue side).
+
+3. **Transliterate the 4 locale files** (hi / fa / he / ur) still showing English "Model Search" placeholder. Needs native-speaker verification for Devanagari (hi), Perso-Arabic (fa/ur), Hebrew (he) scripts. Route slug `/hardware` deliberately preserved — DO NOT rename.
+
+4. **Push 7 unpushed commits to `meridian/main`** (see Pushable State above).
+
+## Bugs Still Open (carry-over from prior sessions, NOT touched this session)
+
+Per `SESSION_STATUS.md` "OPEN BUGS — NEED FIXING":
+- 🔴 **#13 ACTIVE FOCUS — Omnix — can't download a model**. Where downloads actually go (verified, not guessed): Chromium Service Worker **Cache API**, NOT regular files. Two storage locations coexist:
+  - `C:\Users\Jatilq\AppData\Roaming\omnix\Service Worker\CacheStorage\…` = **26.4 GB** (older pre-redirect cache, likely Qwen3-27B from earlier session).
+  - `E:\ai\OmnixData\Service Worker\CacheStorage\d26cb286488555439586eae38b993292d15546db\` = **4.5 GB** (post-redirect; redirected by `electron/main.js`'s `app.setPath('userData', 'E:\\ai\\OmnixData')`).
+  - `E:\ai\Models` contains ZERO `.gguf`/`.onnx`/`.safetensors`/`.bin` from Omnix — all 1.8 TB there is from Meridian's own native downloader.
+- Fix options ranked: (a) Meridian-native download via `reqwest` with HF Bearer auth → save as `.gguf` in `E:\ai\Models\<author>/<repo>/` → configure Transformers.js to load from `file://` [pairs with bug #3 downloader-pat-bearer]; (b) inject HF Bearer token into Transformers.js requests via electron/main.js preload fetch override; (c) cache extraction tool to recover the 26 GB on disk; (d) watchdog to detect silent 401 from gated HF repos when `CacheStorage` byte counts don't increase for >2 min while UI shows "downloading".
+
+All other priors (the 2–3 min Omnix activation sequence, the "health-check is a liar" pattern in `omnix::get_omnix_status`, etc.) are documented in `SESSION_STATUS.md` and were not addressed this session.
+
+---
+
+# SESSION RESULTS — July 1, 2026 (Day 4: Lemonade Model-Management Integration Plan)
+
+## Goal
+
+JC installed Lemonade locally at `E:\ai\Apps\lemonade_server\` and asked to read its native code to incorporate its **backend / model download functions** into Meridian. The day-3 commits only added inference-side Tauri commands (`lemonade_tts` / `lemonade_stt` / `lemonade_image`); the management-side endpoints (`/v1/pull`, `/v1/load`, `/v1/unload`, `/v1/delete`, `/v1/models`, `/v1/downloads`, `/v1/health`, `/v1/system-info`) are NOT yet wired. This day is a planning + discovery pass; implementation lands in subsequent sessions.
+
+## Discovery (filesystem)
+
+| Path | What it is |
+|---|---|
+| `E:\ai\Apps\lemonade_server\bin\LemonadeServer.exe` | The actual inference + management server binary. |
+| `E:\ai\Apps\lemonade_server\bin\lemonade.exe` | The CLI tool (`lemonade pull <name> --checkpoint main <ckpt> --recipe llamacpp`). |
+| `E:\ai\Apps\lemonade_server\bin\lemonade-app.cmd` | Entry script. |
+| `E:\ai\Apps\lemonade_server\app\lemonade-app.exe` | App-style entry (not used by server-only mode). |
+| `*.ps1` orchestration scripts | Reveal canonical workflows: `pull-all-models.ps1`, `import-models.ps1`, `register-from-json.ps1`, `register-all.ps1`, `pull-remaining.ps1`, `fix-symlinks.ps{1,2,3}`. `*.ps1` files call `lemonade.exe pull user.<name> --checkpoint main <ckpt> --recipe llamacpp`. |
+| `E:\ai\Apps\lemonade_server\src\` | empty — the installed bundle does not ship source. To read source, the next agent must `git clone https://github.com/lemonade-sdk/lemonade`. |
+
+## Discovery (live binary)
+
+Server was **not running** at start of session (`curl http://localhost:13305/v1/models` → connection refused). Realtime UI verification depends on JC starting it via Settings → Backend Manager → Lemonade → Start, or manually via `bin\LemonadeServer.exe`. The downstream /v1 endpoints listed below should be exercised before any implementation PR is merged.
+
+## Discovery (HTTP API verified from https://lemonade-server.ai/docs/)
+
+| Method | Path                | Purpose                                                          |
+| ------ | ------------------- | ---------------------------------------------------------------- |
+| GET    | `/v1/models`        | list all registered models                                       |
+| POST   | `/v1/pull`          | install / register a model (HF `checkpoint` + `recipe`; optional SSE via `stream:true`) |
+| POST   | `/v1/load`          | load a registered model into runtime memory                      |
+| POST   | `/v1/unload`        | unload a specific (or all) loaded models                         |
+| POST   | `/v1/delete`        | delete a registered model                                        |
+| GET    | `/v1/health`        | server status + currently-loaded models                          |
+| GET    | `/v1/downloads`     | list server-owned model download jobs (streamed + background)    |
+| GET    | `/v1/system-info`   | hardware / device enumeration                                    |
+| Env    | `LEMONADE_HOST`     | default `127.0.0.1`                                              |
+| Env    | `LEMONADE_PORT`     | default `11434` (NOTE: Conflicts with Lemonade's port-13305 default in `lemonade_extras.rs`!) |
+
+⚠ **Port discrepancy flagged**: `lemonade_extras.rs` defaults to `http://localhost:13305` (matches JC's running install per prior session verification). The `lemonade-server` env vars default to `11434`. The new integration must use either the existing 13305 default or read from settings — NOT assume the env var default. Pin the chosen port in `meridian.backend.lemonade.backendPort` (default 13305).
+
+## Integration Plan (thinker-with-files-gemini verdict)
+
+### A. Rust module layout
+
+**Recommendation**: Create `src-tauri/src/lemonade_manager.rs` (NEW module). Reasoning:
+- `backend_manager.rs` manages generic binary lifecycle; bloating it with Lemonade-specific HTTP payloads would tangle concerns.
+- `lemonade_extras.rs` is strictly inference-side and stays untouched (do not regress the day-2 TTS/STT/Vision wiring).
+- A new module that's purely Lemonade-API gives one place to evolve when Lemonade's endpoints change.
+
+**Commands to add** (all `#[tauri::command]`, snake_case args, camelCase JSON, `#[serde(rename_all = "camelCase")]` on response structs):
+
+```
+lemonade_list_models(endpoint, token) -> Result<Vec<LemonadeModelInfo>, String>
+lemonade_pull_model(checkpoint, recipe, model_name, stream, app, endpoint, token) -> Result<(), String>
+        // emits "lemonade-model-download-progress" events to frontend
+lemonade_load_model(model_name, ctx_size?, endpoint, token) -> Result<(), String>
+lemonade_unload_model(model_name: Option<String>, endpoint, token) -> Result<(), String>
+        // None = unload all
+lemonade_delete_model(model_name, endpoint, token) -> Result<(), String>
+lemonade_get_health(endpoint, token) -> Result<LemonadeHealth, String>
+lemonade_list_downloads(endpoint, token) -> Result<Vec<LemonadeDownloadJob>, String>
+lemonade_get_system_info(endpoint, token) -> Result<LemonadeSystemInfo, String>
+lemonade_auto_launch(app, install_dir, port) -> Result<u32, String>
+        // Spawns LemonadeServer.exe, waits for /v1/health 2xx, returns PID
+        // Reuses backend_manager::BackendRegistry for process tracking
+        // Wire into WindowEvent::Destroyed alongside existing reap_backends
+```
+
+All write-side commands log to existing `backend_events` SQLite table with `kind='lemonade'` and `action` matching the command name.
+
+### B. Config wiring
+
+- New slot: **`meridian.backend.lemonade.installDir`** (default `E:\ai\Apps\lemonade_server\` since that matches JC's install).
+- Existing `meridian.aiPanel.omnixPath`-style `lemonadePath` slot should NOT be reused; introduce a clean separation. Add a one-time migration to copy from the old slot into the new one.
+- **`meridian.backend.lemonade.backendPort`** (default 13305).
+- **`meridian.backend.lemonade.apiToken`** — write-only via `secure_keys.rs`; never crosses IPC in plaintext for production.
+- Schema bump: bump `USER_SETTINGS_SCHEMA_VERSION` 32 → 33 with a `32 → 33` migration step that seeds the new keys WITHOUT overwriting user values.
+
+### C. Frontend
+
+**Recommendation**: New tab INSIDE the existing `src/modules/backend-manager/pages/backend-manager.vue` (rather than a new sidebar item — preserves AGENTS.md's rule that sidebar icons must NOT replace existing items). The new tab uses Tabs UI; visible label: "Lemonade Models".
+
+UI shape:
+- Top: server status card (`lemonade_get_health` polled every 5s via `setInterval`).
+- Middle: registered-models table (`lemonade_list_models`), per row: model_name, checkpoint, recipe, loaded-badge (`/v1/health` cross-reference), action cluster (Load / Unload / Delete with `dialog.ask` confirmation).
+- Bottom: pull-a-new-model form (fields: HF checkpoint, recipe dropdown (`llamacpp` default + others), model_name auto-derive as `user.<repo>`, "Pull" button → invokes `lemonade_pull_model`).
+- SSE progress bar bound to `listen('lemonade-model-download-progress', ...)`.
+
+Destructive ops (Delete / Unload-all) MUST call `import { ask } from '@tauri-apps/plugin-dialog'` FIRST. Frontend copy must reference Meridian's `confirm-destructive` pattern (used by SFTP file browser).
+
+### D. Catalog updates
+
+`src-tauri/resources/backend_catalog.json` (create if absent; bind via `tauri.conf.json::bundle.resources`). Insert:
+
+```json
+{
+  "id": "lemonade.embeddable",
+  "displayName": "Lemonade Server",
+  "version": "10.8.1",
+  "defaultPort": 13305,
+  "binaryPaths": {
+    "windows": "LemonadeServer.exe",
+    "linux": "LemonadeServer",
+    "darwin": "LemonadeServer"
+  },
+  "format": "binary",
+  "installMethod": "manual-or-catalog"
+}
+```
+
+### E. Auth / security
+
+- Tokens stored exclusively via `secure_keys.rs::secure_store_secret("lemonade_api_key", ...)`.
+- Never log tokens.
+- `Authorization: Bearer <KEY>` header constructed inside the Rust command just before the `reqwest` call; never persisted into the lazy store under plaintext.
+
+### F. Backwards compatibility
+
+- Do NOT modify `lemonade_extras.rs` (inference path is working in day-3 verification; touching it risks regressing TTS/STT/Vision).
+- Reuse `backend_manager::BackendRegistry` for process tracking so Lemonade shows up as "Running" with PID in the existing backend panel.
+- Optionally extract `resolve_base()` from `lemonade_extras.rs` into a shared util — OR inline a small local copy in `lemonade_manager.rs` to keep the inference module untouched. Recommendation: keep duplicate (≤15 lines) until day 5 when both modules can be tidied together.
+
+### G. Validation criteria (post-implementation)
+
+1. `cargo check` exits 0 with 0 new warnings (the 12 pre-existing still present, NOT new).
+2. `vue-tsc --build` exits 0.
+3. Starting Lemonade via the new tab spawns the process, prints PID, polls /v1/health until 2xx, then shows status = Running.
+4. Pulling a model from a known HF repo (e.g. `unsloth/Phi-4-mini-instruct-GGUF:Q4_K_M`) emits SSE progress; the bar visibly progresses from 0% → 100%; final model appears in the registered-models table within 5s.
+5. Load → chat in AI Panel → response succeeds (this is the integration smoke test across the two Lemonade modules).
+6. Delete with `dialog.ask` confirmation → file goes from registered list; backend_events row appended.
+
+### H. Open questions for JC
+
+1. **Port**: pin to 13305 (matches existing `lemonade_extras.rs`) or honor `LEMONADE_PORT=11434`? Pinning is the safer choice — the AI Panel URL is already hardcoded to 13305 and changing it would be churn.
+2. **Auto-launch on Meridian boot**: should `lemonade_auto_launch` be called by the same `setup_handler` block that boots Omnix (now opt-in), or only via explicit user action from the new tab? Recommendation: opt-in only; the boot-on-startup path was the source of the day-1 Omnix demote churn.
+3. **Should Lemonade binaries in `E:\ai\Apps\lemonade_server\` be auto-detected on first launch** (e.g. on `meridian.backend.lemonade.installDir` empty, scan parent for an existing install) or require explicit user setup? Recommendation: yes, with a Toast that says “Found existing Lemonade at <path> — use it?" and a Yes/Skip dialog.
+
+## Sequence of next-action commits (thinker's recommendation)
+
+1. **Config & Catalog** — migrate `lemonadePath` → `meridian.backend.lemonade.installDir`; schema bump 32 → 33; add catalog entry.
+2. **Rust framework** — create `src-tauri/src/lemonade_manager.rs` with type stubs; register in `lib.rs::generate_handler!`.
+3. **Read/Launch ops** — `lemonade_get_health`, `lemonade_list_models`, `lemonade_auto_launch` (the last reuses `BackendRegistry`).
+4. **Write ops** — `lemonade_pull_model` (with SSE), `lemonade_load_model`, `lemonade_unload_model`, `lemonade_delete_model`. SQLite `backend_events` appended per command.
+5. **Frontend UI** — "Lemonade Models" tab inside `backend-manager.vue`; SSE listener; `dialog.ask` destructive confirmations.
+6. **Hand-test pass** — JC clicks through the full happy-path with the bundled `unsloth/Phi-4-mini-instruct-GGUF:Q4_K_M` model to validate end-to-end.
+
+Pushable state at end of this session was 7 unpushed commits (4 prior + 3 from day 3). This session made NO code changes — purely exploration + planning — so pushable state is unchanged.
+
+

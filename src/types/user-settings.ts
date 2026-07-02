@@ -222,6 +222,14 @@ export type MeridianBackendConfig = {
   modelPath?: string;
   lastApiCheckAt?: number;
   lastApiCheckOk?: boolean;
+  // Phase-11 day-4: Lemonade-only management fields consumed by the new
+  // `lemonade_manager` Rust module + "Lemonade Models" sidebar entry.
+  // Optional so existing per-backend entries (llama.cpp / llamafile /
+  // koboldcpp / turboquant) don't have to declare them; the lazy-store
+  // migration seeds them only on `meridian.backend.lemonade`.
+  installDir?: string;
+  backendPort?: number;
+  apiTokenKey?: string;
 };
 
 export type MeridianSettings = {
