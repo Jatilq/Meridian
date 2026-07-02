@@ -7,7 +7,7 @@
 //! Mirrors the shape of `omnix.rs` (single-binary Electron server with a
 //! bespoke JSON contract) but targets Lemonade's OpenAI-compatible API on
 //! the port chosen by
-//! `backend_manager::BackendKind::Lemonade::default_port()` (13305). All
+//! `backend_manager::BackendKind::Lemonade::default_port()` (11434). All
 //! three endpoints accept an optional `endpoint` override so the frontend
 //! can point them at a non-default Lemonade install (typically
 //! `aiPanelStore.localEndpointUrl` with any trailing `/v1` stripped).
@@ -37,7 +37,7 @@ use std::time::Duration;
 /// `backend_manager.rs`) so this module has zero coupling to the backend
 /// lifecycle registry — these commands can be called before any backend
 /// binary has been downloaded or started.
-const DEFAULT_LEMONADE_BASE: &str = "http://localhost:13305";
+const DEFAULT_LEMONADE_BASE: &str = "http://localhost:11434";
 
 /// Resolve an optional user-supplied endpoint to a stable base URL.
 ///
@@ -318,36 +318,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resolve_base_defaults_to_localhost_13305() {
-        assert_eq!(resolve_base(None), "http://localhost:13305");
-        assert_eq!(resolve_base(Some("")), "http://localhost:13305");
-        assert_eq!(resolve_base(Some("   ")), "http://localhost:13305");
+    fn resolve_base_defaults_to_localhost_11434() {
+        assert_eq!(resolve_base(None), "http://localhost:11434");
+        assert_eq!(resolve_base(Some("")), "http://localhost:11434");
+        assert_eq!(resolve_base(Some("   ")), "http://localhost:11434");
     }
 
     #[test]
     fn resolve_base_strips_trailing_slash() {
-        assert_eq!(resolve_base(Some("http://localhost:13305/")), "http://localhost:13305");
+        assert_eq!(resolve_base(Some("http://localhost:11434/")), "http://localhost:11434");
     }
 
     #[test]
     fn resolve_base_strips_trailing_v1() {
-        assert_eq!(resolve_base(Some("http://localhost:13305/v1")), "http://localhost:13305");
-        assert_eq!(resolve_base(Some("http://localhost:13305/v1/")), "http://localhost:13305");
+        assert_eq!(resolve_base(Some("http://localhost:11434/v1")), "http://localhost:11434");
+        assert_eq!(resolve_base(Some("http://localhost:11434/v1/")), "http://localhost:11434");
     }
 
     #[test]
     fn resolve_base_trims_surrounding_whitespace() {
         assert_eq!(
-            resolve_base(Some("  http://localhost:13305/v1  ")),
-            "http://localhost:13305"
+            resolve_base(Some("  http://localhost:11434/v1  ")),
+            "http://localhost:11434"
         );
     }
 
     #[test]
     fn resolve_base_preserves_custom_host() {
         assert_eq!(
-            resolve_base(Some("http://192.168.1.50:13305/v1")),
-            "http://192.168.1.50:13305"
+            resolve_base(Some("http://192.168.1.50:11434/v1")),
+            "http://192.168.1.50:11434"
         );
     }
 }

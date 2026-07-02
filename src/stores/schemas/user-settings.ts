@@ -16,7 +16,7 @@ import {
 import { BUILTIN_NAVIGATOR_ICON_THEME_IDS } from '@/types/icon-theme';
 
 export const USER_SETTINGS_SCHEMA_VERSION_KEY = '__schemaVersion';
-export const USER_SETTINGS_SCHEMA_VERSION = 33;
+export const USER_SETTINGS_SCHEMA_VERSION = 34;
 
 export const DEFAULT_GLOBAL_SEARCH_IGNORED_PATHS = [
   '/node_modules',
@@ -804,10 +804,31 @@ async function migrateUserSettingsStep(storage: StorageAdapter, fromVersion: num
     // keep that directory; new installs land at the path that matches JC's
     // actual bundled install at `E:\ai\Apps\lemonade_server`.
     await setDefaultStringIfMissing(storage, 'meridian.backend.lemonade.installDir', 'E:\\ai\\Apps\\lemonade_server');
-    await setDefaultNumberIfMissing(storage, 'meridian.backend.lemonade.backendPort', 13305);
+    await setDefaultNumberIfMissing(storage, 'meridian.backend.lemonade.backendPort', 11434);
     await setDefaultStringIfMissing(storage, 'meridian.backend.lemonade.apiTokenKey', '');
     if (typeof console !== 'undefined' && console.info) {
       console.info('[meridian] schema 32->33: seeded meridian.backend.lemonade management config (installDir / backendPort / apiTokenKey)');
+    }
+  }
+
+  if (fromVersion === 33 && toVersion === 34) {
+    // Phase-11 day-4 hotfix: schema 32->33 seeded backendPort=13305, but
+    // Lemonade's `LEMONADE_PORT` env default is 11434 and JC's actual
+    // install binds 11434 (verified today via curl returning Lemonade App
+    // HTML on 11434 vs connection-refused on 13305). Force-overwrite ONLY
+    // when the stored value is EXACTLY the bad default literal —
+    // exact-match (over .includes) preserves any user-set custom port
+    // (e.g. remote host on 192.168.1.X). Same sentinel-detect pattern as
+    // the 30->31 and 31->32 migrations: don't punish users who deliberately
+    // set their own.
+    const BAD_LEMONADE_PORT = 13305;
+    const GOOD_LEMONADE_PORT = 11434;
+    const existingLemonadePort = await storage.get<number>('meridian.backend.lemonade.backendPort');
+    if (existingLemonadePort === BAD_LEMONADE_PORT) {
+      await storage.set('meridian.backend.lemonade.backendPort', GOOD_LEMONADE_PORT);
+      if (typeof console !== 'undefined' && console.info) {
+        console.info('[meridian] schema 33->34: corrected lemonade backendPort 13305 -> 11434 (LEMONADE_PORT default)');
+      }
     }
   }
 }

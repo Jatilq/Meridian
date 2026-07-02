@@ -118,8 +118,13 @@ interface HfModelFile {
   sizeBytes?: number;
 }
 
+// Mirror of `backend_manager.rs::BackendKind::default_port()` so the UI's
+// pre-fill matches the Rust side out-of-the-box. Keep in lockstep — if
+// Rust's `default_port()` changes, this table changes the same day. The
+// llama.cpp entry is 11434 because SABnzbd holds 8080 on JC's host and
+// JC does not use Ollama (per Day-5 / SESSION_RESULTS conversation).
 const DEFAULT_PORTS: Record<MeridianBackendKind, number> = {
-  'llama.cpp': 8080,
+  'llama.cpp': 11434,
   'koboldcpp': 5001,
   'llamafile': 8080,
   'turboquant': 8080,

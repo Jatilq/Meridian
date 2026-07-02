@@ -18,7 +18,7 @@
 //!
 //! Both modules issue HTTP requests against a base URL resolved from a
 //! caller-supplied `endpoint`. When `endpoint` is `None` / empty, the base
-//! defaults to `http://localhost:13305` (the port that `lemonade_extras.rs`
+//! defaults to `http://localhost:11434` (the port that `lemonade_extras.rs`
 //! defaults to AND the port JC's actual local install binds). Configured
 //! paths flow through `meridian.backend.lemonade.installDir` + `backendPort`.
 //!
@@ -34,14 +34,14 @@ use serde::{Serialize, Deserialize};
 
 /// Default Lemonade OpenAI-compatible base URL. Matches:
 ///   * `backend_manager::BackendKind::Lemonade::default_port()` resolution
-///   * `lemonade_extras.rs::DEFAULT_LEMONADE_BASE` (13305 on JC's install)
+///   * `lemonade_extras.rs::DEFAULT_LEMONADE_BASE` (11434 on JC's install)
 ///   * the catalog row in `src/data/backends.json` (`lemonade.embeddable.windows-x64`)
 ///
 /// Env override `LEMONADE_PORT` (default `11434`) is honored upstream by
-/// lemonade-server itself but Meridian deliberately pins to **13305** to
+/// lemonade-server itself but Meridian deliberately pins to **11434** to
 /// keep one port across all modules — changing would churn the AI Panel
 /// `localEndpointUrl` default + every frontend consumer.
-const DEFAULT_LEMONADE_BASE: &str = "http://localhost:13305";
+const DEFAULT_LEMONADE_BASE: &str = "http://localhost:11434";
 
 /// Resolve the base URL the Lemonade server is listening on. Priority:
 /// 1. Caller-supplied `endpoint` (strips trailing `/v1` + `/` + whitespace)
@@ -114,10 +114,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resolve_lemonade_base_defaults_to_localhost_13305() {
-        assert_eq!(resolve_lemonade_base(None), "http://localhost:13305");
-        assert_eq!(resolve_lemonade_base(Some("")), "http://localhost:13305");
-        assert_eq!(resolve_lemonade_base(Some("   ")), "http://localhost:13305");
+    fn resolve_lemonade_base_defaults_to_localhost_11434() {
+        assert_eq!(resolve_lemonade_base(None), "http://localhost:11434");
+        assert_eq!(resolve_lemonade_base(Some("")), "http://localhost:11434");
+        assert_eq!(resolve_lemonade_base(Some("   ")), "http://localhost:11434");
     }
 
     #[test]
@@ -127,20 +127,20 @@ mod tests {
         // then forget to strip it. `resolve_lemonade_base` should normalize
         // them all to the same bare base.
         assert_eq!(
-            resolve_lemonade_base(Some("http://localhost:13305/")),
-            "http://localhost:13305"
+            resolve_lemonade_base(Some("http://localhost:11434/")),
+            "http://localhost:11434"
         );
         assert_eq!(
-            resolve_lemonade_base(Some("http://localhost:13305/v1")),
-            "http://localhost:13305"
+            resolve_lemonade_base(Some("http://localhost:11434/v1")),
+            "http://localhost:11434"
         );
         assert_eq!(
-            resolve_lemonade_base(Some("http://localhost:13305/v1/")),
-            "http://localhost:13305"
+            resolve_lemonade_base(Some("http://localhost:11434/v1/")),
+            "http://localhost:11434"
         );
         assert_eq!(
-            resolve_lemonade_base(Some("  http://localhost:13305/v1  ")),
-            "http://localhost:13305"
+            resolve_lemonade_base(Some("  http://localhost:11434/v1  ")),
+            "http://localhost:11434"
         );
     }
 }

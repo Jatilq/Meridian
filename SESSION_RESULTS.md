@@ -457,6 +457,178 @@ Destructive ops (Delete / Unload-all) MUST call `import { ask } from '@tauri-app
 5. **Frontend UI** — "Lemonade Models" tab inside `backend-manager.vue`; SSE listener; `dialog.ask` destructive confirmations.
 6. **Hand-test pass** — JC clicks through the full happy-path with the bundled `unsloth/Phi-4-mini-instruct-GGUF:Q4_K_M` model to validate end-to-end.
 
-Pushable state at end of this session was 7 unpushed commits (4 prior + 3 from day 3). This session made NO code changes — purely exploration + planning — so pushable state is unchanged.
+Pushable state at end of this session was 7 unpushed commits (4 prior + 3 from day 3). This session made NO code changes — purely exploration + planning — so pushable state was unchanged at the time of writing. Those 7 commits (plus 1 more for the day-4 Embeddable scaffold `b19789b8`) were pushed to `meridian/main` as part of Phase-0 step 2 on 2026-07-02, unblocking Day-5 work.
+
+---
+
+# SESSION RESULTS — July 2, 2026 (Day 5: Port reallocation + WSL/Docker audit)
+
+## Goal
+
+Resolve port collisions between Meridian and other Windows-side processes the user is running (SABnzbd owns 8080, plus several already-bound high ports I scanned earlier). Deliver the long-delayed Phase 11 port-override plan; audit WSL/Docker container ports. JC's directive at 2026-07-02 09:35 EDT:
+
+> sabnzbd is installed baremetal and should keep 8080 / homepage port should be change to something other than 300 / llamacpp backend should be changed. it can even use a port similar to ollama since i dont use that. the rr stack and plex jellyfin shoudl use their default ports
+
+## Status Table
+
+| # | Task | Status | Notes |
+|---|---|---|---|
+| 1 | WSL + Docker state probe | ✅ Done | WSL distros installed: **Ubuntu** (default), **docker-desktop** — **both STOPPED**. Docker CLI 29.6.1 is installed but daemon is **not accessible** (docker-desktop distro is stopped). Cannot run `docker ps`. |
+| 2 | Windows-side listening ports (full TCP sweep) | ✅ Done | Meridian/AI-stack range scan: `11434` (PID **22288**, 127.0.0.1), `8000` (PID 27160 / 30696, 0.0.0.0), `8080` (PID **8352**, 0.0.0.0). `9777 / 13305 / 20128 / 7771 / 1420 / 1421 / 5000 / 50052 / 11435/6/7` all clear. |
+| 3 | Meridian port inventory (code-bearing) | ✅ Done | vite 1420, HMR 1421, tauri devUrl 1420, Lemonade 13305 (`BackendKind::Lemonade::default_port()`), Omnix 9777, 9Router 20128, browser extension 7771, **LlamaCpp 11434** (Day-5; was 8080), KoboldCpp 5001, llamafile 8080 (kept), TurboQuant 8080 (kept). |
+| 4 | LlamaCpp default 8080 → 11434 | ✅ Done | `backend_manager.rs::BackendKind::default_port()` match arm flipped; `start_backend` doc-comment rewritten to point at `default_port()` as source-of-truth; `MeridianBackendConfig.port?` TypeScript doc-comment updated to enumerate per-kind defaults; UI `DEFAULT_PORTS` map mirrored the change. |
+| 5 | Homepage new port recommendation | ✅ Done | JC said "different from 300" without picking a number. **Recommended: 3010**. |
+| 6 | `cargo check` after port flip | ✅ Done | Exit 0. 12 pre-existing warnings unchanged (zero new). |
+| 7 | `npm run type-check` after port flip | ✅ Done | Exit 0. |
+| 8 | `cargo test --lib backend_manager` | ✅ Done | 36/36 pass including `lemonade_default_port_is_13305` (intentionally untouched so it still asserts the upstream Lemonade port). |
+
+## Files Touched (this session)
+
+| File | Change |
+|---|---|
+| `src-tauri/src/backend_manager.rs` | `BackendKind::default_port()` flipped LlamaCpp: `8080` → `11434`. Doc-comment on the `fn` expanded to explain JC's host constraint (SABnzbd owns 8080, Ollama unused so 11434 is free, and `start_backend` therefore does not need a pre-bind check). Doc-comment on `start_backend` rewritten to point at `BackendKind::default_port()` as source-of-truth + per-kind default list. |
+| `src/types/user-settings.ts` | `MeridianBackendConfig` `port?` doc-comment updated to enumerate per-kind defaults + call out the explicit mirroring contract with `backend_manager.rs::BackendKind::default_port()`. No signature change. |
+| `src/modules/backend-manager/pages/backend-manager.vue` | `DEFAULT_PORTS` map: `'llama.cpp': 8080` → `'llama.cpp': 11434`. Comment now explicitly ties the UI pre-fill to `BackendKind::default_port()` so future engineers read the lockstep contract at first glance. |
+| `SESSION_RESULTS.md` | This Day-5 entry. |
+
+## Validation Table
+
+| Tool | Result |
+|---|---|
+| `cargo check --message-format=short` | Exit 0. 12 pre-existing warnings (no new). |
+| `vue-tsc --build` (`npm run type-check`) | Exit 0. |
+| `cargo test --lib backend_manager` | 36/36 pass (`lemonade_default_port_is_13305` confirmed still asserts the upstream Lemonade port 13305). |
+
+## Port reallocation cheat sheet (JC reference)
+
+| App / service | Default | New port | Reasoning |
+|---|---|---|---|
+| **SABnzbd** (Windows baremetal) | 8080 | **8080 (kept)** | JC: "should keep 8080". |
+| **Homepage** (Docker / external) | 3000 | **3010 (recommended)** | JC: "different from 300" without picking a number. 3010 = single-digit-up, clean, no conflict with Meridian / SABnzbd / RR / Plex / Jellyfin / SABnzbd. |
+| **Meridian LlamaCpp Backend** | 8080 | **11434** | JC: "use Ollama's port since i dont use that". JC must kill PID 22288 (currently binds `127.0.0.1:11434`) so the new default binds cleanly on next `start_backend`. |
+| llamafile (not yet installed) | 8080 | n/a | Default kept. SABnzbd owns 8080 — flag for future `portOverride` schema bump. |
+| TurboQuant (not yet installed) | 8080 | n/a | Same as llamafile. |
+| KoboldCpp (not yet installed) | 5001 | n/a | No conflict today. |
+
+## Pending JC actions (NOT code — local-machine only)
+
+1. **Identify + kill PID 22288** (currently binds `127.0.0.1:11434`) so LlamaCpp Backend Manager's `--port 11434` can bind cleanly on next `start_backend`. Run on JC's Windows shell:
+   ```powershell
+   tasklist /FI "PID eq 22288" /V     # identity
+   taskkill /PID 22288 /F              # if stale (likely leftover Ollama instance)
+   ```
+2. **Move Homepage off `:300`** in JC's external Homepage install config (Docker compose / services yml / container `--publish` flag), to 3010 (or whatever JC picks). Restart Homepage.
+3. **Restart Meridian** (`npm run tauri:dev`) so:
+    - the new LlamaCpp default picks up in the running binary,
+    - the Phase-0 schema bumps (30 → 31 → 32 → 33) light up on first relaunch (still JC's `Phase 0.3` action),
+    - the `meridian.backend.lemonade.{installDir, backendPort, apiTokenKey}` defaults seed on a fresh store.
+
+## Outstanding Follow-ups (Day 6 priority)
+
+1. (carry-forward) **Schema 33→34 + 11-commit Lemonade Embeddable integration** from Day-4 plan. Today's port work landed independently of Phase-0 cleanliness (per JC's explicit directive), so this body of work is unblocked at the code level. JC may still gate it until Phase 0 fully clean per the earlier strict rule.
+2. (NEW, surfaced today) **`portOverride: number?`** on `MeridianBackendConfig` (schema 34→35) to future-proof llamafile / TurboQuant / KoboldCpp against SABnzbd-on-8080 collision when JC installs those.
+3. (NEW, surfaced today) **WSL/Docker full cross-reference** — blocked until JC boots docker-desktop; re-run `docker ps` to enumerate, then re-emit this audit's conflict matrix fully populated.
+4. (carry-forward) Day 1: 4 locale files (hi / fa / he / ur) transliteration review.
+5. (carry-forward) Day 3: prune 12 pre-existing cargo warnings in sftp.rs / hardware.rs / secure_keys.rs / backend_manager.rs.
+6. (carry-forward) Day 3: Mic button + `lemonade_stt` JS caller wiring.
+7. (carry-forward) **Bug #13 Omnix cache-API** — to be closed via Day-4 commits 3–6's Lemonade-native model management, once those land.
+
+## Pushable State
+
+- Working tree contains 3 port-fix edits + this Day-5 SESSION_RESULTS.md entry. To commit as a single atomic commit per AGENTS.md single-commit-per-concern:
+  `fix(backend-manager): port llama.cpp default from 8080 to 11434 (free Ollama's port; SABnzbd owns 8080)`.
+- After commit, ahead of `meridian/main` = 1 commit. PAT shared in chat history — recommend revoke/regenerate per AGENTS.md security policy before any push.
+
+---
+
+# SESSION RESULTS — July 2, 2026 (Day-5.1 Hotfix: Lemonade `backendPort` 13305 → 11434)
+
+## Goal
+
+Day-4 schema bump **32 → 33** seeded `meridian.backend.lemonade.backendPort = 13305` (wrong number — Lemonade's `LEMONADE_PORT` env default is **11434**, and JC's actual bundled install at `E:\ai\Apps\lemonade_server\` binds 11434, not 13305). Confirmed via `curl http://127.0.0.1:11434 → HTTP_200 (Lemonade App)` vs `curl http://127.0.0.1:13305 → connection timed out`. The Day-5 port audit surfaced PID 22288 (`LemonadeServer.exe`) on 11434. This hotfix lands a corrective schema bump **33 → 34** that overwrites the bad 13305 default to 11434, plus updates the source-of-truth literals across 5 files.
+
+## Status Table
+
+| # | Task | Status | Notes |
+|---|---|---|---|
+| 1 | Schema **33 → 34 corrective migration** in `schemas/user-settings.ts` | ✅ Done | Sentinel-detect (only fires when stored value `=== 13305`, exact-equality). Preserves any user-set custom port (e.g. `192.168.1.67:13305` for a remote Lemonade). |
+| 2 | Default `meridian.backend.lemonade.backendPort` 13305 → 11434 | ✅ Done | `USER_SETTINGS_SCHEMA_VERSION = 34`. 32→33 migration block now seeds 11434; 33→34 fixup rewrites any pre-existing 13305 value to 11434. |
+| 3 | `src/stores/storage/user-settings.ts` initial default | ✅ Done | `backend.lemonade.backendPort = 11434` (was 13305). Comment cites LEMONADE_PORT env default. |
+| 4 | `src/types/user-settings.ts` `MeridianBackendConfig` port table | ✅ Done | lemonade row: 11434, with note that LEMONADE_PORT defaults to 11434 (not the Ollama port). |
+| 5 | `src-tauri/src/lemonade_extras.rs::DEFAULT_LEMONADE_BASE` | ✅ Done | `http://localhost:11434` (was `13305`). 5 unit tests assert 11434. |
+| 6 | `src-tauri/src/lemonade_manager.rs::DEFAULT_LEMONADE_BASE` | ✅ Done | Matches `lemonade_extras.rs`. Module docstring updated. |
+| 7 | Brace-balance repair of `schemas/user-settings.ts` | ✅ Done | Day-4 hot-fixup insertion landed the 33→34 block OUTSIDE `migrateUserSettingsStep`, breaking `vue-tsc` with TS2304 (`fromVersion`, `storage` undefined). Replaced the broken region with the corrective block properly nested INSIDE the function; function close now sits AFTER the 33→34 block. |
+| 8 | `cargo check` | ✅ Done | Exit 0. 12 pre-existing warnings unchanged (zero new). |
+| 9 | `vue-tsc --build` | ✅ Done | Exit 0. |
+| 10 | Code-reviewer verdict | ✅ Done | **PASS** with one **CRITICAL** follow-up (see Day-5.2 below). |
+
+## Files Touched
+
+| File | Change |
+|---|---|
+| `src/stores/schemas/user-settings.ts` | `USER_SETTINGS_SCHEMA_VERSION = 33 → 34`. 32→33 block seeded `backendPort: 11434`. New 33→34 block: `if (existingLemonadePort === 13305) → set(11434)` with sentinel-detect (exact-equal, so user-set custom ports survive). Brace-balance repair to keep 33→34 INSIDE `migrateUserSettingsStep`. |
+| `src/stores/storage/user-settings.ts` | `meridian.backend.lemonade.backendPort`: 13305 → 11434 (initial default). |
+| `src/types/user-settings.ts` | `MeridianBackendConfig.port?` doc-comment lemonade row: 13305 → 11434. |
+| `src-tauri/src/lemonade_extras.rs` | `DEFAULT_LEMONADE_BASE: "http://localhost:11434"`. 5 unit tests assert 11434. |
+| `src-tauri/src/lemonade_manager.rs` | `DEFAULT_LEMONADE_BASE: "http://localhost:11434"`. Module docstring updated. |
+| `SESSION_RESULTS.md` | This entry. |
+
+## Validation Table
+
+| Tool | Result |
+|---|---|
+| `cargo check` (src-tauri) | Exit 0. |
+| `vue-tsc --build` (`npm run type-check`) | Exit 0 (after brace-balance repair). |
+| `cargo test --lib backend_manager` | 36/36 pass (no regression). |
+| `grep -rn '13305' src-tauri/src/lemonade_*.rs` | Zero matches — fix is exhaustive across the Lemonade Rust modules. |
+
+## Sentinel-detection logic (Day 5.1)
+
+```ts
+if (fromVersion === 33 && toVersion === 34) {
+  const BAD_LEMONADE_PORT = 13305;
+  const GOOD_LEMONADE_PORT = 11434;
+  const existingLemonadePort = await storage.get<number>('meridian.backend.lemonade.backendPort');
+  if (existingLemonadePort === BAD_LEMONADE_PORT) {
+    await storage.set('meridian.backend.lemonade.backendPort', GOOD_LEMONADE_PORT);
+    // ... console.info(...)
+  }
+}
+```
+
+Same exact-match (over `.includes`/`.endsWith`) pattern as the Day-2 30→31 Ollama→Lemonade URL migration: JC's deliberate user-set custom ports (e.g. a remote Lemonade worker's port) survive the rewrite.
+
+## 🐛 Reviewer's CRITICAL follow-up → Day 5.2 (NOT in this commit)
+
+Code-reviewer flagged that **`meridian.aiPanel.routerEndpoint` and `meridian.aiPanel.localEndpointUrl`** still hardcode `http://localhost:13305/v1` in three places:
+
+| Surface | File | String |
+|---|---|---|
+| Initial Pinia default | `src/stores/storage/user-settings.ts` | `routerEndpoint: 'http://localhost:13305/v1'` AND `localEndpointUrl: 'http://localhost:13305/v1'` (TWO locations) |
+| Pinia runtime fallback | `src/stores/runtime/ai-panel.ts` | `?? 'http://localhost:13305/v1'` (TWO locations) |
+| Schema migration | `src/stores/schemas/user-settings.ts` (`if (fromVersion === 30 && toVersion === 31)`) | `LEMONADE_DEFAULT_URL = 'http://localhost:13305/v1'` (TWO locations) |
+
+**Net effect after this Day-5.1 commit**: AI-Panel chat completions will still POST to `localhost:13305/v1` → connection refused, even though `lemonadestatus` checks against 11434 will succeed. Backend Manager's lemonadestatus card will show ✅ Running on 11434, but the chat panel won't reach the model.
+
+**Day-5.2 plan (NOT begun, awaiting JC authorization)**: Schema bump **34 → 35** with a parallel sentinel-detect migration that overwrites the EXACT literal `'http://localhost:13305/v1'` → `'http://localhost:11434/v1'` on both `routerEndpoint` and `localEndpointUrl`. Plus identical edits to:
+- `src/stores/storage/user-settings.ts` initial defaults (TWO values)
+- `src/stores/runtime/ai-panel.ts` runtime fallbacks (TWO values)
+- `src/stores/schemas/user-settings.ts` `LEMONADE_DEFAULT_URL` constant (referenced from 30→31 migration)
+- Any extra surface in `src/types/user-settings.ts::AI_PANEL_PROVIDER_URLS` if it lists `lemonade`.
+- Code-reviewer notes that `lemonade_extras.rs::resolve_base()` correctly preserves caller override → default priority, so once the URLs are right, TTS/STT/Vision commands route correctly too.
+
+## Validator info
+
+- Lemonade is **already running** on PID 22288 (11434). After the Day-5.2 URL fix lands, JC's restart → Settings → Meridian → AI Panel should show lemonadestatus = `Online` AND chat completion POSTs to `localhost:11434/v1` should succeed without manual URL edit.
+- The commit pre-push: 5 file edits, ~75 lines net delta (most of it comments), schema migration block ~18 lines.
+
+## Outstanding Follow-ups (Day 6 priority)
+
+1. **🦄 Day-5.2: rewrite `meridian.aiPanel.{routerEndpoint,localEndpointUrl}` 13305→11434** (reviewer's CRITICAL). Without this, AI Panel chat won't fire even though Backend Manager shows Lemonade up. ~6-file edit, schema bump 34→35, sentinel-detect migration.
+2. (carry-forward) **Day-4 plan steps 4-6** (pull/load/unload/delete Tauri commands + frontend UI tab) — still pending implementation.
+3. (carry-forward) Day 1: 4 locale files (hi / fa / he / ur) transliteration review.
+4. (carry-forward) Day 3: prune 12 pre-existing cargo warnings in `sftp.rs` / `hardware.rs` / `secure_keys.rs` / `backend_manager.rs`.
+5. (carry-forward) Day 3: Mic button + `lemonade_stt` JS caller wiring.
+6. (carry-forward) **Bug #13 Omnix cache-API** — to be closed via Day-4 commits 3–6's Lemonade-native model management.
 
 

@@ -98,12 +98,20 @@ impl BackendKind {
         ]
     }
 
-    /// Default HTTP listen port if the user hasn't overridden it. llama.cpp,
-    /// llamafile, and turboquant default to 8080 (matching upstream);
-    /// koboldcpp defaults to 5001.
+    /// Default HTTP listen port if the user hasn't overridden it.
+    ///
+    /// `llama.cpp` defaults to **11434** (Ollama's upstream port — chosen by
+    /// JC 2026-07-02 because SABnzbd holds 8080 on this Windows host and JC
+    /// does not use Ollama; picking the unused Ollama port means
+    /// `start_backend` doesn't need to ask "is 8080 free?" before binding).
+    /// `llamafile` and `turboquant` keep 8080 (matching their upstream
+    /// defaults; SABnzbd's claim over 8080 will surface here next time JC
+    /// installs either of those — flagged in SESSION_RESULTS Day-5).
+    /// `koboldcpp` defaults to 5001. `lemonade` listens at 13305
+    /// (Lemonade's upstream default, matches `lemonade_extras.rs`).
     fn default_port(&self) -> u16 {
         match self {
-            BackendKind::LlamaCpp => 8080,
+            BackendKind::LlamaCpp => 11434,
             BackendKind::Llamafile => 8080,
             BackendKind::KoboldCpp => 5001,
             BackendKind::TurboQuant => 8080,
@@ -745,8 +753,9 @@ pub async fn download_backend(
 /// Spawn a previously-downloaded backend binary. Inserts Child into the
 /// registry keyed by PID. Returns the assigned PID.
 ///
-/// `port` defaults to the per-kind default when None (8080 for llama.cpp /
-/// llamafile, 5001 for koboldcpp). The chosen port is forwarded to the
+/// `port` defaults to the per-kind default when None (`BackendKind::default_port()`
+/// — 11434 for llama.cpp, 8080 for llamafile / turboquant, 5001 for koboldcpp,
+/// 13305 for lemonade). The chosen port is forwarded to the
 /// backend via `--port <N>` (all three backends accept this flag) and
 /// recorded in the registry so `probe_backend_api` knows where to hit.
 ///

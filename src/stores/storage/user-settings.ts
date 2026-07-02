@@ -252,7 +252,14 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
         // when launched with --api-key; resolve via secure_keys.rs when set).
         'lemonade': {
           installDir: 'E:\\ai\\Apps\\lemonade_server',
-          backendPort: 13305,
+          // Lemonade's `LEMONADE_PORT` env default is 11434. JC's actual
+          // local install binds 11434 (verified). Earlier code shipped
+          // 13305 which is the OpenAI-compat port Ollama uses historically;
+          // that port is empty on this host, so the AI Panel's chat /
+          // TTS / STT / vision calls all silently fail with connection
+          // refused unless the lazy-store migration 33->34 redirects them
+          // here. Use 11434 going forward (schema 34).
+          backendPort: 11434,
           apiTokenKey: '',
         },
       },

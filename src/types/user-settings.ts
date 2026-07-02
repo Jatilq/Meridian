@@ -214,7 +214,12 @@ export type SshConnectionSetting = {
 export type MeridianBackendKind = 'llama.cpp' | 'llamafile' | 'koboldcpp' | 'turboquant' | 'lemonade';
 
 /// Per-backend preferences. `port` is the HTTP listen port to launch the
-/// backend on (defaults: llama.cpp=8080, llamafile=8080, koboldcpp=5001).
+/// backend on. Defaults are owned by `backend_manager.rs::BackendKind::default_port()`:
+/// - `llama.cpp`     → 11434 (Ollama's upstream port; SABnzbd holds 8080 on JC's host)
+/// - `llamafile`     → 8080  (upstream default; conflicts with SABnzbd if installed)
+/// - `turboquant`    → 8080  (upstream default; conflicts with SABnzbd if installed)
+/// - `koboldcpp`     → 5001
+/// - `lemonade`      → 11434 (Lemonade's `LEMONADE_PORT` env default; matches JC's actual install)
 /// `modelPath` is the most-recently-loaded model — re-applying it via the
 /// Backend Manager's Load button keeps the previous selection handy.
 export type MeridianBackendConfig = {
