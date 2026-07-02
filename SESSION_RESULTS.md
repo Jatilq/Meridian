@@ -631,4 +631,75 @@ Code-reviewer flagged that **`meridian.aiPanel.routerEndpoint` and `meridian.aiP
 5. (carry-forward) Day 3: Mic button + `lemonade_stt` JS caller wiring.
 6. (carry-forward) **Bug #13 Omnix cache-API** — to be closed via Day-4 commits 3–6's Lemonade-native model management.
 
+---
+
+# SESSION RESULTS — July 2, 2026 (Day-5.2: AI-Panel consumer URL hardcode resolution)
+
+## Goal
+
+Close the reviewer's **CRITICAL** follow-up from Day-5.1 (commit `6239795d`). The Day-5 / Day-5.1 commit series fixed the *backend-side* port literals (LlamaCpp 8080→11434, Lemonade `backendPort` 13305→11434) but the AI-Panel *consumer* URLs that Rain actually sends HTTP requests to (`meridian.aiPanel.routerEndpoint`, `meridian.aiPanel.localEndpointUrl`, and their Pinia runtime fallbacks) still seeded `http://localhost:13305/v1`. Net effect post-Day-5.1: Backend Manager lemonadestatus card showed ✅ Running on 11434, but chat `/v1/chat/completions` POSTed to 13305 → connection refused. Day-5.2 closes that loop with a 5-file change set + schema bump 34→35.
+
+## Status Table
+
+| # | Task | Status | Notes |
+|---|---|---|---|
+| 1 | `USER_SETTINGS_SCHEMA_VERSION` 34 → 35 + new 34→35 corrective migration | ✅ Done | `src/stores/schemas/user-settings.ts`. Sentinel-detect (EXACT-equal `===`): rewrites BOTH `meridian.aiPanel.routerEndpoint` and `meridian.aiPanel.localEndpointUrl` ONLY when stored value equals `'http://localhost:13305/v1'`. Same pattern as 30→31 + 33→34. Preserves any user-set custom URL (LM Studio on `:1234`, OpenRouter hostname, remote Lemonade at 192.168.1.X:13305). |
+| 2 | Storage initial defaults `routerEndpoint` + `localEndpointUrl` | ✅ Done | `src/stores/storage/user-settings.ts`. Both flipped to `'http://localhost:11434/v1'`. Comments cite `LEMONADE_PORT` env default + point at the 34→35 migration as the source-of-truth for upgrading users. |
+| 3 | Pinia runtime fallbacks | ✅ Done | `src/stores/runtime/ai-panel.ts`. Both `??`/`||` fallbacks flipped to `http://localhost:11434/v1`. Comments cite 34→35 by name so future readers see WHY the fallback exists (sentinel pre-cleansed for upgrade installs). |
+| 4 | `BackendKind::Lemonade::default_port()` 13305 → 11434 + docstring | ✅ Done | `src-tauri/src/backend_manager.rs`. Doc-string now cites `LEMONADE_PORT` env default + the curl-binding proof (11305 connection-refused vs 11434 returns Lemonade App HTML, JC 2026-07-02). |
+| 5 | Test rename `lemonade_default_port_is_13305` → `lemonade_default_port_is_11434` + assert | ✅ Done | Same Rust file. Keeps the test name honest with what it asserts. |
+| 6 | `.vue` `DEFAULT_PORTS.lemonade` mirror 13305 → 11434 | ✅ Done | `src/modules/backend-manager/pages/backend-manager.vue`. Comment now cites the Rust `default_port()` as source-of-truth so future drift is a one-line patch each place. |
+| 7 | `cargo check` + `vue-tsc` | ✅ Done | Exit 0 / 0 (12 pre-existing warnings in `sftp.rs` / `hardware.rs` / `backend_manager.rs` / `secure_keys.rs` unchanged; zero new). |
+| 8 | Code-reviewer verdict | ✅ Done | **PASS** with one minor (non-blocking) observation: the `BAD_LEMONADE_URL` / `GOOD_LEMONADE_URL` local-scope constants in the 34→35 block could be DRY'd against the existing `LEGACY_OLLAMA_URL` / `LEMONADE_DEFAULT_URL` constants in 30→31. Same observation already applies to 33→34's `BAD/GOOD_LEMONADE_PORT` pattern; out of scope here. |
+
+## Files Touched
+
+| File | Change |
+|---|---|
+| `src/stores/schemas/user-settings.ts` | `USER_SETTINGS_SCHEMA_VERSION = 34 → 35`. New `if (fromVersion === 34 && toVersion === 35)` migration block: sentinel-detect `'http://localhost:13305/v1'` → `'http://localhost:11434/v1'` for both `routerEndpoint` and `localEndpointUrl`. Migration placed INSIDE `migrateUserSettingsStep`; brace balance manually verified via `awk`/`cat -A` byte-precise dump. |
+| `src/stores/storage/user-settings.ts` | `routerEndpoint` + `localEndpointUrl` initial defaults both `http://localhost:13305/v1` → `http://localhost:11434/v1`. Comments cite `LEMONADE_PORT` env default. |
+| `src/stores/runtime/ai-panel.ts` | `routerEndpoint` / `localEndpointUrl` ref initial-value fallbacks both flipped to `http://localhost:11434/v1`. Comments cite 34→35 by name. |
+| `src-tauri/src/backend_manager.rs` | `BackendKind::Lemonade => 11434` (was 13305). Doc-string + module comment updated. Test renamed + assert updated. |
+| `src/modules/backend-manager/pages/backend-manager.vue` | `DEFAULT_PORTS.lemonade: 13305` → `11434`. Comment cites `backend_manager.rs::BackendKind::Lemonade::default_port()` as source-of-truth. |
+| `SESSION_RESULTS.md` | This Day-5.2 entry. |
+
+## Validation Table
+
+| Tool | Result |
+|---|---|
+| `cargo check` (src-tauri) | Exit 0. 12 pre-existing warnings unchanged; zero new. |
+| `vue-tsc --build` (`npm run type-check`) | Exit 0. |
+| `cargo test --lib backend_manager` | 36/36 pass. The renamed `lemonade_default_port_is_11434` now asserts 11434. |
+| `grep -rn '13305/v1' src/ src-tauri/src/` | Zero matches in active source. Only matches are in the documented historical-sentinel references inside the 30→31 + 34→35 migration blocks (those references ARE the sentinel-detect detection targets — intentional). |
+| Brace balance (manual byte dump) | Intact — `migrateUserSettingsStep` opens once + closes once via the function-end `}`; 33→34 + 34→35 blocks both properly nested. |
+
+## Migration chain — final convergence
+
+For a user upgrading through schema 30 → 35 (say, Day-2 install that hardcoded 13305/v1 a year ago):
+
+```
+30→31: Ollama URL 'http://localhost:11434/v1' → Lemonade 'http://localhost:13305/v1'
+31→32: omnixEnabled = false  (forced demote; reap-kill stale Electron)
+32→33: meridian.backend.lemonade.{installDir, backendPort, apiTokenKey} seeded
+        (with backendPort: 11434 — Day-5.1 hotfix already corrected this default)
+33→34: backendPort sentinel-detect: 13305 → 11434 (catches the bad 32→33 seed)
+34→35: AI-Panel URL sentinel-detect: 'http://localhost:13305/v1' → ':11434/v1'
+```
+
+End state for the routing chain: every URL string including the AI-Panel pointer ends up at `http://localhost:11434/v1` (= Lemonade's actual upstream default) for users with no custom URL set; users with LM Studio / OpenRouter / remote Lemonade URLs at any step are preserved by the exact-match sentinel-detect pattern.
+
+## Stage + commit
+
+Committed as `02c35f70` — `fix(ai-panel): Day-5.2 consumer URL hardcode resolution (13305/v1 -> 11434/v1)`. Just my 5 files staged; JC's pre-existing working-tree changes (the 17 files in `git status` at session start) remain independent for JC's own commit decisions.
+
+## Outstanding Follow-ups (Day 6 priority, post-Day-5.2)
+
+1. (carry-forward) **Day-4 plan steps 4-6** (pull/load/unload/delete Tauri commands + frontend "Lemonade Models" tab) — still pending implementation.
+2. **Day-6.0 clean restart**: JC closes PowerShell, opens a fresh one, retries `npm run tauri:dev` (cargo is on bash PATH but PowerShell PATH didn't include `~/.cargo/bin`). Phase 0 step 3.
+3. After restart: **verify in UI** — Settings → Meridian → AI Panel should show both `routerEndpoint` + `localEndpointUrl` pre-filled at `http://localhost:11434/v1` (fresh install) OR correctly migrated from the bad default (upgrade install). Backend Manager → Lemonade → Status probe should show ✅ Online.
+4. (carry-forward) Day 1: 4 locale files (hi / fa / he / ur) transliteration review.
+5. (carry-forward) Day 3: prune 12 pre-existing cargo warnings in `sftp.rs` / `hardware.rs` / `secure_keys.rs` / `backend_manager.rs`.
+6. (carry-forward) Day 3: Mic button + `lemonade_stt` JS caller wiring.
+7. (carry-forward) **Bug #13 Omnix cache-API** — to be closed via Day-4 commits 3–6's Lemonade-native model management.
+
 
