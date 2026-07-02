@@ -129,7 +129,7 @@ pub async fn sftp_read_dir(creds: SftpCredentials, path: String) -> Result<SftpC
         path.clone()
     };
 
-    let mut read_dir = sftp
+    let read_dir = sftp
         .read_dir(&dir)
         .await
         .map_err(|e| format!("Failed to read remote dir {}: {}", dir, e))?;
@@ -138,7 +138,7 @@ pub async fn sftp_read_dir(creds: SftpCredentials, path: String) -> Result<SftpC
     let mut dir_count = 0usize;
     let mut file_count = 0usize;
 
-    while let Some(item) = read_dir.next() {
+    for item in read_dir {
         let name = item.file_name();
         if name == "." || name == ".." {
             continue;

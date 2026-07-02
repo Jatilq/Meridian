@@ -614,7 +614,7 @@ async fn download_chunked(
     }
     let chunk_count = chunk_count.max(1);
     let dest_path = Path::new(dest_dir).join(safe_file_name(file_name));
-    let chunk_size = (total_size + chunk_count - 1) / chunk_count;
+    let chunk_size = total_size.div_ceil(chunk_count);
 
     // Pre-create the file at full size so we can write each chunk at its offset
     // as it arrives — reporting progress incrementally instead of buffering the
@@ -756,7 +756,7 @@ pub async fn start_download(
     let dest_path = Path::new(&dest_dir).join(safe_file_name(&file_name));
 
     // Persist the item to the queue table on start (Gap 1).
-    let mut item = DownloadItem {
+    let item = DownloadItem {
         id: id.clone(),
         url: url.clone(),
         status: DownloadStatus::Downloading,

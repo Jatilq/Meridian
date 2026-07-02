@@ -379,7 +379,7 @@ pub async fn get_local_hardware() -> Result<HardwareSnapshot, String> {
 fn parse_kv(out: &str, key: &str) -> Option<String> {
     out.lines()
         .find(|l| l.trim_start().starts_with(&format!("{}=", key)))
-        .and_then(|l| l.splitn(2, '=').nth(1))
+        .and_then(|l| l.split_once('=').map(|x| x.1))
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
 }
@@ -708,7 +708,7 @@ fn parse_top_cpu_util(out: &str) -> Option<f32> {
     let idle = out
         .split(',')
         .find(|seg| seg.contains("id"))
-        .and_then(|seg| seg.trim().split_whitespace().next())
+        .and_then(|seg| seg.split_whitespace().next())
         .and_then(|n| n.parse::<f32>().ok())?;
     Some((100.0 - idle).clamp(0.0, 100.0))
 }

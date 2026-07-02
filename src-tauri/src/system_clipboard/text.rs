@@ -18,7 +18,7 @@ pub fn read_clipboard_change_token_sync() -> Result<String, String> {
         unsafe {
             use windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
 
-            return Ok(GetClipboardSequenceNumber().to_string());
+            Ok(GetClipboardSequenceNumber().to_string())
         }
     }
 
@@ -31,7 +31,7 @@ pub fn read_clipboard_change_token_sync() -> Result<String, String> {
 pub(crate) fn read_system_clipboard_text_sync() -> Result<String, String> {
     #[cfg(target_os = "windows")]
     {
-        return windows_read_clipboard_text();
+        windows_read_clipboard_text()
     }
 
     #[cfg(not(target_os = "windows"))]

@@ -110,7 +110,7 @@ fn hub_list_handler(state: &ShareState, query: &ListQuery) -> Response {
         });
     }
 
-    entries.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+    entries.sort_by_key(|left| left.name.to_lowercase());
 
     let share_name = share_root_label(&state.share_path);
 

@@ -218,14 +218,14 @@ fn emit_item_progress(
     let range_end = ((source_index + 1) as u32) * 100 / source_count;
     let span = (range_end.saturating_sub(range_start)) as u64;
     let local_total = local_total.max(1);
-    let slice_u64 = (((local_done * span) + local_total - 1) / local_total).min(span);
+    let slice_u64 = (local_done * span).div_ceil(local_total).min(span);
     let mut pct = range_start + slice_u64 as u32;
     if local_done >= local_total {
         pct = range_end;
     }
     pct = pct.min(100);
     if !force {
-        if pct <= *last_emitted_pct && local_done % 48 != 0 && local_done < local_total {
+        if pct <= *last_emitted_pct && !local_done.is_multiple_of(48) && local_done < local_total {
             return;
         }
         if pct <= *last_emitted_pct && local_done < local_total {

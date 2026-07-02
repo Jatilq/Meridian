@@ -32,7 +32,7 @@ struct ClipboardImageBytes {
 pub(crate) fn set_system_clipboard_image_from_png_bytes_sync(png_bytes: &[u8]) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        return set_system_clipboard_image_from_png_bytes_inner(png_bytes);
+        set_system_clipboard_image_from_png_bytes_inner(png_bytes)
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -60,7 +60,7 @@ fn set_system_clipboard_image_from_png_bytes_inner(png_bytes: &[u8]) -> Result<(
 
     #[cfg(target_os = "windows")]
     {
-        return windows_set_clipboard_png_bytes(png_bytes);
+        windows_set_clipboard_png_bytes(png_bytes)
     }
 
     #[cfg(not(target_os = "windows"))]

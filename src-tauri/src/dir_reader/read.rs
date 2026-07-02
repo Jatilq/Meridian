@@ -464,7 +464,7 @@ fn shortcut_metadata(
         let resolved_path = resolve_windows_shortcut_target(path)?;
         let link_status = link_status_for_target(Path::new(&resolved_path));
 
-        return Some((Some(normalize_path(&resolved_path)), Some(link_status)));
+        Some((Some(normalize_path(&resolved_path)), Some(link_status)))
     }
 
     #[cfg(target_os = "macos")]

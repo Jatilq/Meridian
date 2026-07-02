@@ -68,9 +68,8 @@ pub async fn rain_run_shell_command(
             Err(format!("Command wait failed: {}", e))
         }
     }
-    .map(|r| {
-        let _ = app.emit("rain-shell-output", &r);
-        r
+    .inspect(|r| {
+        let _ = app.emit("rain-shell-output", r);
     })
 }
 

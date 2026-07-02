@@ -1427,12 +1427,12 @@ async fn resolve_github_release_url(
             )
         })?;
 
-    let primary = pick_release_asset(&assets, primary_match, preferred_prefix);
+    let primary = pick_release_asset(assets, primary_match, preferred_prefix);
     if let Some(url) = primary {
         return Ok(url);
     }
     if let Some(alt) = alt_match {
-        if let Some(url) = pick_release_asset(&assets, alt, preferred_prefix) {
+        if let Some(url) = pick_release_asset(assets, alt, preferred_prefix) {
             return Ok(url);
         }
     }

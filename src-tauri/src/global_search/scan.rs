@@ -84,7 +84,7 @@ fn should_skip_link_metadata(metadata: &Metadata) -> bool {
 
 fn maybe_set_current_scan_path(path: String, update_counter: &AtomicU64) {
     let update_count = update_counter.fetch_add(1, Ordering::Relaxed);
-    if update_count % STATUS_UPDATE_INTERVAL == 0 {
+    if update_count.is_multiple_of(STATUS_UPDATE_INTERVAL) {
         set_current_scan_path(Some(path));
     }
 }
