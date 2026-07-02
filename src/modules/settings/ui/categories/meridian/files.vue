@@ -51,83 +51,65 @@ function clearFolder() {
     description="Shared folder where downloaded model files are stored. Used by the AI panel, hardware scanner, and backend manager."
     :icon="FolderIcon"
   >
-    <div class="files-settings">
-      <div class="files-settings__field">
-        <label class="files-settings__label" for="models-folder-input">
-          Models folder
-        </label>
-        <div class="files-settings__row">
-          <Input
-            id="models-folder-input"
-            v-model="modelsFolder"
-            placeholder="e.g. E:\ai\Models"
-            class="files-settings__input"
-          />
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            class="files-settings__browse"
-            @click="browse"
-          >
-            <FolderOpenIcon :size="14" />
-            Browse
-          </Button>
-          <Button
-            v-if="modelsFolder"
-            type="button"
-            variant="ghost"
-            size="sm"
-            class="files-settings__clear"
-            title="Clear models folder"
-            @click="clearFolder"
-          >
-            Clear
-          </Button>
+    <div class="exo-card exo-card--amber">
+      <div class="exo-tile" aria-hidden="true">
+        <FolderIcon :size="28" class="exo-tile__icon" />
+      </div>
+      <div class="exo-identity">
+        <span class="exo-identity__title">Models folder</span>
+        <span class="exo-identity__sub">{{ modelsFolder || '(not configured)' }}</span>
+      </div>
+      <div class="exo-specs">
+        <div class="exo-specs__field">
+          <label class="exo-specs__label" for="models-folder-input">On-disk path</label>
+          <div class="files-settings__row">
+            <Input
+              id="models-folder-input"
+              v-model="modelsFolder"
+              placeholder="e.g. E:\ai\Models"
+              class="exo-specs__input"
+            />
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              class="exo-actions__btn"
+              @click="browse"
+            >
+              <FolderOpenIcon :size="14" />
+              Browse
+            </Button>
+            <Button
+              v-if="modelsFolder"
+              type="button"
+              variant="ghost"
+              size="sm"
+              class="exo-actions__btn"
+              title="Clear models folder"
+              @click="clearFolder"
+            >
+              Clear
+            </Button>
+          </div>
+          <span class="exo-card-hint">
+            Path persists across sessions and is read on app boot.
+          </span>
         </div>
       </div>
+      <div class="exo-actions" aria-hidden="true" />
     </div>
   </SettingsItem>
 </template>
 
 <style scoped>
-.files-settings {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.files-settings__field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.375rem;
-}
-
-.files-settings__label {
-  color: hsl(var(--foreground));
-  font-size: 0.875rem;
-  font-weight: 500;
-}
-
+/* Browse + Clear button row — `.exo-actions__btn` from exo.css handles
+   each button's individual look, this just lays them out inline with
+   the input field above. Don't migrate to exo.css because the layout
+   is `.files-settings`-specific (the Browse/Clear pairing isn't used
+   anywhere else). */
 .files-settings__row {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-}
-
-.files-settings__input {
-  flex: 1;
-  width: 100%;
-}
-
-.files-settings__browse {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-
-.files-settings__clear {
-  flex-shrink: 0;
 }
 </style>
