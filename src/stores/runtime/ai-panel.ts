@@ -91,13 +91,14 @@ const modelsLoaded = ref(false);
 const useOmnix = ref(userSettingsStore.userSettings.meridian?.aiPanel?.omnixEnabled ?? false);
 const omnixOnline = ref(false);
 const omnixPath = ref(userSettingsStore.userSettings.meridian?.aiPanel?.omnixPath || 'E:\\ai\\Apps\\Omnix');
-// Default to Lemonade on port 13305 (catalog row in src/data/backends.json,
-// shipped to installers via tauri.conf.json::bundle.resources). Falls back
-// to this URL only when the persisted user setting is missing; the
-// 30→31 schema migration in schemas/user-settings.ts rewrites the legacy
-// Ollama literal for existing installs so this fallback rarely fires
-// in practice for users upgrading past the pivot.
-const routerEndpoint = ref(userSettingsStore.userSettings.meridian?.aiPanel?.routerEndpoint || 'http://localhost:13305/v1');
+// Default to Lemonade on port 11434 (Lemonade's upstream `LEMONADE_PORT`
+// env default; matches `backend_manager.rs::BackendKind::Lemonade::default_port()`).
+// The 34→35 schema migration in schemas/user-settings.ts rewrites any
+// existing 13305 sentinel back to 11434 so this fallback rarely fires for
+// users upgrading past the post-pivot hotfix. Falls back to this URL only
+// when the persisted user setting is missing entirely (fresh install with
+// no migration history yet).
+const routerEndpoint = ref(userSettingsStore.userSettings.meridian?.aiPanel?.routerEndpoint || 'http://localhost:11434/v1');
 const ttsEnabled = ref(userSettingsStore.userSettings.meridian?.aiPanel?.ttsEnabled ?? false);
 const routerOnline = ref(false);
 const systemPrompt = ref(userSettingsStore.userSettings.meridian?.aiPanel?.systemPrompt || 'You are Rain, a direct and slightly dry companion built into Meridian. You help the user navigate, organize, search, and manage their files. Current directory: {current_path}. Selected files: {selected_files}. Talk like a knowledgeable colleague would — concise, practical, a little dry when it matters. Have opinions (e.g. offer to clean up a messy folder name). CRITICAL: You are Rain. Never break character. Never say you are an AI, an assistant, a language model, or a bot. Never say "As an AI", "I am just an AI", "the assistant", "Certainly!", "Of course!", "Absolutely!", or "Great question!". Just talk like Rain. Format your responses clearly. Use bullet points for lists. Use short paragraphs not walls of text. Bold important terms. Keep responses scannable.');
@@ -121,7 +122,9 @@ const apiProvider = ref<AiPanelProviderId>(userSettingsStore.userSettings.meridi
 // Onboarding flow writes both `routerEndpoint` and `localEndpointUrl` from the
 // same input (see setLocalEndpoint below). The runtime fallback keeps them in
 // lockstep so the first paint of the AI panel matches the chosen backend.
-const localEndpointUrl = ref(userSettingsStore.userSettings.meridian?.aiPanel?.localEndpointUrl ?? 'http://localhost:13305/v1');
+// Lemonade listens on 11434 (LEMONADE_PORT default), NOT 13305; 34→35 migration
+// rewrites the bad sentinel for existing installs.
+const localEndpointUrl = ref(userSettingsStore.userSettings.meridian?.aiPanel?.localEndpointUrl ?? 'http://localhost:11434/v1');
 const apiKeyTemp = ref(userSettingsStore.userSettings.meridian?.aiPanel?.apiKeyTemp ?? '');
 let onboardingSkipped = false;
 let memoryLoaded = false;

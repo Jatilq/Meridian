@@ -128,7 +128,11 @@ const DEFAULT_PORTS: Record<MeridianBackendKind, number> = {
   'koboldcpp': 5001,
   'llamafile': 8080,
   'turboquant': 8080,
-  'lemonade': 13305,
+  // Lemonade's upstream `LEMONADE_PORT` env default. Previously 13305;
+  // 11434 matches the real LemonadeServer.exe binding on JC's host
+  // (verified 2026-07-02 via curl). Keep in lockstep with
+  // backend_manager.rs::BackendKind::Lemonade::default_port().
+  'lemonade': 11434,
 };
 
 // ============================================================================

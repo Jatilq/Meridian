@@ -107,16 +107,24 @@ impl BackendKind {
     /// `llamafile` and `turboquant` keep 8080 (matching their upstream
     /// defaults; SABnzbd's claim over 8080 will surface here next time JC
     /// installs either of those — flagged in SESSION_RESULTS Day-5).
-    /// `koboldcpp` defaults to 5001. `lemonade` listens at 13305
-    /// (Lemonade's upstream default, matches `lemonade_extras.rs`).
+    /// `koboldcpp` defaults to 5001. `lemonade` listens at 11434
+    /// (Lemonade's upstream `LEMONADE_PORT` env default; previously 13305
+    /// was hardcoded here on the assumption that was Lemonade's default,
+    /// but the real LemonadeServer.exe binds 11434 — verified via curl
+    /// returns the Lemonade App HTML on 11434 vs connection-refused on
+    /// 13305, JC 2026-07-02).
     fn default_port(&self) -> u16 {
         match self {
             BackendKind::LlamaCpp => 11434,
             BackendKind::Llamafile => 8080,
             BackendKind::KoboldCpp => 5001,
             BackendKind::TurboQuant => 8080,
-            // Lemonade's OpenAI-compatible API listens at 13305 upstream.
-            BackendKind::Lemonade => 13305,
+            // Lemonade's OpenAI-compatible API listens at 11434 upstream
+            // (LEMONADE_PORT env default). Matches
+            // `lemonade_extras.rs::DEFAULT_LEMONADE_BASE` and the JS
+            // `DEFAULT_PORTS.lemonade` mirror in
+            // `src/modules/backend-manager/pages/backend-manager.vue`.
+            BackendKind::Lemonade => 11434,
         }
     }
 }
@@ -1971,8 +1979,8 @@ mod tests {
     }
 
     #[test]
-    fn lemonade_default_port_is_13305() {
-        assert_eq!(BackendKind::Lemonade.default_port(), 13305);
+    fn lemonade_default_port_is_11434() {
+        assert_eq!(BackendKind::Lemonade.default_port(), 11434);
     }
 
     #[test]

@@ -214,9 +214,10 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
         // from Settings -> Meridian -> AI Panel at any time.
         omnixEnabled: false,
         omnixPath: 'E:\\ai\\Apps\\Omnix',
-        // Default router (Rain's OpenAI-compatible backend) is Lemonade on port 13305.
-        // Switch to Ollama, LM Studio, or any OpenAI-compatible URL from Settings → Meridian → AI Panel.
-        routerEndpoint: 'http://localhost:13305/v1',
+        // Default router (Rain's OpenAI-compatible backend) is Lemonade on port 11434
+        // (Lemonade's upstream `LEMONADE_PORT` env default). Switch to Ollama, LM Studio,
+        // or any OpenAI-compatible URL from Settings → Meridian → AI Panel.
+        routerEndpoint: 'http://localhost:11434/v1',
         ttsEnabled: false,
         systemPrompt: 'You are Rain, a direct and slightly dry companion built into Meridian. You help the user navigate, organize, search, and manage your files. Current directory: {current_path}. Selected files: {selected_files}. Talk like a knowledgeable colleague would — concise, practical, a little dry when it matters. Have opinions (e.g. offer to clean up a messy folder name). CRITICAL: You are Rain. Never break character. Never say you are an AI, an assistant, a language model, or a bot. Never say "As an AI", "I am just an AI", "the assistant", "Certainly!", "Of course!", "Absolutely!", or "Great question!". Just talk like Rain. Format your responses clearly. Use bullet points for lists. Use short paragraphs not walls of text. Bold important terms. Keep responses scannable.',
         temperature: 0.7,
@@ -228,8 +229,11 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
         apiProvider: 'custom',
         // Mirrors routerEndpoint. The onboarding flow's "Local AI server" input writes
         // to both keys (see setLocalEndpoint in the AI panel store), so changing this
-        // default keeps the two fields consistent at first paint.
-        localEndpointUrl: 'http://localhost:13305/v1',
+        // default keeps the two fields consistent at first paint. Lemonade listens on
+        // 11434 (its upstream LEMONADE_PORT default), NOT 13305 — earlier schema seeded
+        // 13305 as the OpenAI-compat URL; 34→35 corrects any existing install that
+        // landed on that bad default.
+        localEndpointUrl: 'http://localhost:11434/v1',
         apiKeyTemp: '',
       },
       downloader: {

@@ -16,7 +16,7 @@ import {
 import { BUILTIN_NAVIGATOR_ICON_THEME_IDS } from '@/types/icon-theme';
 
 export const USER_SETTINGS_SCHEMA_VERSION_KEY = '__schemaVersion';
-export const USER_SETTINGS_SCHEMA_VERSION = 34;
+export const USER_SETTINGS_SCHEMA_VERSION = 35;
 
 export const DEFAULT_GLOBAL_SEARCH_IGNORED_PATHS = [
   '/node_modules',
@@ -829,6 +829,37 @@ async function migrateUserSettingsStep(storage: StorageAdapter, fromVersion: num
       if (typeof console !== 'undefined' && console.info) {
         console.info('[meridian] schema 33->34: corrected lemonade backendPort 13305 -> 11434 (LEMONADE_PORT default)');
       }
+    }
+  }
+
+  if (fromVersion === 34 && toVersion === 35) {
+    // Day-5.2 hotfix: the AI Panel URL fields (`routerEndpoint` +
+    // `localEndpointUrl`) seeded with `http://localhost:13305/v1` because
+    // that was thought to be Lemonade's upstream port; Lemonade actually
+    // listens on 11434 (`LEMONADE_PORT`) and a 13305 connect-refuses. The
+    // 30->31 migration rewrote `http://localhost:11434/v1` -> `13305/v1`
+    // on install backends — those installs still have the bad URL today.
+    // Force-overwrite ONLY when the stored value is EXACTLY the bad
+    // default literal — exact-match (over .includes/.endsWith) preserves
+    // any user-typed custom URL (LM Studio, Ollama, an OpenRouter
+    // hostname, a remote Lemonade, etc.). Same sentinel-detect pattern as
+    // the 30->31 + 33->34 migrations.
+    const BAD_LEMONADE_URL = 'http://localhost:13305/v1';
+    const GOOD_LEMONADE_URL = 'http://localhost:11434/v1';
+    const existingRouter = await storage.get<string>('meridian.aiPanel.routerEndpoint');
+    const existingLocal = await storage.get<string>('meridian.aiPanel.localEndpointUrl');
+    let migratedCount = 0;
+    if (existingRouter === BAD_LEMONADE_URL) {
+      await storage.set('meridian.aiPanel.routerEndpoint', GOOD_LEMONADE_URL);
+      migratedCount += 1;
+    }
+    if (existingLocal === BAD_LEMONADE_URL) {
+      await storage.set('meridian.aiPanel.localEndpointUrl', GOOD_LEMONADE_URL);
+      migratedCount += 1;
+    }
+    if (migratedCount > 0 && typeof console !== 'undefined' && console.info) {
+      const endpointLabel = migratedCount === 1 ? 'endpoint' : 'endpoints';
+      console.info(`[meridian] schema 34->35: rewrote ${migratedCount} AI Panel URL ${endpointLabel} 13305/v1 -> 11434/v1 (LEMONADE_PORT default)`);
     }
   }
 }
