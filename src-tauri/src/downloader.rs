@@ -1244,8 +1244,16 @@ mod tests {
             .await
             .expect("download should succeed");
 
-        assert_eq!(item.status, DownloadStatus::Completed);
-        assert_eq!(item.progress, 1.0);
+        // start_download returns the queued item (status = Downloading) and
+        // spawns the actual transfer as a background tokio task. The function
+        // returns before the bg task has even started its HTTP request because
+        // it has no .await points after the spawn. Polling for the persisted
+        // record in history (rather than reading `item.status` on the cloned
+        // return value) guarantees the bg task has run to completion and
+        // asserts against the truth (the DB row).
+        let historical = poll_until_history_completed(&data_dir, &item.id).await;
+        assert_eq!(historical.status, DownloadStatus::Completed);
+        assert_eq!(historical.progress, 1.0);
 
         // The queue should be drained and the item must be in history.
         let db = DownloaderDb::open(&data_dir).unwrap();
@@ -1337,6 +1345,34 @@ mod tests {
         assert!(cancelled, "item must be marked Cancelled in the queue");
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    // Poll helper for any test that needs to wait for a spawned background
+    // download task to move the row into history with Completed status.
+    // Bounds the wait so a stuck bg task fails the test (instead of hanging
+    // indefinitely) and exposes the failure as a normal panic.
+    async fn poll_until_history_completed(data_dir: &str, id: &str) -> DownloadItem {
+        const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+        const POLL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+        let deadline = tokio::time::Instant::now() + POLL_TIMEOUT;
+        loop {
+            let db = DownloaderDb::open(data_dir).unwrap();
+            if let Some(historical) = db
+                .load_history()
+                .unwrap()
+                .into_iter()
+                .find(|h| h.id == id && h.status == DownloadStatus::Completed)
+            {
+                return historical;
+            }
+            if tokio::time::Instant::now() > deadline {
+                panic!(
+                    "download did not reach Completed status within {}s",
+                    POLL_TIMEOUT.as_secs()
+                );
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
     }
 
     // Gap 4 verification: yt-dlp progress-line parsing (binary-independent).
