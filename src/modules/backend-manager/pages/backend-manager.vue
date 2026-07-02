@@ -7,6 +7,7 @@ Copyright © 2021 - present Aleksey Hoffman. All rights reserved.
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { ask } from '@tauri-apps/plugin-dialog';
 import { useRouter } from 'vue-router';
 import { useUserSettingsStore } from '@/stores/storage/user-settings';
 import type { MeridianBackendKind, MeridianBackendConfig, SshConnectionSetting } from '@/types/user-settings';
@@ -138,13 +139,14 @@ const DEFAULT_PORTS: Record<MeridianBackendKind, number> = {
 // ============================================================================
 // Tab state
 // ============================================================================
-type TabId = 'backends' | 'models' | 'slaves' | 'omnix-models';
+type TabId = 'backends' | 'models' | 'slaves' | 'omnix-models' | 'lemonade-models';
 
 const tabs: { id: TabId; label: string }[] = [
   { id: 'backends', label: 'Backends' },
   { id: 'models', label: 'Models' },
   { id: 'slaves', label: 'RPC Slaves' },
   { id: 'omnix-models', label: 'Omnix Models' },
+  { id: 'lemonade-models', label: 'Lemonade Models' },
 ];
 
 // Live download progress per backend kind, driven by `backend-download-progress`
@@ -445,6 +447,88 @@ const omnixOtherCacheCount = computed(() => {
 const omnixBusy = ref(false);
 const omnixNote = ref('');
 
+// ============================================================================
+// Lemonade Models tab state (Day-7 Phase 8). Mirrors the omnix tab pattern
+// but drives Lemonade's native lifecycle endpoints via 5 Tauri commands in
+// src-tauri/src/lemonade_manager.rs. Destructive ops (delete) gate behind
+// a Tauri `ask()` confirmation dialog per AGENTS.md.
+// ============================================================================
+interface LemonadeModelInfo {
+  id: string;
+  recipe?: string | null;
+  labels: string[];
+  sizeBytes?: number | null;
+  downloaded: boolean;
+  loaded: boolean;
+  checkpoint?: string | null;
+}
+const lemonadeModels = ref<LemonadeModelInfo[]>([]);
+const lemonadeBusy = ref(false);
+const lemonadeNote = ref('');
+const lemonadeError = ref('');
+
+async function refreshLemonade(): Promise<void> {
+  lemonadeBusy.value = true;
+  lemonadeNote.value = '';
+  lemonadeError.value = '';
+  try {
+    lemonadeModels.value = await invoke<LemonadeModelInfo[]>('lemonade_list_models', {
+      endpoint: null,
+    });
+  }
+  catch (error) {
+    lemonadeModels.value = [];
+    lemonadeError.value = `Lemonade unreachable on :11434 — ${error}`;
+  }
+  finally {
+    lemonadeBusy.value = false;
+  }
+}
+
+async function lemonadeAction(action: 'load' | 'unload' | 'pull', modelId: string): Promise<void> {
+  lemonadeBusy.value = true;
+  lemonadeNote.value = `${action} ${modelId}…`;
+  try {
+    const command = action === 'load' ? 'lemonade_load'
+      : action === 'unload' ? 'lemonade_unload'
+        : 'lemonade_pull';
+    await invoke<string>(command, { modelName: modelId, endpoint: null });
+    lemonadeNote.value = `${modelId}: ${action} ok`;
+    await refreshLemonade();
+  }
+  catch (error) {
+    lemonadeNote.value = `${action} failed: ${error}`;
+  }
+  finally {
+    lemonadeBusy.value = false;
+  }
+}
+
+async function lemonadeDelete(model: LemonadeModelInfo): Promise<void> {
+  const sizeLabel = formatBytes2(model.sizeBytes);
+  const confirmed = await ask(
+    `Delete ${model.id} (${sizeLabel}) from Lemonade's on-disk cache? This cannot be undone.`,
+    { title: 'Delete Lemonade model', kind: 'warning', okLabel: 'Delete', cancelLabel: 'Keep' },
+  );
+  if (!confirmed) {
+    lemonadeNote.value = `Delete cancelled for ${model.id}`;
+    return;
+  }
+  lemonadeBusy.value = true;
+  lemonadeNote.value = `delete ${model.id}…`;
+  try {
+    await invoke<string>('lemonade_delete', { modelName: model.id, endpoint: null });
+    lemonadeNote.value = `${model.id}: deleted`;
+    await refreshLemonade();
+  }
+  catch (error) {
+    lemonadeNote.value = `delete failed: ${error}`;
+  }
+  finally {
+    lemonadeBusy.value = false;
+  }
+}
+
 async function refreshOmnix(): Promise<void> {
   omnixBusy.value = true;
   omnixNote.value = '';
@@ -735,6 +819,35 @@ function pickBackend(id: MeridianBackendKind | undefined): BackendEntry {
   return catalog.backends.find((b) => b.id === target) ?? catalog.backends[0]!;
 }
 
+// Per-kind theme key — drives the per-per-backend accent gradient, the LED
+// color, the variant-chip selected state, and the kind-label tint. Mirrors
+// cluster.vue's `exoTheme(nodeName)` shape. Each MeridianBackendKind maps to
+// one of five palette entries defined in the .bm-runtime__* CSS tokens.
+type RuntimeTheme = 'llama' | 'lemonade' | 'kobold' | 'llamafile' | 'turboquant';
+
+function themeKeyFor(kind: MeridianBackendKind): RuntimeTheme {
+  switch (kind) {
+    case 'llama.cpp':   return 'llama';
+    case 'lemonade':    return 'lemonade';
+    case 'koboldcpp':   return 'kobold';
+    case 'llamafile':   return 'llamafile';
+    case 'turboquant':  return 'turboquant';
+  }
+}
+
+// Short identifier rendered inside the CSS-drawn tile (kept under 5 chars
+// so the monospace glyphs don't wrap inside the 56×80px tile). The dots in
+// `llama.cpp` would visually overflow, so we use a stylistic abbreviation.
+function themeInitials(kind: MeridianBackendKind): string {
+  switch (kind) {
+    case 'llama.cpp':   return 'll.cpp';
+    case 'lemonade':    return 'LMND';
+    case 'koboldcpp':   return 'KCpp';
+    case 'llamafile':   return 'LF';
+    case 'turboquant':  return 'TQ';
+  }
+}
+
 watch(detected, (val) => {
   if (val) {
     note.value.__global__ = `Detected GPU: ${val.vendor} (${val.gpuName ?? 'unknown'}, source=${val.source}). Override the variant per backend below if needed.`;
@@ -798,118 +911,164 @@ onUnmounted(() => {
         <span v-else-if="tab.id === 'omnix-models' && omnixInstalledInCatalogSet.size" class="bm__tab-count">
           ({{ omnixInstalledInCatalogSet.size }}/{{ omnixCatalog.length }})
         </span>
+        <span v-else-if="tab.id === 'lemonade-models' && lemonadeModels.length" class="bm__tab-count">
+          ({{ lemonadeModels.length }})
+        </span>
       </button>
     </nav>
 
-    <!-- ============================ Backends tab ============================ -->
+    <!-- ============================ Backends tab — exo-style cards ========== -->
+    <!-- Mirrors cluster.vue's row layout: per-kind CSS-drawn tile LEFT, -->
+    <!-- identity column (kind + name + homepage + status pill), fluid         -->
+    <!-- specs column (description + variant chips + port/model + meta),       -->
+    <!-- actions column (Download/Start/Stop/Test API). Per-kind accent      -->
+    <!-- gradient + ambient grid backdrop give the same visual language as     -->
+    <!-- the Cluster Control panel.                                            -->
     <section v-show="activeTab === 'backends'" class="bm__section" role="tabpanel">
+      <div class="bm-runtime__ambient-grid" aria-hidden="true" />
+
       <article
         v-for="entry in catalog.backends"
         :key="entry.id"
-        class="bm__backend"
+        class="bm-runtime"
+        :class="[
+          `bm-runtime--${themeKeyFor(entry.id)}`,
+          {
+            'bm-runtime--running': statuses[entry.id]?.status === 'running',
+            'bm-runtime--installed': statuses[entry.id]?.status === 'installed',
+          },
+        ]"
       >
-        <header class="bm__backend-head">
-          <div>
-            <h2 class="bm__backend-name">{{ entry.name }}</h2>
-            <span class="bm__backend-homepage">{{ entry.homepage }}</span>
+        <!-- Per-kind CSS-drawn tile. Top/bottom color bands are per-kind; -->
+        <!-- body shows initials + 3 thin lines + status LED.                -->
+        <div class="bm-runtime__tile" aria-hidden="true">
+          <div class="bm-runtime__band" />
+          <div class="bm-runtime__body">
+            <span class="bm-runtime__initials">{{ themeInitials(entry.id) }}</span>
+            <div class="bm-runtime__lines">
+              <span /><span /><span />
+            </div>
+            <div
+              class="bm-runtime__led"
+              :class="{
+                'bm-runtime__led--installed': statuses[entry.id]?.status === 'installed',
+                'bm-runtime__led--running':  statuses[entry.id]?.status === 'running',
+              }"
+            />
           </div>
-          <div class="bm__status-row">
-            <span v-if="apiProbes[entry.id]" :class="['bm__api-badge', apiProbes[entry.id]?.ok ? 'bm__api-badge--ok' : 'bm__api-badge--bad']">
-              {{ apiProbes[entry.id]?.ok ? `API live · ${apiProbes[entry.id]?.elapsedMs}ms` : 'API down' }}
+          <div class="bm-runtime__band bm-runtime__band--bottom" />
+        </div>
+
+        <!-- Identity column: kind tag + name + homepage + status pill -->
+        <div class="bm-runtime__identity">
+          <span class="bm-runtime__kind">{{ entry.id }}</span>
+          <span class="bm-runtime__name">{{ entry.name }}</span>
+          <span class="bm-runtime__homepage">{{ entry.homepage }}</span>
+
+          <div class="bm-runtime__status-row">
+            <span
+              :class="[
+                'bm-runtime__status',
+                `bm-runtime__status--${statuses[entry.id]?.status ?? 'notInstalled'}`,
+              ]"
+            >
+              <span class="bm-runtime__status-dot" />
+              <span class="bm-runtime__status-text">{{ statuses[entry.id]?.status ?? 'notInstalled' }}</span>
             </span>
-            <span :class="['bm__status', `bm__status--${statuses[entry.id]?.status ?? 'notInstalled'}`]">
-              {{ statuses[entry.id]?.status ?? 'notInstalled' }}
+            <span
+              v-if="apiProbes[entry.id]"
+              :class="[
+                'bm-runtime__api-badge',
+                apiProbes[entry.id]?.ok ? 'bm-runtime__api-badge--ok' : 'bm-runtime__api-badge--bad',
+              ]"
+            >
+              API · {{ apiProbes[entry.id]?.ok ? `${apiProbes[entry.id]?.elapsedMs}ms` : 'down' }}
             </span>
           </div>
-        </header>
+        </div>
 
-        <p class="bm__backend-desc">{{ entry.description }}</p>
+        <!-- Specs column: description + variant chips + port/model + meta -->
+        <div class="bm-runtime__specs">
+          <p class="bm-runtime__desc">{{ entry.description }}</p>
 
-        <div class="bm__variants-label">Choose a runtime:</div>
-        <ul class="bm__variants">
-          <li
-            v-for="variant in entry.variants"
-            :key="variant.id"
-            :class="[
-              'bm__variant',
-              {
-                'bm__variant--selected': getActiveVariant(entry).id === variant.id,
-              },
-            ]"
-          >
+          <div class="bm-runtime__variants">
+            <span class="bm-runtime__variants-label">Builds</span>
             <button
+              v-for="variant in entry.variants"
+              :key="variant.id"
               type="button"
-              class="bm__variant-btn"
+              class="bm-runtime__variant-chip"
+              :class="{ 'bm-runtime__variant-chip--selected': getActiveVariant(entry).id === variant.id }"
               :disabled="busy[entry.id]"
               :title="variant.notes"
               @click="selectVariant(entry, variant.id)"
             >
-              <span class="bm__variant-radio" />
-              <span class="bm__variant-label">{{ variant.label }}</span>
-              <span class="bm__variant-hw">{{ variant.hardware.toUpperCase() }}</span>
-              <span class="bm__variant-size">{{ formatBytes(variant.sizeBytes) }}</span>
+              <span class="bm-runtime__variant-hw">{{ variant.hardware.toUpperCase() }}</span>
+              <span class="bm-runtime__variant-label">{{ variant.label }}</span>
+              <span class="bm-runtime__variant-size">{{ formatBytes(variant.sizeBytes) }}</span>
             </button>
-          </li>
-        </ul>
+          </div>
 
-        <div class="bm__config">
-          <label class="bm__config-row">
-            <span class="bm__config-label">Port</span>
-            <input
-              type="number"
-              min="1"
-              max="65535"
-              class="bm__input bm__input--port"
-              :value="getPort(entry.id)"
-              :disabled="busy[entry.id]"
-              @change="setConfig(entry.id, { port: Number(($event.target as HTMLInputElement).value) || DEFAULT_PORTS[entry.id] })"
-            />
-          </label>
-          <label class="bm__config-row">
-            <span class="bm__config-label">Model</span>
-            <div class="bm__model-row">
+          <div class="bm-runtime__config">
+            <label class="bm-runtime__config-row">
+              <span class="bm-runtime__config-label">Port</span>
               <input
-                type="text"
-                class="bm__input"
-                placeholder="Path to .gguf or pick from Models tab"
-                :value="getModelPath(entry.id)"
-                :disabled="busy[entry.id] || statuses[entry.id]?.status === 'running'"
-                @change="setConfig(entry.id, { modelPath: ($event.target as HTMLInputElement).value })"
+                type="number"
+                min="1"
+                max="65535"
+                class="bm__input bm-runtime__input--port"
+                :value="getPort(entry.id)"
+                :disabled="busy[entry.id]"
+                @change="setConfig(entry.id, { port: Number(($event.target as HTMLInputElement).value) || DEFAULT_PORTS[entry.id] })"
               />
-              <button
-                type="button"
-                class="bm__btn bm__btn--ghost"
-                :disabled="busy[entry.id] || statuses[entry.id]?.status === 'running'"
-                @click="loadModelInto(entry)"
-              >
-                Pick…
-              </button>
-            </div>
-          </label>
+            </label>
+            <label class="bm-runtime__config-row bm-runtime__config-row--model">
+              <span class="bm-runtime__config-label">Model</span>
+              <div class="bm-runtime__model-row">
+                <input
+                  type="text"
+                  class="bm__input"
+                  placeholder="Path to .gguf or pick from Models tab"
+                  :value="getModelPath(entry.id)"
+                  :disabled="busy[entry.id] || statuses[entry.id]?.status === 'running'"
+                  @change="setConfig(entry.id, { modelPath: ($event.target as HTMLInputElement).value })"
+                />
+                <button
+                  type="button"
+                  class="bm__btn bm__btn--ghost bm-runtime__model-pick"
+                  :disabled="busy[entry.id] || statuses[entry.id]?.status === 'running'"
+                  @click="loadModelInto(entry)"
+                >
+                  Pick…
+                </button>
+              </div>
+            </label>
+          </div>
+
+          <div class="bm-runtime__meta">
+            <span v-if="statuses[entry.id]?.port" class="bm-runtime__meta-chip">
+              <span class="bm-runtime__meta-label">port</span>
+              <code class="bm-runtime__meta-value">http://localhost:{{ statuses[entry.id]?.port }}/v1</code>
+            </span>
+            <span v-if="statuses[entry.id]?.installPath" class="bm-runtime__meta-chip">
+              <span class="bm-runtime__meta-label">path</span>
+              <code class="bm-runtime__meta-value">{{ statuses[entry.id]?.installPath }}</code>
+            </span>
+            <span v-if="statuses[entry.id]?.pid" class="bm-runtime__meta-chip">
+              <span class="bm-runtime__meta-label">pid</span>
+              <span class="bm-runtime__meta-value">{{ statuses[entry.id]?.pid }}</span>
+            </span>
+            <span v-if="apiProbes[entry.id]?.urlTested" class="bm-runtime__meta-chip">
+              <span class="bm-runtime__meta-label">probe</span>
+              <code class="bm-runtime__meta-value">{{ apiProbes[entry.id]?.urlTested }}</code>
+            </span>
+          </div>
         </div>
 
-        <div class="bm__backend-meta">
-          <span v-if="statuses[entry.id]?.port">
-            <span class="bm__meta-label">Listening on:</span>
-            <code class="bm__meta-value">http://localhost:{{ statuses[entry.id]?.port }}/v1</code>
-          </span>
-          <span v-if="statuses[entry.id]?.installPath">
-            <span class="bm__meta-label">Installed at:</span>
-            <code class="bm__meta-value">{{ statuses[entry.id]?.installPath }}</code>
-          </span>
-          <span v-if="statuses[entry.id]?.pid">
-            <span class="bm__meta-label">PID:</span>
-            <span>{{ statuses[entry.id]?.pid }}</span>
-          </span>
-          <span v-if="apiProbes[entry.id]?.urlTested">
-            <span class="bm__meta-label">Last probe:</span>
-            <code class="bm__meta-value">{{ apiProbes[entry.id]?.urlTested }}</code>
-          </span>
-        </div>
-
-        <footer class="bm__backend-footer">
+        <!-- Actions column: Download (with progress) / Start or Stop / Test API -->
+        <div class="bm-runtime__actions">
           <button
-            class="bm__btn bm__btn--download"
+            class="bm__btn bm__btn--download bm-runtime__download"
             :disabled="
               busy[entry.id]
                 || statuses[entry.id]?.status === 'running'
@@ -924,7 +1083,7 @@ onUnmounted(() => {
               </span>
             </template>
             <template v-else>
-              {{ statuses[entry.id]?.status === 'notInstalled' ? 'Download selected runtime' : 'Re-Download selected runtime' }}
+              {{ statuses[entry.id]?.status === 'notInstalled' ? 'Download' : 'Re-Download' }}
             </template>
           </button>
           <button
@@ -953,8 +1112,8 @@ onUnmounted(() => {
           >
             Test API
           </button>
-          <span v-if="note[entry.id]" class="bm__note">{{ note[entry.id] }}</span>
-        </footer>
+          <span v-if="note[entry.id]" class="bm-runtime__note">{{ note[entry.id] }}</span>
+        </div>
       </article>
     </section>
 
@@ -1135,6 +1294,47 @@ onUnmounted(() => {
             >
               {{ omnixInstalledSet.has(entry.modelID) ? 'Installed' : 'Get on HF' }}
             </button>
+          </div>
+        </li>
+      </ul>
+    </section>
+
+    <!-- ============================ Lemonade Models tab ====================== -->
+    <section v-show="activeTab === 'lemonade-models'" class="bm__section" role="tabpanel">
+      <header class="bm__section-head">
+        <div>
+          <h2 class="bm__section-title">Lemonade Models</h2>
+          <p class="bm__section-sub">
+            Live catalog from <code>localhost:11434</code> ({{ lemonadeModels.length }} entries)
+          </p>
+        </div>
+        <div class="bm__section-head-actions">
+          <button class="bm__btn" :disabled="lemonadeBusy" @click="refreshLemonade">
+            {{ lemonadeBusy ? 'Scanning…' : 'Refresh' }}
+          </button>
+        </div>
+      </header>
+      <p v-if="lemonadeError" class="bm__note">{{ lemonadeError }}</p>
+      <p v-if="lemonadeNote" class="bm__note bm__note--empty">{{ lemonadeNote }}</p>
+      <ul v-if="lemonadeModels.length" class="bm__models">
+        <li v-for="model in lemonadeModels" :key="model.id" class="bm__model">
+          <div class="bm__model-info">
+            <div class="bm__model-name-row">
+              <span class="bm__model-name">{{ model.id }}</span>
+              <span v-if="model.loaded" class="bm__badge bm__badge--installed">loaded</span>
+              <span v-else-if="model.downloaded" class="bm__badge bm__badge--verified">downloaded</span>
+              <span v-else class="bm__badge">available</span>
+              <span v-if="model.recipe" class="bm__badge bm__badge--cat">{{ model.recipe }}</span>
+            </div>
+            <div class="bm__model-meta">
+              {{ formatBytes2(model.sizeBytes) }}<template v-if="model.labels.length"> · {{ model.labels.join(' · ') }}</template>
+            </div>
+          </div>
+          <div class="bm__model-actions">
+            <button v-if="model.downloaded && !model.loaded" class="bm__btn" :disabled="lemonadeBusy" @click="lemonadeAction('load', model.id)">Load</button>
+            <button v-if="model.loaded" class="bm__btn bm__btn--danger" :disabled="lemonadeBusy" @click="lemonadeAction('unload', model.id)">Unload</button>
+            <button v-if="!model.downloaded" class="bm__btn bm__btn--primary" :disabled="lemonadeBusy" @click="lemonadeAction('pull', model.id)">Pull</button>
+            <button v-if="model.downloaded" class="bm__btn" :disabled="lemonadeBusy" @click="lemonadeDelete(model)">Delete</button>
           </div>
         </li>
       </ul>
@@ -1338,112 +1538,6 @@ onUnmounted(() => {
   margin: 0;
 }
 
-.bm__backend-homepage {
-  display: block;
-  font-size: 0.7rem;
-  color: hsl(var(--muted-foreground));
-  font-family: var(--font-mono, monospace);
-}
-
-.bm__backend-desc {
-  margin: 0;
-  font-size: 0.85rem;
-  color: hsl(var(--muted-foreground));
-  line-height: 1.4;
-}
-
-.bm__status-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-left: auto;
-}
-
-.bm__status {
-  padding: 0.15rem 0.6rem;
-  border-radius: 999px;
-  border: 1px solid hsl(var(--border));
-  background: hsl(var(--background-3));
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: hsl(var(--muted-foreground));
-  white-space: nowrap;
-}
-
-.bm__status--installed {
-  border-color: hsl(var(--primary) / 50%);
-  color: hsl(var(--primary));
-}
-
-.bm__status--running {
-  border-color: hsl(150 60% 50% / 50%);
-  color: hsl(150 60% 55%);
-  background: hsl(150 60% 50% / 8%);
-}
-
-.bm__api-badge {
-  padding: 0.15rem 0.5rem;
-  border-radius: 999px;
-  font-size: 0.7rem;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.bm__api-badge--ok {
-  background: hsl(150 60% 50% / 15%);
-  color: hsl(150 60% 55%);
-  border: 1px solid hsl(150 60% 50% / 40%);
-}
-
-.bm__api-badge--bad {
-  background: hsl(0 70% 60% / 15%);
-  color: hsl(0 70% 60%);
-  border: 1px solid hsl(0 70% 60% / 40%);
-}
-
-.bm__variants-label {
-  font-size: 0.7rem;
-  color: hsl(var(--muted-foreground));
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-weight: 600;
-}
-
-.bm__variants {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.bm__variant {
-  border-radius: var(--radius-sm);
-  background: hsl(var(--background-3));
-  border: 1px solid transparent;
-}
-
-.bm__variant--selected {
-  border-color: hsl(var(--primary));
-}
-
-.bm__variant-btn {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  width: 100%;
-  padding: 0.5rem 0.75rem;
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  text-align: left;
-  font-family: inherit;
-  font-size: 0.85rem;
-  color: inherit;
-}
-
 .bm__variant-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -1451,15 +1545,6 @@ onUnmounted(() => {
 
 .bm__variant-btn:hover:not(:disabled) {
   background: hsl(var(--foreground) / 4%);
-}
-
-.bm__variant-radio {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  border: 1.5px solid hsl(var(--muted-foreground));
-  flex-shrink: 0;
-  position: relative;
 }
 
 .bm__variant--selected .bm__variant-radio {
@@ -1472,47 +1557,6 @@ onUnmounted(() => {
   inset: 2.5px;
   border-radius: 50%;
   background: hsl(var(--primary));
-}
-
-.bm__variant-label {
-  font-weight: 500;
-  flex: 1;
-}
-
-.bm__variant-hw {
-  font-family: var(--font-mono, monospace);
-  font-size: 0.65rem;
-  letter-spacing: 0.5px;
-  opacity: 0.7;
-}
-
-.bm__variant-size {
-  font-variant-numeric: tabular-nums;
-  font-size: 0.75rem;
-  color: hsl(var(--muted-foreground));
-}
-
-.bm__config {
-  display: grid;
-  grid-template-columns: 140px 1fr;
-  gap: 0.5rem 0.75rem;
-  align-items: center;
-  background: hsl(var(--background-3));
-  border-radius: var(--radius-sm);
-  padding: 0.6rem 0.75rem;
-  border: 1px solid hsl(var(--border));
-}
-
-.bm__config-row {
-  display: contents;
-}
-
-.bm__config-label {
-  font-size: 0.7rem;
-  color: hsl(var(--muted-foreground));
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-weight: 600;
 }
 
 .bm__input {
@@ -1534,10 +1578,6 @@ onUnmounted(() => {
 .bm__input:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.bm__input--port {
-  max-width: 110px;
 }
 
 .bm__models-filter {
@@ -1675,6 +1715,497 @@ onUnmounted(() => {
 
 .bm__btn--danger:hover:not(:disabled) {
   background: hsl(0 70% 60% / 20%);
+}
+
+/* ========================================================================== */
+/* Backends tab — exo-style runtime cards (mirrors cluster.vue exo-node)    */
+/*                                                                              */
+/* Per-kind accent palette (llama.cpp teal / lemonade coral / koboldcpp      */
+/* violet / llamafile amber / turboquant magenta) drives the tile bands,     */
+/* status pill, name gradient, variant-chip selected state, and meta-chip    */
+/* label colors. Animation classes for running LED pulse + amber-band         */
+/* glow. Ambient dot-grid backdrop mirrors .cluster__ambient-grid.            */
+/* ========================================================================== */
+.bm__section {
+  position: relative;
+}
+
+.bm-runtime__ambient-grid {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle at 2px 2px, hsl(var(--primary) / 18%) 1.2px, transparent 1.2px);
+  background-size: 24px 24px;
+  opacity: 0.6;
+  pointer-events: none;
+  z-index: 0;
+  border-radius: var(--radius-md);
+}
+
+/* Per-kind accent palette — five backends get five distinct gradient/border
+   glow values. The kind column (label + LED + bands + meta-label + ripple
+   glow) all read from the same tokens so a re-theming is one CSS edit away.
+   Same shape as cluster.vue's --cluster-node-* tokens for visual parity.    */
+.bm-runtime {
+  --bm-runtime-llama-accent:      174 80% 45%;
+  --bm-runtime-llama-bg-from:     hsl(174 80% 45% / 0.20);
+  --bm-runtime-llama-bg-to:       hsl(174 80% 45% / 0.04);
+  --bm-runtime-llama-border:      hsl(174 80% 45% / 0.55);
+  --bm-runtime-llama-glow:        hsl(174 80% 45% / 0.40);
+
+  --bm-runtime-lemonade-accent:   348 83% 58%;
+  --bm-runtime-lemonade-bg-from:  hsl(348 83% 58% / 0.20);
+  --bm-runtime-lemonade-bg-to:    hsl(348 83% 58% / 0.04);
+  --bm-runtime-lemonade-border:   hsl(348 83% 58% / 0.55);
+  --bm-runtime-lemonade-glow:     hsl(348 83% 58% / 0.40);
+
+  --bm-runtime-kobold-accent:     280 80% 65%;
+  --bm-runtime-kobold-bg-from:    hsl(280 80% 65% / 0.20);
+  --bm-runtime-kobold-bg-to:      hsl(280 80% 65% / 0.04);
+  --bm-runtime-kobold-border:     hsl(280 80% 65% / 0.55);
+  --bm-runtime-kobold-glow:       hsl(280 80% 65% / 0.40);
+
+  --bm-runtime-llamafile-accent:   40 90% 55%;
+  --bm-runtime-llamafile-bg-from:  hsl(40 90% 55% / 0.20);
+  --bm-runtime-llamafile-bg-to:    hsl(40 90% 55% / 0.04);
+  --bm-runtime-llamafile-border:   hsl(40 90% 55% / 0.55);
+  --bm-runtime-llamafile-glow:     hsl(40 90% 55% / 0.40);
+
+  --bm-runtime-turboquant-accent:  318 80% 65%;
+  --bm-runtime-turboquant-bg-from: hsl(318 80% 65% / 0.20);
+  --bm-runtime-turboquant-bg-to:   hsl(318 80% 65% / 0.04);
+  --bm-runtime-turboquant-border:  hsl(318 80% 65% / 0.55);
+  --bm-runtime-turboquant-glow:    hsl(318 80% 65% / 0.40);
+}
+
+.bm-runtime {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 64px minmax(160px, 200px) 1fr minmax(180px, 200px);
+  align-items: center;
+  gap: 1.1rem;
+  padding: 1rem 1.15rem;
+  margin-bottom: 0.75rem;
+  border: 1px solid var(--rt-border, hsl(var(--border)));
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(135deg, var(--rt-bg-from, hsl(var(--background-3))) 0%, var(--rt-bg-to, transparent) 100%),
+    hsl(var(--background-2));
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
+  transition: box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
+  min-height: 124px;
+}
+.bm-runtime:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28), 0 0 0 1px var(--rt-glow, hsl(var(--primary) / 22%));
+}
+.bm-runtime--llama {
+  --rt-accent: var(--bm-runtime-llama-accent);
+  --rt-bg-from: var(--bm-runtime-llama-bg-from);
+  --rt-bg-to: var(--bm-runtime-llama-bg-to);
+  --rt-border: var(--bm-runtime-llama-border);
+  --rt-glow: var(--bm-runtime-llama-glow);
+}
+.bm-runtime--lemonade {
+  --rt-accent: var(--bm-runtime-lemonade-accent);
+  --rt-bg-from: var(--bm-runtime-lemonade-bg-from);
+  --rt-bg-to: var(--bm-runtime-lemonade-bg-to);
+  --rt-border: var(--bm-runtime-lemonade-border);
+  --rt-glow: var(--bm-runtime-lemonade-glow);
+}
+.bm-runtime--kobold {
+  --rt-accent: var(--bm-runtime-kobold-accent);
+  --rt-bg-from: var(--bm-runtime-kobold-bg-from);
+  --rt-bg-to: var(--bm-runtime-kobold-bg-to);
+  --rt-border: var(--bm-runtime-kobold-border);
+  --rt-glow: var(--bm-runtime-kobold-glow);
+}
+.bm-runtime--llamafile {
+  --rt-accent: var(--bm-runtime-llamafile-accent);
+  --rt-bg-from: var(--bm-runtime-llamafile-bg-from);
+  --rt-bg-to: var(--bm-runtime-llamafile-bg-to);
+  --rt-border: var(--bm-runtime-llamafile-border);
+  --rt-glow: var(--bm-runtime-llamafile-glow);
+}
+.bm-runtime--turboquant {
+  --rt-accent: var(--bm-runtime-turboquant-accent);
+  --rt-bg-from: var(--bm-runtime-turboquant-bg-from);
+  --rt-bg-to: var(--bm-runtime-turboquant-bg-to);
+  --rt-border: var(--bm-runtime-turboquant-border);
+  --rt-glow: var(--bm-runtime-turboquant-glow);
+}
+.bm-runtime--running {
+  border-color: hsl(var(--success) / 55%);
+}
+
+/* ===== CSS-drawn tile (mirrors .exo-node__tile in cluster.vue) ===== */
+.bm-runtime__tile {
+  position: relative;
+  width: 56px;
+  height: 84px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.4));
+}
+.bm-runtime__band {
+  height: 6px;
+  background: linear-gradient(180deg, hsl(var(--rt-accent)) 0%, hsl(var(--rt-accent) / 80%) 100%);
+  box-shadow: 0 0 6px hsl(var(--rt-accent) / 65%);
+}
+.bm-runtime__band--bottom {
+  background: linear-gradient(0deg, hsl(var(--rt-accent)) 0%, hsl(var(--rt-accent) / 80%) 100%);
+}
+.bm-runtime__body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px;
+  background:
+    linear-gradient(180deg, hsl(var(--rt-accent) / 22%) 0%, hsl(var(--background-3)) 60%, rgba(0,0,0,0.4) 100%);
+  border-left: 1px solid hsl(var(--rt-accent) / 35%);
+  border-right: 1px solid hsl(var(--rt-accent) / 35%);
+  position: relative;
+  overflow: hidden;
+}
+.bm-runtime__body::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at 50% 0%, hsl(var(--rt-accent) / 28%) 0%, transparent 70%);
+  pointer-events: none;
+}
+.bm-runtime__initials {
+  position: relative;
+  font-family: var(--font-mono, 'Consolas', 'Courier New', monospace);
+  font-weight: 700;
+  font-size: 0.72rem;
+  color: hsl(var(--rt-accent));
+  text-shadow: 0 0 4px hsl(var(--rt-accent) / 50%);
+  letter-spacing: 0.02em;
+  text-align: center;
+  z-index: 1;
+}
+.bm-runtime__lines {
+  position: relative;
+  width: 75%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 1;
+}
+.bm-runtime__lines span {
+  height: 2px;
+  background: rgba(0,0,0,0.45);
+  border-radius: 1px;
+}
+.bm-runtime__led {
+  position: relative;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #6b7280;
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+  z-index: 1;
+}
+.bm-runtime__led--installed {
+  background: hsl(var(--primary));
+  box-shadow: 0 0 5px hsl(var(--primary) / 80%);
+}
+.bm-runtime__led--running {
+  background: hsl(var(--success));
+  box-shadow: 0 0 7px hsl(var(--success) / 90%);
+  animation: bm-runtime-led-pulse 1.4s ease-in-out infinite;
+}
+@keyframes bm-runtime-led-pulse {
+  0%, 100% { opacity: 1; filter: brightness(1); }
+  50%      { opacity: 0.65; filter: brightness(0.85); }
+}
+
+/* ===== Identity column ===== */
+.bm-runtime__identity {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+  min-width: 0;
+}
+.bm-runtime__kind {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: hsl(var(--rt-accent));
+  font-family: var(--font-mono, 'Consolas', monospace);
+}
+.bm-runtime__name {
+  font-size: 1.2rem;
+  font-weight: 800;
+  font-family: var(--font-mono, 'Consolas', monospace);
+  background: linear-gradient(120deg, hsl(var(--foreground)) 0%, hsl(var(--rt-accent)) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  line-height: 1.15;
+}
+.bm-runtime__homepage {
+  font-size: 0.7rem;
+  color: hsl(var(--muted-foreground));
+  font-family: var(--font-mono, monospace);
+  word-break: break-all;
+}
+.bm-runtime__status-row {
+  margin-top: 0.35rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+/* ===== Status pill (animated when running) ===== */
+.bm-runtime__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 100px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  font-family: var(--font-mono, monospace);
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--background-3));
+  color: hsl(var(--muted-foreground));
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.bm-runtime__status--installed {
+  border-color: hsl(var(--rt-accent) / 55%);
+  color: hsl(var(--rt-accent));
+  background: hsl(var(--rt-accent) / 10%);
+}
+.bm-runtime__status--running {
+  border-color: hsl(var(--success) / 55%);
+  color: hsl(var(--success));
+  background: hsl(var(--success) / 12%);
+  box-shadow: 0 0 9px hsl(var(--success) / 30%);
+}
+.bm-runtime__status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 5px currentColor;
+}
+
+.bm-runtime__api-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.55rem;
+  border-radius: 100px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  font-family: var(--font-mono, monospace);
+  white-space: nowrap;
+}
+.bm-runtime__api-badge--ok {
+  background: hsl(var(--success) / 12%);
+  color: hsl(var(--success));
+  border: 1px solid hsl(var(--success) / 40%);
+}
+.bm-runtime__api-badge--bad {
+  background: hsl(0 70% 60% / 12%);
+  color: hsl(0 70% 60%);
+  border: 1px solid hsl(0 70% 60% / 40%);
+}
+
+/* ===== Specs column (description + chip variants + port/model + meta) ===== */
+.bm-runtime__specs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.bm-runtime__desc {
+  margin: 0;
+  font-size: 0.78rem;
+  color: hsl(var(--muted-foreground));
+  line-height: 1.4;
+}
+.bm-runtime__variants {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+.bm-runtime__variants-label {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+  margin-right: 0.2rem;
+}
+.bm-runtime__variant-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--background-3));
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.72rem;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.bm-runtime__variant-chip:hover:not(:disabled) {
+  border-color: hsl(var(--rt-accent) / 50%);
+  background: hsl(var(--rt-accent) / 6%);
+  color: hsl(var(--foreground));
+}
+.bm-runtime__variant-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.bm-runtime__variant-chip--selected {
+  background: hsl(var(--rt-accent) / 18%);
+  border-color: hsl(var(--rt-accent));
+  color: hsl(var(--rt-accent));
+  font-weight: 600;
+}
+.bm-runtime__variant-hw {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  opacity: 0.85;
+}
+.bm-runtime__variant-label {
+  font-weight: 500;
+}
+.bm-runtime__variant-size {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.65rem;
+  color: hsl(var(--muted-foreground));
+  font-family: var(--font-mono, monospace);
+}
+.bm-runtime__variant-chip--selected .bm-runtime__variant-size {
+  color: hsl(var(--rt-accent) / 80%);
+}
+
+.bm-runtime__config {
+  display: flex;
+  gap: 0.6rem;
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+.bm-runtime__config-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  flex: 1;
+  min-width: 0;
+}
+.bm-runtime__config-row--model {
+  flex: 2;
+}
+.bm-runtime__config-label {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+}
+.bm-runtime__input--port {
+  max-width: 110px;
+}
+.bm-runtime__model-row {
+  display: flex;
+  gap: 0.3rem;
+}
+.bm-runtime__model-row > .bm__input {
+  flex: 1;
+  min-width: 0;
+}
+.bm-runtime__model-pick {
+  padding: 0.3rem 0.6rem;
+  font-size: 0.72rem;
+}
+
+.bm-runtime__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.7rem;
+}
+.bm-runtime__meta-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  padding: 0.25rem 0.55rem;
+  background: hsl(var(--background-3));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-sm);
+  word-break: break-word;
+  max-width: 100%;
+}
+.bm-runtime__meta-label {
+  font-weight: 700;
+  color: hsl(var(--rt-accent));
+  text-transform: uppercase;
+  font-size: 0.6rem;
+  letter-spacing: 0.05em;
+}
+.bm-runtime__meta-value {
+  font-size: 0.7rem;
+  color: hsl(var(--foreground));
+}
+
+/* ===== Actions column ===== */
+.bm-runtime__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-items: stretch;
+  justify-content: center;
+}
+.bm-runtime__actions > .bm__btn {
+  font-family: inherit;
+  font-size: 0.74rem;
+  padding: 0.4rem 0.7rem;
+}
+.bm-runtime__download {
+  min-width: 0;
+}
+.bm-runtime__note {
+  font-size: 0.7rem;
+  color: hsl(var(--muted-foreground));
+  font-family: var(--font-mono, monospace);
+  word-break: break-word;
+  padding-top: 0.2rem;
+}
+
+/* ===== Narrow viewport: stack specs/actions below identity ===== */
+@media (max-width: 1024px) {
+  .bm-runtime {
+    grid-template-columns: 60px 1fr;
+    grid-template-areas:
+      'tile      identity'
+      'specs     specs'
+      'actions   actions';
+    row-gap: 0.85rem;
+  }
+  .bm-runtime__tile     { grid-area: tile; }
+  .bm-runtime__identity { grid-area: identity; }
+  .bm-runtime__specs    { grid-area: specs; }
+  .bm-runtime__actions  {
+    grid-area: actions;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
 }
 
 .bm__note {
