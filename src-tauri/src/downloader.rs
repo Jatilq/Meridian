@@ -132,12 +132,6 @@ pub struct YtDlpFormat {
     pub format_note: Option<String>,
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub struct DownloadQueueState {
-    pub queue: Vec<DownloadItem>,
-    pub history: Vec<DownloadItem>,
-}
-
 pub(crate) struct DownloaderDb {
     conn: rusqlite::Connection,
 }
@@ -258,13 +252,6 @@ impl DownloaderDb {
                 ],
             )
             .map_err(|e| format!("Failed to update: {}", e))?;
-        Ok(())
-    }
-
-    fn remove(&self, id: &str) -> Result<(), String> {
-        self.conn
-            .execute("DELETE FROM download_queue WHERE id=?1", [id])
-            .map_err(|e| format!("Failed to remove: {}", e))?;
         Ok(())
     }
 
@@ -424,11 +411,6 @@ pub fn find_ytdlp() -> Option<String> {
     None
 }
 
-#[tauri::command]
-pub fn get_qt_downloader_status() -> Result<bool, String> {
-    Ok(find_ytdlp().is_some())
-}
-
 /// Probe a URL with `yt-dlp --simulate --print filename`. Returns the filename
 /// yt-dlp would use if it recognizes the URL, or None if yt-dlp is missing or
 /// doesn't handle this URL (so the caller can fall back to direct HTTP).
@@ -524,12 +506,13 @@ fn apply_hf_bearer(
     req: reqwest::RequestBuilder,
     hf_token: Option<&str>,
 ) -> reqwest::RequestBuilder {
-    if let Some(t) = hf_token {
-        if !t.is_empty() {
-            return req.header(reqwest::header::AUTHORIZATION, format!("Bearer {}", t));
-        }
-    }
-    req
+    // Delegate to the generic bearer-attach helper so the Bearer contract
+    // lives in exactly one place. Compared to the previous inline version,
+    // this also hardens the whitespace-only-token case: `add_bearer_header`
+    // trims before attaching, so `Some(" ")` no longer produces a header
+    // with a trailing space ("Bearer  ") that intermediaries are free to
+    // drop or otherwise mishandle.
+    add_bearer_header(req, hf_token)
 }
 
 /// Resolve the HuggingFace access token server-side. Mirrors the secure-key
