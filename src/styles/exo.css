@@ -1,0 +1,408 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+License: GNU GPLv3 or later. See the license file in the project root for more information.
+Copyright © 2021 - present Aleksey Hoffman. All rights reserved.
+
+   ====================================================================
+   exo.css — shared row-card tokens for the Meridian exo treatments.
+
+   Pulls together the visual language shipped across:
+     • cluster.vue (commit efa26bea) — per-host accent on topology rows
+     • backend-manager.vue (commit 075c81d9) — per-kind accent on
+       runtime cards (Backends tab)
+   Used by:
+     • src/modules/settings/ui/categories/meridian/*.vue (5+ cards)
+     • src/modules/hardware/pages/hardware.vue (Model Search rows)
+
+   Five named accent tokens (HSL trio "H S% L%" + bg/border/glow
+   channels), the canonical 4-column row geometry, the ambient dot-grid
+   backdrop, status pill + LED waveform, and the 1024px stack
+   media-query. Panels only need to pick an accent class and drop their
+   content into the .exo-card grid; CSS does the rest.
+
+   Panels SHOULD NOT redefine .exo-card geometry. They CAN override the
+   `--rt-accent` / `--rt-bg-from` / `--rt-bg-to` / `--rt-border` /
+   `--rt-glow` CSS variables for their own sub-modifiers (e.g. an
+   AI-Panel "routerOffline" sub-state), but doing so at the root level
+   instead of per-kind keeps the token sheet tidy.
+   ==================================================================== */
+
+:root {
+  /* ----- 5 named accents (.exo-card--{name} ties these together) ----- */
+  /* Note: mamba / black / violet HSL channels are kept in lockstep
+     with the SHIPPED tokens in cluster.vue's
+     `.cluster-node-*-accent / -bg-from / -border / -glow` per-host
+     accents (commit efa26bea, lines 724–740) and backend-manager.vue's
+     `.bm-runtime--llama/lemonade/kobold` (commit 075c81d9). Drift
+     here = visible color mismatch between the topology, the Settings
+     → Meridian cards, and the Backend Manager Backends tab. DO NOT
+     retune mamba/black/violet without re-aligning all three files. */
+  --exo-accent-mamba:    174 80% 45%;  /* teal — MAMBA / local / 9Router */
+  --exo-accent-black:    348 83% 58%;  /* coral — BLACK / SSH */
+  --exo-accent-amber:     40 90% 55%;   /* amber — Hardware / Files */
+  --exo-accent-violet:   280 80% 65%;   /* violet — Downloads / Koboldcpp */
+  --exo-accent-indigo:   220 80% 65%;   /* indigo — AI Panel */
+
+  /* ----- row geometry — every exo card uses this 4-column grid ----- */
+  --exo-row-template: 64px minmax(160px, 200px) 1fr minmax(180px, 200px);
+  --exo-stack-breakpoint: 1024px;
+}
+
+/* ====================================================================
+   Base .exo-card — the row container. Apply a --name modifier class
+   to tint via --rt-accent / --rt-bg-from / --rt-bg-to / --rt-border /
+   --rt-glow and the card paints itself per-kind automatically.
+   ==================================================================== */
+.exo-card {
+  --rt-accent:  var(--exo-accent-mamba);
+  --rt-bg-from: hsl(var(--rt-accent) / 0.20);
+  --rt-bg-to:   hsl(var(--rt-accent) / 0.04);
+  --rt-border:  hsl(var(--rt-accent) / 0.55);
+  --rt-glow:    hsl(var(--rt-accent) / 0.40);
+
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: var(--exo-row-template);
+  align-items: center;
+  gap: 1.1rem;
+  padding: 1rem 1.15rem;
+  margin-bottom: 0.75rem;
+  border: 1px solid var(--rt-border, hsl(var(--border)));
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(135deg, var(--rt-bg-from, hsl(var(--background-3))) 0%, var(--rt-bg-to, transparent) 100%),
+    hsl(var(--background-2));
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
+  transition: box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
+  min-height: 96px;
+}
+.exo-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28), 0 0 0 1px var(--rt-glow, hsl(var(--primary) / 22%));
+}
+
+/* ----- per-host accent classes (Cluster / SSH settings reuse this) ----- */
+.exo-card--mamba {
+  --rt-accent:  var(--exo-accent-mamba);
+  --rt-bg-from: hsl(174 80% 45% / 0.20);
+  --rt-bg-to:   hsl(174 80% 45% / 0.04);
+  --rt-border:  hsl(174 80% 45% / 0.55);
+  --rt-glow:    hsl(174 80% 45% / 0.40);
+}
+.exo-card--black {
+  --rt-accent:  var(--exo-accent-black);
+  --rt-bg-from: hsl(348 83% 58% / 0.20);
+  --rt-bg-to:   hsl(348 83% 58% / 0.04);
+  --rt-border:  hsl(348 83% 58% / 0.55);
+  --rt-glow:    hsl(348 83% 58% / 0.40);
+}
+.exo-card--violet {
+  --rt-accent:  var(--exo-accent-violet);
+  --rt-bg-from: hsl(var(--exo-accent-violet) / 0.20);
+  --rt-bg-to:   hsl(var(--exo-accent-violet) / 0.04);
+  --rt-border:  hsl(var(--exo-accent-violet) / 0.55);
+  --rt-glow:    hsl(var(--exo-accent-violet) / 0.40);
+}
+.exo-card--amber {
+  --rt-accent:  var(--exo-accent-amber);
+  --rt-bg-from: hsl(var(--exo-accent-amber) / 0.20);
+  --rt-bg-to:   hsl(var(--exo-accent-amber) / 0.04);
+  --rt-border:  hsl(var(--exo-accent-amber) / 0.55);
+  --rt-glow:    hsl(var(--exo-accent-amber) / 0.40);
+}
+.exo-card--indigo {
+  --rt-accent:  var(--exo-accent-indigo);
+  --rt-bg-from: hsl(var(--exo-accent-indigo) / 0.20);
+  --rt-bg-to:   hsl(var(--exo-accent-indigo) / 0.04);
+  --rt-border:  hsl(var(--exo-accent-indigo) / 0.55);
+  --rt-glow:    hsl(var(--exo-accent-indigo) / 0.40);
+}
+
+/* ====================================================================
+   Per-card state modifiers (orthogonal to accent).
+   ==================================================================== */
+.exo-card--running {
+  border-color: hsl(var(--success) / 55%);
+}
+.exo-card--installed {
+  border-color: var(--rt-accent);
+}
+
+/* ====================================================================
+   Tile column (left, 64px wide). Initial placeholder divs are
+   styled-down inside .exo-tile — panels drop their own lucide icon
+   via an <span class="exo-tile__icon"> wrapping block. The CSS-drawn
+   bands + LED inside the tile are reused for "live status" panels.
+   ==================================================================== */
+.exo-tile {
+  position: relative;
+  width: 56px;
+  height: 84px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    linear-gradient(180deg, hsl(var(--rt-accent) / 22%) 0%, hsl(var(--background-3)) 60%, rgba(0, 0, 0, 0.4) 100%);
+  border-radius: var(--radius-sm);
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.4));
+  flex-shrink: 0;
+}
+.exo-tile__icon {
+  width: 28px;
+  height: 28px;
+  color: hsl(var(--rt-accent));
+  filter: drop-shadow(0 0 4px hsl(var(--rt-accent) / 55%));
+}
+
+/* ----- LED inside the tile (mirrors bm-runtime__led) ----- */
+.exo-tile__led {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #6b7280;
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+.exo-tile__led--installed {
+  background: hsl(var(--rt-accent));
+  box-shadow: 0 0 5px hsl(var(--rt-accent) / 80%);
+}
+.exo-tile__led--running {
+  background: hsl(var(--success));
+  box-shadow: 0 0 7px hsl(var(--success) / 90%);
+  animation: exo-led-pulse 1.4s ease-in-out infinite;
+}
+@keyframes exo-led-pulse {
+  0%, 100% { opacity: 1; filter: brightness(1); }
+  50%      { opacity: 0.65; filter: brightness(0.85); }
+}
+
+/* Accessibility: disable the perpetual LED pulse for users with
+   `prefers-reduced-motion: reduce` (vestibular disorders, motion
+   sensitivity). The LED still glows, just stops pulsing. Same
+   precedence as cluster.vue + backend-manager.vue's prior
+   treatment of this rule. */
+@media (prefers-reduced-motion: reduce) {
+  .exo-tile__led--running { animation: none; }
+}
+
+/* ====================================================================
+   Identity column (center-left, 160-200px). Title goes inside
+   .exo-identity__title (gradient name text), sub-text inside
+   .exo-identity__sub (mono muted).
+   ==================================================================== */
+.exo-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+  min-width: 0;
+}
+.exo-identity__title {
+  font-size: 1.1rem;
+  font-weight: 800;
+  font-family: var(--font-mono, 'Consolas', monospace);
+  background: linear-gradient(120deg, hsl(var(--foreground)) 0%, hsl(var(--rt-accent)) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  line-height: 1.15;
+}
+.exo-identity__sub {
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
+  font-family: var(--font-mono, monospace);
+  word-break: break-all;
+}
+
+/* ====================================================================
+   Specs column (center, flex). Default user agent: form fields stack
+   vertically; for 2-up layouts, panels apply
+   .exo-specs--two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+   ==================================================================== */
+.exo-specs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.exo-specs--two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+}
+.exo-specs__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+.exo-specs__label {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+}
+.exo-specs__input,
+.exo-specs__select {
+  width: 100%;
+  padding: 0.45rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  border: 1px solid hsl(var(--border));
+  font-family: var(--font-mono, monospace);
+  font-size: 0.8rem;
+  outline: none;
+}
+.exo-specs__input:focus,
+.exo-specs__select:focus {
+  border-color: hsl(var(--ring));
+}
+.exo-specs__textarea {
+  width: 100%;
+  padding: 0.45rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  border: 1px solid hsl(var(--border));
+  font-family: inherit;
+  font-size: 0.8rem;
+  outline: none;
+  resize: vertical;
+}
+
+/* ====================================================================
+   Actions column (right, 180-200px).
+   ==================================================================== */
+.exo-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-items: stretch;
+  justify-content: center;
+}
+.exo-actions__btn {
+  padding: 0.4rem 0.8rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--background-3));
+  color: hsl(var(--foreground));
+  font-size: 0.78rem;
+  cursor: pointer;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+}
+.exo-actions__btn:hover:not(:disabled) {
+  background: hsl(var(--foreground) / 5%);
+  border-color: var(--rt-accent, hsl(var(--primary)));
+}
+.exo-actions__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.exo-actions__btn--primary {
+  border-color: var(--rt-accent, hsl(var(--primary)));
+  background: hsl(var(--rt-accent, var(--primary)) / 10%);
+}
+.exo-actions__btn--primary:hover:not(:disabled) {
+  background: hsl(var(--rt-accent, var(--primary)) / 22%);
+}
+.exo-actions__btn--danger {
+  border-color: hsl(0 70% 55%);
+  background: hsl(0 70% 60% / 10%);
+}
+.exo-actions__btn--danger:hover:not(:disabled) {
+  background: hsl(0 70% 60% / 20%);
+}
+
+/* ====================================================================
+   Ambient dot-grid backdrop. Mirrors cluster.vue .cluster__ambient-grid.
+   Parent must be position: relative for the absolute inset to align.
+   ==================================================================== */
+.exo-ambient-grid {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle at 2px 2px, hsl(var(--primary) / 18%) 1.2px, transparent 1.2px);
+  background-size: 24px 24px;
+  opacity: 0.6;
+  pointer-events: none;
+  z-index: 0;
+  border-radius: var(--radius-md);
+}
+
+/* ====================================================================
+   Status pill (orthogonal to bezel, can sit at the top of .exo-actions
+   or on a row by itself).
+   ==================================================================== */
+.exo-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 100px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  font-family: var(--font-mono, monospace);
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--background-3));
+  color: hsl(var(--muted-foreground));
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.exo-status-pill--installed {
+  border-color: hsl(var(--rt-accent) / 55%);
+  color: hsl(var(--rt-accent));
+  background: hsl(var(--rt-accent) / 10%);
+}
+.exo-status-pill--running {
+  border-color: hsl(var(--success) / 55%);
+  color: hsl(var(--success));
+  background: hsl(var(--success) / 12%);
+  box-shadow: 0 0 9px hsl(var(--success) / 30%);
+}
+.exo-status-pill--offline {
+  border-color: hsl(0 70% 55% / 55%);
+  color: hsl(0 70% 60%);
+  background: hsl(0 70% 60% / 10%);
+}
+.exo-status-pill__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 5px currentColor;
+}
+
+/* ====================================================================
+   Narrow viewport: stack the 4 columns into 3 stacked rows so the
+   card stays readable below the canonical 1024px breakpoint. Mirrors
+   cluster.vue + backend-manager.vue's stack rule.
+   ==================================================================== */
+@media (max-width: 1024px) {
+  .exo-card {
+    grid-template-columns: 60px 1fr;
+    grid-template-areas:
+      'tile      identity'
+      'specs     specs'
+      'actions   actions';
+    row-gap: 0.85rem;
+  }
+  .exo-tile     { grid-area: tile; }
+  .exo-identity { grid-area: identity; }
+  .exo-specs    { grid-area: specs; }
+  .exo-actions  {
+    grid-area: actions;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .exo-specs--two-col {
+    grid-template-columns: 1fr;
+  }
+}
