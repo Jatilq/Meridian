@@ -1618,24 +1618,6 @@ onUnmounted(() => {
   outline: none;
 }
 
-.bm__backend-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
-  font-size: 0.75rem;
-  color: hsl(var(--muted-foreground));
-}
-
-.bm__meta-label {
-  font-weight: 600;
-  margin-right: 0.25rem;
-}
-
-.bm__meta-value {
-  font-family: var(--font-mono, monospace);
-  font-size: 0.7rem;
-}
-
 .bm__backend-footer {
   display: flex;
   align-items: center;
