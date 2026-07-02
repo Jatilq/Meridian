@@ -969,7 +969,7 @@ mod tests {
     async fn cancellable_sleep_returns_early_when_cancelled_during_wait() {
         let flag = Arc::new(AtomicBool::new(false));
         let flag_for_task = flag.clone();
-        tauri::async_runtime::spawn(async move {
+        tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(150)).await;
             flag_for_task.store(true, Ordering::SeqCst);
         });
@@ -991,7 +991,7 @@ mod tests {
         let attempt_counter = Arc::new(std::sync::atomic::AtomicU32::new(0));
 
         let flag_for_task = flag.clone();
-        tauri::async_runtime::spawn(async move {
+        tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(200)).await;
             flag_for_task.store(true, Ordering::SeqCst);
         });
@@ -1051,7 +1051,7 @@ mod tests {
                 .await
                 .expect("bind ephemeral port");
             let addr = listener.local_addr().expect("local addr");
-            tauri::async_runtime::spawn(async move {
+            tokio::spawn(async move {
                 axum::serve(listener, router).await.expect("serve");
             });
             addr
