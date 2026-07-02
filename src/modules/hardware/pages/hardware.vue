@@ -793,12 +793,18 @@ function hfModelUrl(repoId: string): string {
         <article
           v-for="model in models.slice(0, visibleCount)"
           :key="model.id"
-          class="hardware__result"
+          class="exo-card exo-card--amber hardware__result"
           :class="['hardware__result--expanded-' + isExpanded(model.id), { 'hardware__result--no-fit': !fitsForSizeGb(model.sizeGb, targetVramMb) }]"
         >
-          <!-- Top row: name + primary quant + fit + trusted + chevron.
-               Click the chevron (or this top-row zone) to toggle the
-               LM-Studio-style per-quant breakdown below. -->
+          <!-- Top row: HF tile + name + primary quant + fit + trusted +
+               chevron. Click the chevron (or this top-row zone) to toggle
+               the LM-Studio-style per-quant breakdown below. The tile is
+               a small amber gradient block that reads as the HuggingFace
+               avatar without needing a custom SVG icon (lucide doesn't
+               ship a HuggingFace logo). -->
+          <div class="hardware__result-tile" aria-hidden="true">
+            <span class="hardware__result-tile-mark">HF</span>
+          </div>
           <div class="hardware__result-info">
             <div class="hardware__result-row1">
               <span class="hardware__result-name">{{ model.name }}</span>
@@ -865,12 +871,14 @@ function hfModelUrl(repoId: string): string {
               Quantizer: <strong>{{ model.quantizerLabel }}</strong>
             </div>
           </div>
-          <!-- Expand chevron + top-level Download. The chevron toggles
-               the LM-Studio-style per-quant breakdown below; Download
-               enqueues the currently best-pick GGUF. -->
-          <div class="hardware__result-actions">
+          <!-- Expand chevron + top-level Download. Wrapped in exo-actions
+               so the two controls stack vertically and align with the
+               exo-card geometry (the tile | info | ... | actions rail).
+               The Download button keeps its existing primary look; the
+               expand chevron keeps its existing geometric icon. -->
+          <div class="hardware__result-actions exo-actions">
             <button
-              class="hardware__download-btn"
+              class="hardware__download-btn exo-actions__btn exo-actions__btn--primary"
               :disabled="!fitsForSizeGb(model.sizeGb, targetVramMb)"
               :title="fitsForSizeGb(model.sizeGb, targetVramMb)
                 ? `Download ${model.ggufFilename}`
@@ -878,7 +886,7 @@ function hfModelUrl(repoId: string): string {
               @click="downloadModel(model)"
             >Download</button>
             <button
-              class="hardware__expand-btn"
+              class="hardware__expand-btn exo-actions__btn"
               :aria-expanded="isExpanded(model.id)"
               :aria-label="isExpanded(model.id) ? `Collapse ${model.name} details` : `Expand ${model.name} details`"
               :title="isExpanded(model.id) ? 'Collapse details' : `Expand — ${model.siblings.length} quants + real context`"
@@ -1262,25 +1270,79 @@ function hfModelUrl(repoId: string): string {
   scrollbar-gutter: stable;
   padding-right: 0.5rem;
 }
+/* ==========================================================================
+   Per-result card — exo-style row layout (.exo-card--amber supplies the
+   gradient bg + amber border + hover glow). The grid here is a 3-column
+   variant (tile | info | actions) since per-model rows don't need a
+   fluid specs column — all chip / meta lines live inside the info column
+   stacked vertically. The grid-template-columns customises the exo-card
+   base 4-column template by overriding it for this card type. The 4-col
+   layout still kicks in below 1024px via the stack media-query at the
+   bottom of exo.css. */
 .hardware__result {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 56px 1fr auto;
   align-items: flex-start;
-  gap: 1rem;
-  padding: 0.75rem 1rem;
-  border-radius: var(--radius-sm);
-  border: 1px solid hsl(var(--border));
-  background: hsl(var(--background-2));
+  gap: 1.1rem;
+  /* Override exo-card's 4-col template so hardware.vue fits 3 cols
+     without extra unused grid slots. Visual padding inherited from
+     exo-card. */
+  padding: 0.85rem 1.05rem 0.85rem 0.85rem;
 }
-.hardware__result--no-fit {
-  opacity: 0.75;
-  border-style: dashed;
+/* Stack to single column on tablet/mobile — restores the 1024px
+   media-query behaviour defined in exo.css for the base .exo-card.
+   Without this override the 3-col rule we just declared would
+   shadow the media-query and cards stay tiled on small viewports. */
+@media (max-width: 1024px) {
+  .hardware__result {
+    grid-template-columns: 1fr;
+  }
+  .hardware__result-tile {
+    margin-bottom: 0.4rem;
+  }
+}
+
+/* ----- HF tile (replaces a missing lucide icon) ----- */
+.hardware__result-tile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 76px;
+  background: linear-gradient(180deg,
+    hsl(40 95% 60% / 22%) 0%,
+    hsl(var(--background-3)) 60%,
+    rgba(0, 0, 0, 0.4) 100%);
+  border-radius: var(--radius-sm);
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.4));
+  flex-shrink: 0;
+  align-self: center;
+  position: relative;
+  overflow: hidden;
+}
+.hardware__result-tile::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at 50% 0%,
+    hsl(40 95% 60% / 28%) 0%, transparent 70%);
+  pointer-events: none;
+}
+.hardware__result-tile-mark {
+  position: relative;
+  font-family: var(--font-mono, 'Consolas', 'Courier New', monospace);
+  font-weight: 800;
+  font-size: 0.85rem;
+  color: hsl(40 95% 60%);
+  text-shadow: 0 0 4px hsl(40 95% 60% / 55%);
+  letter-spacing: 0.02em;
 }
 .hardware__result-info {
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
   min-width: 0;
+  /* Exo-style "specs" column named to mirror cluster.vue + backend-manager.vue */
 }
 .hardware__result-row1 {
   display: flex;
@@ -1290,6 +1352,11 @@ function hfModelUrl(repoId: string): string {
 }
 .hardware__result-name {
   font-weight: 600;
+  background: linear-gradient(120deg, hsl(var(--foreground)) 0%, hsl(40 95% 60%) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-size: 1.05rem;
 }
 .hardware__result-quant {
   font-family: var(--font-mono, monospace);
@@ -1408,41 +1475,24 @@ function hfModelUrl(repoId: string): string {
   align-items: flex-end;
   gap: 0.4rem;
   flex-shrink: 0;
+  min-width: 0;
 }
 .hardware__download-btn {
-  padding: 0.4rem 0.9rem;
-  border-radius: var(--radius-sm);
-  background: hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
-  border: none;
-  cursor: pointer;
-  font-weight: 500;
-  font-size: 0.85rem;
-  transition: filter 120ms ease;
-}
-.hardware__download-btn:hover:not(:disabled) {
-  filter: brightness(1.1);
-}
-.hardware__download-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+  /* Exo-style primary button — .exo-actions__btn--primary adds the
+     amber border + tint via flex with our existing palette. We keep
+     the existing hsl(var(--primary)) background so the button reads
+     "primary" instead of "amber accent" — primary-contrast against
+     is higher on Download than on a per-kind accent. */
+  justify-content: center;
 }
 .hardware__expand-btn {
-  width: 2rem;
-  height: 1.6rem;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  border: 1px solid hsl(var(--border));
-  color: hsl(var(--muted-foreground));
-  cursor: pointer;
-  font-size: 0.85rem;
-  font-weight: 600;
-  padding: 0;
-  line-height: 1;
+  width: auto;
+  height: auto;
+  padding: 0.4rem 0.7rem;
 }
 .hardware__expand-btn:hover {
-  border-color: hsl(var(--primary));
-  color: hsl(var(--primary));
+  border-color: hsl(40 95% 60%);
+  color: hsl(40 95% 60%);
 }
 
 /* ─── Expanded details: per-quant table + context fetch ───────────────── */

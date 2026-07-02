@@ -55,24 +55,27 @@ export function hostThemeKey(host: string | undefined | null): ExoThemeKey {
   const lower = host.toLowerCase();
 
   // MAMBA family (local Titan / 9Router / Triton / left node).
-  // Match on nickname or the canonical 192.168.1.67 IP.
+  // Nicknames use a word-boundary regex so subdomain/FQDN fragments
+  // (e.g. “metrics.black.local”) don't false-trigger on `local`,
+  // and a label like “black.local” correctly routes to BLACK.
+  // IPs match on the documented dotted-quad (AGENTS.md hardware ref).
+  // Boundary semantics: `9router` MUST end at a non-word char (\b on
+  // the trailing side). Labels like `9routerpanel` therefore map to
+  // violet, not mamba — production labels should use exactly
+  // `9router` / `9ROUTER`, not embedded substrings.
   if (
-    lower.includes('mamba') ||
-    lower.includes('titan') ||
-    lower.includes('triton') ||
-    lower.includes('local') ||
-    lower.includes('9router') ||
+    /\b(mamba|titan|triton|9router)\b/.test(lower) ||
+    lower === 'local' ||
+    lower === 'localhost' ||
     lower.includes('192.168.1.67')
   ) {
     return 'mamba';
   }
 
-  // BLACK family (worker / obsidian / right node).
-  // Match on nickname or the canonical 192.168.1.64 IP.
+  // BLACK family (worker / obsidian / right node). Same word-
+  // boundary regex plus dotted-quad IP.
   if (
-    lower.includes('black') ||
-    lower.includes('obsidian') ||
-    lower.includes('worker') ||
+    /\b(black|obsidian|worker)\b/.test(lower) ||
     lower.includes('192.168.1.64')
   ) {
     return 'black';
@@ -96,7 +99,15 @@ export function hostThemeKey(host: string | undefined | null): ExoThemeKey {
  * it so the exhaustiveness check fires against live state, not a
  * stale snapshot.
  */
-export function themeKeyFor(kind: MeridianBackendKind): string {
+/** Modifier class suffixes that backend-manager.vue / exo.css agree on. */
+export type ExoBackendThemeKey =
+  | 'llama'
+  | 'lemonade'
+  | 'kobold'
+  | 'llamafile'
+  | 'turboquant';
+
+export function themeKeyFor(kind: MeridianBackendKind): ExoBackendThemeKey {
   switch (kind) {
     case 'llama.cpp':   return 'llama';
     case 'lemonade':    return 'lemonade';
