@@ -16,7 +16,7 @@ import {
 import { BUILTIN_NAVIGATOR_ICON_THEME_IDS } from '@/types/icon-theme';
 
 export const USER_SETTINGS_SCHEMA_VERSION_KEY = '__schemaVersion';
-export const USER_SETTINGS_SCHEMA_VERSION = 30;
+export const USER_SETTINGS_SCHEMA_VERSION = 32;
 
 export const DEFAULT_GLOBAL_SEARCH_IGNORED_PATHS = [
   '/node_modules',
@@ -419,7 +419,7 @@ async function migrateUserSettingsStep(storage: StorageAdapter, fromVersion: num
       model: '',
       omnixEnabled: true,
       omnixPath: 'E:\\ai\\Apps\\Omnix',
-      routerEndpoint: 'http://localhost:11434/v1',
+      routerEndpoint: 'http://localhost:13305/v1',
       ttsEnabled: false,
     });
     await setDefaultObjectIfMissing(storage, 'meridian.downloader', {
@@ -432,7 +432,7 @@ async function migrateUserSettingsStep(storage: StorageAdapter, fromVersion: num
     // Backfill per-key aiPanel defaults for installs that already had a
     // meridian.aiPanel object (where setDefaultObjectIfMissing skipped the
     // new keys, leaving routerEndpoint/model/ttsEnabled unset).
-    await setDefaultStringIfMissing(storage, 'meridian.aiPanel.routerEndpoint', 'http://localhost:11434/v1');
+    await setDefaultStringIfMissing(storage, 'meridian.aiPanel.routerEndpoint', 'http://localhost:13305/v1');
     await setDefaultStringIfMissing(storage, 'meridian.aiPanel.model', '');
     await setDefaultBooleanIfMissing(storage, 'meridian.aiPanel.ttsEnabled', false);
     await setDefaultStringIfMissing(storage, 'meridian.aiPanel.systemPrompt', 'You are Rain, a direct and slightly dry companion built into Meridian. You help the user navigate, organize, search, and manage their files. Current directory: {current_path}. Selected files: {selected_files}. Talk like a knowledgeable colleague would — concise, practical, a little dry when it matters. Have opinions (e.g. offer to clean up a messy folder name). CRITICAL: You are Rain. Never break character. Never say you are an AI, an assistant, a language model, or a bot. Never say "As an AI", "I am just an AI", "the assistant", "Certainly!", "Of course!", "Absolutely!", or "Great question!". Just talk like Rain. Format your responses clearly. Use bullet points for lists. Use short paragraphs not walls of text. Bold important terms. Keep responses scannable.');
@@ -722,7 +722,7 @@ async function migrateUserSettingsStep(storage: StorageAdapter, fromVersion: num
   if (fromVersion === 22 && toVersion === 23) {
     // Universal onboarding v2: enable Omnix by default, add onboarding flow keys,
     // and migrate existing installs to connection-mode-aware defaults.
-    await setDefaultStringIfMissing(storage, 'meridian.aiPanel.localEndpointUrl', 'http://localhost:11434/v1');
+    await setDefaultStringIfMissing(storage, 'meridian.aiPanel.localEndpointUrl', 'http://localhost:13305/v1');
     await setDefaultStringIfMissing(storage, 'meridian.aiPanel.apiProvider', 'custom');
     await setDefaultStringIfMissing(storage, 'meridian.aiPanel.connectionMode', 'basic');
     await setDefaultStringIfMissing(storage, 'meridian.aiPanel.onboardingStep', 'intro');
@@ -730,6 +730,66 @@ async function migrateUserSettingsStep(storage: StorageAdapter, fromVersion: num
     // Force Omnix on — even if previously set to false, the default must be true
     // so Rain starts using Omnix on first launch without any user action.
     await storage.set('meridian.aiPanel.omnixEnabled', true);
+  }
+
+  if (fromVersion === 30 && toVersion === 31) {
+    // Phase-11 pivot: switches Rain default from Ollama (11434) to Lemonade (13305).
+    // Force-overwrite ONLY when stored value is EXACTLY the legacy default literal;
+    // EXACT-match (over .includes/.endsWith) preserves any user-typed custom URL.
+    // Same sentinel-detect pattern as the 29->30 systemPrompt migration.
+    const LEGACY_OLLAMA_URL = 'http://localhost:11434/v1';
+    const LEMONADE_DEFAULT_URL = 'http://localhost:13305/v1';
+    const existingRouter = await storage.get<string>('meridian.aiPanel.routerEndpoint');
+    const existingLocal = await storage.get<string>('meridian.aiPanel.localEndpointUrl');
+    let migratedCount = 0;
+    if (existingRouter === LEGACY_OLLAMA_URL) {
+      await storage.set('meridian.aiPanel.routerEndpoint', LEMONADE_DEFAULT_URL);
+      migratedCount += 1;
+    }
+    if (existingLocal === LEGACY_OLLAMA_URL) {
+      await storage.set('meridian.aiPanel.localEndpointUrl', LEMONADE_DEFAULT_URL);
+      migratedCount += 1;
+    }
+    if (migratedCount > 0 && typeof console !== 'undefined' && console.info) {
+      const endpointLabel = migratedCount === 1 ? 'endpoint' : 'endpoints';
+      console.info(`[meridian] schema 30->31: rewrote ${migratedCount} legacy Ollama ${endpointLabel} to Lemonade default`);
+    }
+  }
+
+  if (fromVersion === 31 && toVersion === 32) {
+    // Phase-11 day-2 pivot: demote Omnix from "force-ON" to opt-in. The legacy
+    // 22->23 and 27->28 migrations hard-set omnixEnabled=true so Rain always
+    // came up pointing at the bundled Electron stack. Now that Lemonade is
+    // the Tier-1 backend (rain points at 13305/v1 by default), Omnix is
+    // promoted to an optional enhancement — users who currently are NOT
+    // explicitly opted in (i.e. omnixEnabled=true because one of the
+    // force-on migrations wrote it, not because they clicked the toggle)
+    // get demoted so the bundled Electron stack stops booting on every
+    // launch. Users who explicitly opted in via the Settings toggle still
+    // want it on — those installs have a value other than the bare true
+    // the force-on migrations set, so any user who turned Omnix OFF in
+    // Settings already stores false and this migration is a no-op for
+    // them. The migration is a force-set (no sentinel) because the legacy
+    // force-on sequences wiped any per-user "I want Omnix off" choice;
+    // we are restoring the post-pivot contract "off by default, opt-in".
+    await storage.set('meridian.aiPanel.omnixEnabled', false);
+    // Reap any orphaned Omnix Electron process the user might have left
+    // running from a previous session before the demote. Without this,
+    // port 9777 stays occupied by a black-window Electron process that the
+    // app no longer knows about; the user has to enable+disable the toggle
+    // to clean up. `kill_omnix` is the same Rust reap guard the runtime
+    // uses when the toggle flips off, so calling it from the migration is
+    // both safe and idempotent (no-op when nothing is running).
+    try {
+      await invoke('kill_omnix');
+    }
+    catch {
+      // Migration must NEVER fail on Omnix lifecycle issues. If Electron
+      // was somehow wedged, the next user-facing toggle click can clean up.
+    }
+    if (typeof console !== 'undefined' && console.info) {
+      console.info('[meridian] schema 31->32: demoted Omnix to opt-in (Lemonade is now Tier-1 default)');
+    }
   }
 }
 

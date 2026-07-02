@@ -118,25 +118,48 @@ watch(
 );
 
 async function maybeSpeak(text: string) {
-  // Optional TTS: speak the assistant response via Omnix Kokoro when enabled
-  // and Omnix is online. Plays the returned float audio through Web Audio.
-  if (!aiPanelStore.ttsEnabled || !aiPanelStore.omnixOnline) return;
+  // Optional TTS. Two backends, picked by the same toggle Rain uses for
+  // text inference:
+  //   1. `useOmnix && omnixOnline` -> Omnix Kokoro (legacy Electron server).
+  //      Returns JSON-wrapped float audio samples; played via Web Audio.
+  //   2. Otherwise -> Lemonade `/v1/audio/speech`. Returns raw audio bytes
+  //      that we wrap in a Blob and play through a standard <audio> element.
+  // TTS is best-effort; both branches swallow errors so a broken backend
+  // never blocks the user from reading the response.
+  if (!aiPanelStore.ttsEnabled) return;
   try {
-    const raw = await invoke<string>('omnix_tts', { text, voiceId: null });
-    const data = JSON.parse(raw);
-    const samples: number[] = data.audio || [];
-    const rate = Number(data.sampling_rate) || 24000;
-    if (!samples.length) return;
-    const AudioCtx = (window as unknown as { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext }).AudioContext
-      || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!AudioCtx) return;
-    const ctx = new AudioCtx();
-    const buffer = ctx.createBuffer(1, samples.length, rate);
-    buffer.copyToChannel(Float32Array.from(samples), 0);
-    const src = ctx.createBufferSource();
-    src.buffer = buffer;
-    src.connect(ctx.destination);
-    src.start();
+    if (aiPanelStore.useOmnix && aiPanelStore.omnixOnline) {
+      const raw = await invoke<string>('omnix_tts', { text, voiceId: null });
+      const data = JSON.parse(raw);
+      const samples: number[] = data.audio || [];
+      const rate = Number(data.sampling_rate) || 24000;
+      if (!samples.length) return;
+      const AudioCtx = (window as unknown as { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext }).AudioContext
+        || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const buffer = ctx.createBuffer(1, samples.length, rate);
+      buffer.copyToChannel(Float32Array.from(samples), 0);
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+      src.connect(ctx.destination);
+      src.start();
+    }
+    else {
+      const byteArray = await invoke<number[]>('lemonade_tts', {
+        text,
+        voice: 'af_heart',
+        model: 'kokoro',
+        endpoint: aiPanelStore.localEndpointUrl,
+      });
+      if (!byteArray.length) return;
+      const bytes = new Uint8Array(byteArray);
+      const blob = new Blob([bytes], { type: 'audio/wav' });
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.onended = () => URL.revokeObjectURL(url);
+      void audio.play();
+    }
   }
   catch {
     // TTS is best-effort; ignore failures
@@ -519,7 +542,9 @@ async function handleSend() {
     const isRouterExplicit = routerBase && aiPanelStore.connectionMode !== 'basic';
 
     if (aiPanelStore.useOmnix && aiPanelStore.omnixOnline && hasImage) {
-      // Vision: send the image file to Omnix as multipart via the Rust command
+      // Vision: send the image file to Omnix as multipart via the Rust command.
+      // Legacy path — preserved so JC's existing Omnix installs behave
+      // identically until the toggle is flipped off.
       const imageFile = selectedFiles.find((file: string) => {
         const ext = file.split('.').pop()?.toLowerCase();
         return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(ext || '');
@@ -527,6 +552,36 @@ async function handleSend() {
       const visionText = await invoke<string>('omnix_vision', {
         imagePath: imageFile,
         prompt: `${systemPrompt}\n\nUser: ${prompt}`,
+      });
+      aiPanelStore.addMessage('assistant', visionText);
+      await maybeSpeak(visionText);
+      try {
+        const parsed = JSON.parse(visionText);
+        if (parsed.intent && ['organize', 'rename', 'delete'].includes(parsed.intent)) {
+          handleIntentConfirmation(parsed);
+        }
+      }
+      catch { /* response was not JSON, leave as plain text */ }
+      aiPanelStore.setLoading(false);
+      return;
+    }
+    else if (hasImage) {
+      // Lemonade vision path (Tier-1 default). Lemonade exposes vision as a
+      // standard OpenAI-compat chat-completions call with an `image_url`
+      // data URL content part — see `lemonade_extras::lemonade_image`.
+      const imageFile = selectedFiles.find((file: string) => {
+        const ext = file.split('.').pop()?.toLowerCase();
+        return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(ext || '');
+      });
+      if (!imageFile) {
+        aiPanelStore.addMessage('assistant', 'No supported image file is selected.');
+        aiPanelStore.setLoading(false);
+        return;
+      }
+      const visionText = await invoke<string>('lemonade_image', {
+        imagePath: imageFile,
+        prompt: `${systemPrompt}\n\nUser: ${prompt}`,
+        endpoint: aiPanelStore.localEndpointUrl,
       });
       aiPanelStore.addMessage('assistant', visionText);
       await maybeSpeak(visionText);
@@ -591,9 +646,15 @@ async function handleSend() {
     }
     else {
       // No AI reached. Show a helpful message — never a raw fetch error.
+      // Phase-11 day-2: Lemonade is the Tier-1 default. The hint names
+      // Lemonade + the new optional-Omnix path so the user understands why
+      // nothing responded (often: Lemonade isn't downloaded yet -> open
+      // Backend Manager, or the toggle is OFF -> enable in Settings).
       const hint = aiPanelStore.useOmnix
         ? 'Rain is warming up. Hang tight — I\'ll try again in a moment...'
-        : 'No AI endpoint is configured. Enable Omnix in Settings to get started right away.';
+        : aiPanelStore.routerOnline
+          ? 'No AI endpoint is configured. Download Lemonade from Backend Manager to get started with a local model, or enable Omnix in Settings.'
+          : 'No AI endpoint is configured. Open Backend Manager to download Lemonade (default local backend), or enable Omnix in Settings.';
       aiPanelStore.addMessage('assistant', hint);
       return;
     }
@@ -743,6 +804,12 @@ async function spawnOmnix() {
 watch(
   () => aiPanelStore.useOmnix,
   async (enabled) => {
+    // Phase-11 day-2: with omnixEnabled OFF by default (31->32 migration +
+    // initial defaults object in storage), the toggle watcher must NOT
+    // try to boot the bundled Electron stack unless the user actually
+    // turns the toggle on. Previously the watcher assumed omnixEnabled
+    // was always true at first paint and the "kill_omnix" branch was
+    // unreachable on a fresh install.
     if (enabled) {
       await spawnOmnix();
       await checkOmnixStatus();

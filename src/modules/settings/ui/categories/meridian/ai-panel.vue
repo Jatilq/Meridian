@@ -250,15 +250,16 @@ const modelSupportsTools = computed(() => {
         />
       </div>
 
-      <!-- Local AI Enhancement: Omnix (optional, on by default) -->
-      <div class="ai-panel-settings__section-title">Local AI Enhancement (Omnix) — on by default</div>
+      <!-- Local AI Enhancement: Omnix (optional, off by default since 31->32) -->
+      <div class="ai-panel-settings__section-title">Local AI Enhancement (Omnix) — optional, off by default</div>
       <div class="ai-panel-settings__toggle">
       <div>
         <label class="ai-panel-settings__label" for="ai-panel-omnix">
           Enable Omnix
         </label>
         <span class="ai-panel-settings__hint">
-          Adds Vision, TTS, and Director. Works immediately with no configuration.
+          Add-on for Vision / TTS. Lemonade (Local AI server above) is the primary backend
+          and ships with vision + TTS already, so most users can leave this off.
         </span>
       </div>
       <Switch

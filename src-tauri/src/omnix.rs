@@ -8,6 +8,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::fs;
 use tauri::Manager;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 
 static OMNIX_CHILD: Mutex<Option<Child>> = Mutex::new(None);
 /// True while a background spawn is in progress. Prevents duplicate spawns
@@ -180,10 +182,16 @@ pub async fn spawn_omnix(app: tauri::AppHandle, omnix_path: Option<String>) -> R
                 return Ok(dir);
             }
             log::info!("[omnix] spawning electron from {}", electron_path.display());
-            let child = std::process::Command::new(&electron_path)
-                .current_dir(&dir)
-                .arg(".")
-                .spawn()
+            let mut command = std::process::Command::new(&electron_path);
+            command.current_dir(&dir).arg(".");
+            // Hide the Electron console/window — matches the pattern used in
+            // process_runner.rs, backend_manager.rs, downloader.rs, etc.
+            #[cfg(windows)]
+            {
+                const CREATE_NO_WINDOW: u32 = 0x08000000;
+                command.creation_flags(CREATE_NO_WINDOW);
+            }
+            let child = command.spawn()
                 .map_err(|e| {
                     log::error!("[omnix] spawn failed: {}", e);
                     format!("Failed to spawn omnix: {}", e)
@@ -229,6 +237,91 @@ pub async fn get_omnix_status() -> Result<bool, String> {
             log::trace!("[omnix] health check failed: {}", e);
             Ok(false)
         }
+    }
+}
+
+/// Send a text prompt to Omnix's text inference endpoint. Returns the
+/// model's text response. This is the primary "chat" path that Rain CLI
+/// and the AI panel use when `useOmnix && omnixOnline` — the frontend
+/// calls `invoke('omnix_text', { prompt, systemPrompt, temperature,
+/// maxTokens, topP })` and expects a plain string back.
+///
+/// The Omnix Electron server exposes `POST /api/text` accepting a JSON
+/// body `{ prompt, systemPrompt, temperature, maxTokens, topP }` and
+/// returning `{ response: "..." }`. If the server returns a different
+/// shape we fall back to raw text extraction so the user always gets
+/// *something* rather than a cryptic parse error.
+#[tauri::command]
+pub async fn omnix_text(
+    prompt: String,
+    system_prompt: Option<String>,
+    temperature: Option<f64>,
+    max_tokens: Option<u64>,
+    top_p: Option<f64>,
+) -> Result<String, String> {
+    let mut body = serde_json::json!({ "prompt": prompt });
+    if let Some(sp) = system_prompt {
+        body["systemPrompt"] = serde_json::Value::String(sp);
+    }
+    if let Some(t) = temperature {
+        body["temperature"] = serde_json::json!(t);
+    }
+    if let Some(mt) = max_tokens {
+        body["maxTokens"] = serde_json::json!(mt);
+    }
+    if let Some(tp) = top_p {
+        body["topP"] = serde_json::json!(tp);
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+    let response = client
+        .post("http://localhost:9777/api/text")
+        .header("Content-Type", "application/json")
+        .body(body.to_string())
+        .send()
+        .await
+        .map_err(|e| format!("Omnix text request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Omnix text returned status {}", response.status()));
+    }
+
+    let raw = response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read Omnix text response: {}", e))?;
+
+    // Try parsing as JSON first — the expected shape is `{ "response": "..." }`.
+    // If that fails, treat the raw body as the plain-text answer.
+    match serde_json::from_str::<serde_json::Value>(&raw) {
+        Ok(json) => {
+            // Prefer `.response`, then `.text`, then `.content`, then `.message`.
+            // If none of those are strings, try the OpenAI-compatible shape
+            // `choices[0].message.content` (Omnix may wrap responses this way).
+            // Last resort: return the raw body as-is so the user always gets
+            // *something* rather than a cryptic parse error.
+            let from_flat = json
+                .get("response")
+                .or_else(|| json.get("text"))
+                .or_else(|| json.get("content"))
+                .or_else(|| json.get("message"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let text = from_flat.unwrap_or_else(|| {
+                json.get("choices")
+                    .and_then(|c| c.get(0))
+                    .and_then(|c0| c0.get("message"))
+                    .and_then(|m| m.get("content"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(&raw)
+                    .to_string()
+            });
+            Ok(text)
+        }
+        Err(_) => Ok(raw),
     }
 }
 

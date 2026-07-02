@@ -3,6 +3,7 @@
 // Copyright © 2021 - present Aleksey Hoffman. All rights reserved.
 
 use crate::process_runner::run_command_blocking;
+use crate::secure_keys;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{Write, Seek, SeekFrom};
@@ -18,6 +19,35 @@ const DB_FILE_NAME: &str = "meridian.db";
 /// Sentinel error returned by the download path when a cancellation token fires,
 /// so start_download can distinguish a user pause/cancel from a real failure.
 const CANCELLED_MARKER: &str = "__meridian_cancelled__";
+
+/// Conditionally attach `Authorization: Bearer <token>` to a reqwest
+/// `RequestBuilder`. Returns the builder unchanged when the option is None,
+/// empty, or whitespace-only. Pattern mirrors
+/// `backend_manager::build_github_request` so future bearer-aware refactors
+/// (e.g. GitHub Basic-Auth fallback, HuggingFace `X-HF-Authorization` aliases)
+/// share one helper.
+///
+/// **Note.** This attaches the token verbatim when the caller supplies it.
+/// Callers must therefore only pass tokens whose target URL host is one the
+/// user trusts with that credential — sending a HuggingFace token to a
+/// non-HuggingFace host would leak it. The frontend is responsible for that
+/// gating (it builds the URL + token pair); the Rust side trusts what comes
+/// over IPC.
+fn add_bearer_header(
+    mut req: reqwest::RequestBuilder,
+    token: Option<&str>,
+) -> reqwest::RequestBuilder {
+    if let Some(t) = token {
+        let trimmed = t.trim();
+        if !trimmed.is_empty() {
+            req = req.header(
+                reqwest::header::AUTHORIZATION,
+                format!("Bearer {}", trimmed),
+            );
+        }
+    }
+    req
+}
 
 /// Registry of in-flight downloads so cancel/pause can actually stop a running
 /// task, not just flip a DB status string (Gap 3).
@@ -477,26 +507,102 @@ fn safe_file_name(name: &str) -> String {
         .to_string()
 }
 
-async fn fetch_head(url: &str) -> Result<reqwest::Response, String> {
+/// Conditionally attach `Authorization: Bearer <hf_token>` to a reqwest
+/// `RequestBuilder` when `hf_token` is `Some` and non-empty. Mirrors the
+/// inline bearer-attach pattern at backend_manager::build_github_request so
+/// the Bearer contract is identical across Meridian modules. The matching
+/// server-side credential-resolution pattern lives at
+/// `cluster.rs::ssh_exec` (lines 109-130) — read together they describe
+/// Meridian's full credential-vault contract.
+///
+/// Empty-String tokens are treated as `None` to avoid emitting a
+/// `Authorization: Bearer ` header with no value (which every well-formed
+/// client would discard anyway). The token itself NEVER crosses IPC for
+/// production downloads; `resolve_hf_token` reads it from the encrypted
+/// `secure-keys.json` Tauri store on the Rust side.
+fn apply_hf_bearer(
+    req: reqwest::RequestBuilder,
+    hf_token: Option<&str>,
+) -> reqwest::RequestBuilder {
+    if let Some(t) = hf_token {
+        if !t.is_empty() {
+            return req.header(reqwest::header::AUTHORIZATION, format!("Bearer {}", t));
+        }
+    }
+    req
+}
+
+/// Resolve the HuggingFace access token server-side. Mirrors the secure-key
+/// pattern at `cluster.rs::ssh_exec`: the frontend never ships plaintext
+/// over IPC for production downloads; the Rust side reads the encrypted
+/// `secure-keys.json` Tauri store at command time. The `override_token`
+/// parameter is a documented test-only fallback (tests bypass the Tauri
+/// command layer and call `start_download` directly, so this path is
+/// unlikely to fire in production).
+///
+/// `expected_provider` is a None|provider-string guard so a key stored for
+/// one service cannot accidentally be attached to a different service's
+/// URL — e.g. an OpenAI key would 401 otherwise and would silently leak
+/// over the wire.
+async fn resolve_hf_token(
+    app: &tauri::AppHandle,
+    override_token: Option<String>,
+    expected_provider: Option<&str>,
+) -> Result<Option<String>, String> {
+    if let Some(t) = override_token.filter(|s| !s.is_empty()) {
+        return Ok(Some(t));
+    }
+    let app_for_lookup = app.clone();
+    let entry_opt = tauri::async_runtime::spawn_blocking(move || {
+        secure_keys::secure_get_api_key(app_for_lookup)
+    })
+    .await
+    .map_err(|e| format!("Failed to join secure-key store lookup: {e}"))??;
+    if let Some(entry) = entry_opt {
+        if let Some(expected) = expected_provider {
+            if entry.provider != expected {
+                log::debug!(
+                    "Stored api-key provider is '{}', not '{}'; not attaching to HF request",
+                    entry.provider,
+                    expected
+                );
+                return Ok(None);
+            }
+        }
+        return Ok(Some(entry.key));
+    }
+    Ok(None)
+}
+
+async fn fetch_head(url: &str, hf_token: Option<&str>) -> Result<reqwest::Response, String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
         .build()
         .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
-    client.head(url).send().await.map_err(|e| format!("HEAD failed: {}", e))
+    apply_hf_bearer(client.head(url), hf_token)
+        .send()
+        .await
+        .map_err(|e| format!("HEAD failed: {}", e))
 }
 
-async fn fetch_chunk(url: &str, start: u64, end: u64) -> Result<Vec<u8>, String> {
+async fn fetch_chunk(
+    url: &str,
+    start: u64,
+    end: u64,
+    hf_token: Option<&str>,
+) -> Result<Vec<u8>, String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(60))
         .build()
         .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
     let range = format!("bytes={}-{}", start, end);
-    let response = client
-        .get(url)
-        .header(reqwest::header::RANGE, range)
-        .send()
-        .await
-        .map_err(|e| format!("Chunk fetch failed: {}", e))?;
+    let response = apply_hf_bearer(
+        client.get(url).header(reqwest::header::RANGE, range),
+        hf_token,
+    )
+    .send()
+    .await
+    .map_err(|e| format!("Chunk fetch failed: {}", e))?;
 
     if !response.status().is_success() && response.status() != reqwest::StatusCode::PARTIAL_CONTENT {
         return Err(format!("Chunk HTTP {}", response.status()));
@@ -517,6 +623,7 @@ async fn download_chunked(
     total_size: u64,
     chunk_count: u64,
     token: CancellationToken,
+    hf_token: Option<&str>,
     on_progress: impl Fn(u64, u64) + Send + 'static,
 ) -> Result<String, String> {
     if token.is_cancelled() {
@@ -544,7 +651,7 @@ async fn download_chunked(
         }
         let end = if start + chunk_size > total_size { total_size - 1 } else { start + chunk_size - 1 };
 
-        let data = fetch_chunk(url, start, end).await?;
+        let data = fetch_chunk(url, start, end, hf_token).await?;
         file.seek(SeekFrom::Start(start)).map_err(|e| format!("Seek error: {}", e))?;
         file.write_all(&data).map_err(|e| format!("Failed to write file: {}", e))?;
         downloaded += data.len() as u64;
@@ -571,13 +678,14 @@ async fn download_direct(
     file_name: &str,
     chunk_count: u64,
     token: CancellationToken,
+    hf_token: Option<&str>,
     on_progress: impl Fn(u64, Option<u64>) + Send + 'static,
 ) -> Result<String, String> {
     use futures_util::StreamExt;
     if token.is_cancelled() {
         return Err(CANCELLED_MARKER.to_string());
     }
-    let head = fetch_head(url).await?;
+    let head = fetch_head(url, hf_token).await?;
     let total = head.content_length();
     let accept_ranges = head
         .headers()
@@ -590,7 +698,7 @@ async fn download_direct(
 
     if accept_ranges && total.is_some() && total.unwrap() > 1024 * 1024 {
         let total_size = total.unwrap();
-        return download_chunked(url, dest_dir, file_name, total_size, chunk_count, token.clone(), move |downloaded, total| {
+        return download_chunked(url, dest_dir, file_name, total_size, chunk_count, token.clone(), hf_token, move |downloaded, total| {
             on_progress(downloaded, Some(total));
         }).await;
     }
@@ -599,7 +707,10 @@ async fn download_direct(
         .timeout(Duration::from_secs(120))
         .build()
         .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
-    let response = client.get(url).send().await.map_err(|e| format!("Download failed: {}", e))?;
+    let response = apply_hf_bearer(client.get(url), hf_token)
+        .send()
+        .await
+        .map_err(|e| format!("Download failed: {}", e))?;
     if !response.status().is_success() {
         return Err(format!("HTTP {}", response.status()));
     }
@@ -630,6 +741,7 @@ pub async fn start_download(
     _format_id: Option<String>,
     auto_save_folder: Option<String>,
     chunk_count: u64,
+    hf_token: Option<String>,
 ) -> Result<DownloadItem, String> {
     // Decide route + filename up front:
     // - explicit format selected -> yt-dlp path
@@ -714,7 +826,13 @@ pub async fn start_download(
                 }
             }).await
         } else {
-            download_direct(&url, &dest_dir, &file_name, chunk_count, bg_token.clone(), progress_cb).await
+            // hf_token is consumed by the HTTP-direct path. The yt-dlp
+            // path (above) ignores it because yt-dlp reads the token from
+            // its own env var (HF_TOKEN); wiring that through is a separate
+            // follow-up commit for when JC needs gated-repo downloads via
+            // yt-dlp (currently all yt-dlp targets are public YouTube
+            // URLs which don't require auth).
+            download_direct(&url, &dest_dir, &file_name, chunk_count, bg_token.clone(), hf_token.as_deref(), progress_cb).await
         };
 
         match result {
@@ -778,6 +896,7 @@ pub async fn resume_download(
     app_data_dir: &str,
     registry: &DownloaderRegistry,
     id: String,
+    hf_token: Option<String>,
 ) -> Result<(), String> {
     // Look up the paused item to recover its URL, destination, and byte offset.
     let (url, dest_path, file_name) = {
@@ -821,6 +940,7 @@ pub async fn resume_download(
             &dest_path,
             existing_bytes,
             token.clone(),
+            hf_token.as_deref(),
             move |downloaded, total| {
                 if let Ok(db) = DownloaderDb::open(&progress_dir) {
                     let progress = match total {
@@ -874,6 +994,7 @@ async fn download_resumable(
     dest_path: &str,
     start_offset: u64,
     token: CancellationToken,
+    hf_token: Option<&str>,
     on_progress: impl Fn(u64, Option<u64>) + Send + 'static,
 ) -> Result<String, String> {
     use futures_util::StreamExt;
@@ -888,7 +1009,7 @@ async fn download_resumable(
         .build()
         .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
 
-    let mut request = client.get(url);
+    let mut request = apply_hf_bearer(client.get(url), hf_token);
     if start_offset > 0 {
         request = request.header(reqwest::header::RANGE, format!("bytes={}-", start_offset));
     }
@@ -1025,6 +1146,15 @@ pub async fn downloader_get_state(app: tauri::AppHandle) -> Result<DownloaderSta
     Ok(DownloaderState { queue, history })
 }
 
+// TODO: package `start_download`'s 8 positional args into a `DownloadConfig`
+// struct once the call sites cool down. Until then, parameters stay
+// positional and the HF token is resolved server-side below (no plaintext
+// over IPC).
+//
+// The `hf_token` parameter was REMOVED from the IPC surface because the
+// server-side resolution pattern (cluster.rs::ssh_exec) is the only safe
+// path for production. Tests bypass the Tauri command layer entirely and
+// invoke `start_download` directly with whatever token they choose.
 #[tauri::command]
 pub async fn downloader_enqueue(
     app: tauri::AppHandle,
@@ -1035,10 +1165,11 @@ pub async fn downloader_enqueue(
     auto_save_folder: Option<String>,
     chunk_count: Option<u64>,
 ) -> Result<DownloadItem, String> {
+    let hf_token = resolve_hf_token(&app, None, Some("huggingface")).await?;
     let app_data_dir = get_app_data_dir(&app)?;
     let registry = registry.inner().clone();
     let chunks = chunk_count.unwrap_or(DOWNLOAD_CHUNKS);
-    start_download(&app_data_dir, &registry, url, file_name, format_id, auto_save_folder, chunks).await
+    start_download(&app_data_dir, &registry, url, file_name, format_id, auto_save_folder, chunks, hf_token).await
 }
 
 #[tauri::command]
@@ -1069,9 +1200,10 @@ pub async fn downloader_resume(
     registry: tauri::State<'_, DownloaderRegistry>,
     id: String,
 ) -> Result<(), String> {
+    let hf_token = resolve_hf_token(&app, None, Some("huggingface")).await?;
     let app_data_dir = get_app_data_dir(&app)?;
     let registry = registry.inner().clone();
-    resume_download(&app_data_dir, &registry, id).await
+    resume_download(&app_data_dir, &registry, id, hf_token).await
 }
 
 #[tauri::command]
@@ -1125,7 +1257,7 @@ mod tests {
 
         let url = format!("http://{}/file.bin", addr);
         let registry = DownloaderRegistry::new();
-        let item = start_download(&data_dir, &registry, url, Some("file.bin".to_string()), None, None, 8)
+        let item = start_download(&data_dir, &registry, url, Some("file.bin".to_string()), None, None, 8, None)
             .await
             .expect("download should succeed");
 
@@ -1191,6 +1323,7 @@ mod tests {
                 None,
                 None,
                 8,
+                None,
             )
             .await
         });
@@ -1231,5 +1364,50 @@ mod tests {
         assert_eq!(parse_ytdlp_percent("[download] 100% of 10.00MiB"), Some(100.0));
         assert_eq!(parse_ytdlp_percent("[info] downloading format"), None);
         assert_eq!(parse_ytdlp_percent("random line"), None);
+    }
+
+    // ----- HF Bearer plumbing (R2.1: backend_manager.rs mirrors this contract) -----
+
+    #[test]
+    fn apply_hf_bearer_attaches_authorization_when_token_some_and_nonempty() {
+        // Pin the contract: `Authorization: Bearer hf_test_xyz` is the exact
+        // header HuggingFace expects for gated-repo downloads.
+        let client = reqwest::Client::new();
+        let request = apply_hf_bearer(client.get("http://example.com/x"), Some("hf_test_xyz"));
+        let built = request.build().expect("RequestBuilder.build must succeed");
+        let auth = built
+            .headers()
+            .get(reqwest::header::AUTHORIZATION)
+            .expect("Authorization header must be set when token is Some(&str)");
+        assert_eq!(auth.to_str().unwrap(), "Bearer hf_test_xyz");
+    }
+
+    #[test]
+    fn apply_hf_bearer_omits_authorization_when_token_none() {
+        // Anonymous requests stay anonymous — no header at all, no
+        // "Authorization: Bearer " trailing-space foot-gun.
+        let client = reqwest::Client::new();
+        let request = apply_hf_bearer(client.get("http://example.com/x"), None);
+        let built = request.build().expect("RequestBuilder.build must succeed");
+        assert!(
+            built.headers().get(reqwest::header::AUTHORIZATION).is_none(),
+            "Authorization header must NOT be set when token is None"
+        );
+    }
+
+    #[test]
+    fn apply_hf_bearer_treats_empty_string_as_none() {
+        // Empty-string tokens would emit a `Bearer ` header with no value
+        // — clients and intermediaries (proxies, loggers) may either drop
+        // the empty value or emit `Bearer` with a trailing space. We
+        // guarantee no header is emitted, period, so behavior is identical
+        // to a None token.
+        let client = reqwest::Client::new();
+        let request = apply_hf_bearer(client.get("http://example.com/x"), Some(""));
+        let built = request.build().expect("RequestBuilder.build must succeed");
+        assert!(
+            built.headers().get(reqwest::header::AUTHORIZATION).is_none(),
+            "empty token must be treated as None and emit no Authorization header"
+        );
     }
 }

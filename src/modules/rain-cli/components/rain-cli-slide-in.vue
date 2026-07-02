@@ -108,9 +108,11 @@ async function handleSend() {
 
     const isRouterExplicit = routerBase && aiPanelStore.connectionMode !== 'basic';
     if (!isRouterExplicit) {
-      const hint = aiPanelStore.useOmnix
-        ? 'Rain is warming up. Hang tight — I\'ll try again in a moment...'
-        : 'No AI endpoint is configured. Enable Omnix in Settings to get started right away.';
+    const hint = aiPanelStore.useOmnix
+      ? 'Rain is warming up. Hang tight — I\'ll try again in a moment...'
+      : aiPanelStore.routerOnline
+        ? 'No AI endpoint is configured. Download Lemonade from Backend Manager to start with a local model, or enable Omnix in Settings.'
+        : 'No AI endpoint is configured. Open Backend Manager to install Lemonade (the default Tier-1 backend), or enable Omnix in Settings.';
       aiPanelStore.addMessage('assistant', hint);
       isLoading.value = false;
       scrollToBottom();

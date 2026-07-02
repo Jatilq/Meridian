@@ -23,6 +23,7 @@ mod downloader;
 mod extension_receiver;
 mod input_simulation;
 mod omnix;
+mod lemonade_extras;
 mod backend_manager;
 mod install_paths;
 mod extensions;
@@ -409,10 +410,14 @@ pub fn run() {
             omnix::spawn_omnix,
             omnix::kill_omnix,
             omnix::get_omnix_status,
+            omnix::omnix_text,
             omnix::omnix_vision,
             omnix::omnix_tts,
             omnix::omnix_director,
             omnix::scan_huggingface_cache,
+            lemonade_extras::lemonade_stt,
+            lemonade_extras::lemonade_tts,
+            lemonade_extras::lemonade_image,
             cluster::check_node_status,
             cluster::get_gpu_stats,
             cluster::launch_rpc_slave,

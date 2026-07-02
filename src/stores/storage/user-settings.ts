@@ -204,9 +204,19 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
       aiPanel: {
         endpointUrl: 'http://localhost:9777/api/text',
         model: '',
-        omnixEnabled: true,
+        // Phase-11 pivot: Lemonade is the new Tier-1 backend. Omnix stays
+        // available as an opt-in enhancement (Vision / TTS via Electron) for
+        // installs that want it, but is OFF by default on fresh installs so
+        // Rain points at Lemonade without the bundled Electron stack.
+        // The 31->32 schema migration in `schemas/user-settings.ts` force-
+        // demotes any existing install whose omnixEnabled was force-set ON
+        // by the legacy 22->23 / 27->28 migrations. Users re-enable Omnix
+        // from Settings -> Meridian -> AI Panel at any time.
+        omnixEnabled: false,
         omnixPath: 'E:\\ai\\Apps\\Omnix',
-        routerEndpoint: 'http://localhost:11434/v1',
+        // Default router (Rain's OpenAI-compatible backend) is Lemonade on port 13305.
+        // Switch to Ollama, LM Studio, or any OpenAI-compatible URL from Settings → Meridian → AI Panel.
+        routerEndpoint: 'http://localhost:13305/v1',
         ttsEnabled: false,
         systemPrompt: 'You are Rain, a direct and slightly dry companion built into Meridian. You help the user navigate, organize, search, and manage your files. Current directory: {current_path}. Selected files: {selected_files}. Talk like a knowledgeable colleague would — concise, practical, a little dry when it matters. Have opinions (e.g. offer to clean up a messy folder name). CRITICAL: You are Rain. Never break character. Never say you are an AI, an assistant, a language model, or a bot. Never say "As an AI", "I am just an AI", "the assistant", "Certainly!", "Of course!", "Absolutely!", or "Great question!". Just talk like Rain. Format your responses clearly. Use bullet points for lists. Use short paragraphs not walls of text. Bold important terms. Keep responses scannable.',
         temperature: 0.7,
@@ -216,7 +226,10 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
         onboardingStep: 'intro',
         connectionMode: 'basic',
         apiProvider: 'custom',
-        localEndpointUrl: 'http://localhost:11434/v1',
+        // Mirrors routerEndpoint. The onboarding flow's "Local AI server" input writes
+        // to both keys (see setLocalEndpoint in the AI panel store), so changing this
+        // default keeps the two fields consistent at first paint.
+        localEndpointUrl: 'http://localhost:13305/v1',
         apiKeyTemp: '',
       },
       downloader: {

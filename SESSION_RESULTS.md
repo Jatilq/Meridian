@@ -136,3 +136,71 @@ Finish the integration work left dangling from the prior session: wire Fix D on 
 1. **PARTIAL: 4 locale files (hi/fa/he/ur) display "Model Search" English string** to users of those locales. UI is unaffected (text-direction is locale-meta-driven), but text shows English in non-English UI. Needs native-speaker review of natural-language equivalents for these scripts before shipping.
 2. **Verbatim naturalization could read awkwardly** in some locales (`sl` / `pt` lack an explicit article). Native-speaker review recommended before shipping.
 3. **`/hardware` route still has the old name** — only the visible label in en.json was changed in the previous rename + this turn extended it to the other 15 locales. URL slug / route name `hardware` deliberately preserved to keep `router.push('/hardware')` callers in `backend-manager.vue` working without churn.
+
+---
+
+# SESSION RESULTS — July 1, 2026 (Day 2: Lemonade-as-Tier-1)
+
+## Goal
+
+Finish the Phase-11 day-2 pivot: install Lemonade as the new Tier-1 AI backend (Lemonade's OpenAI-compat server on port 13305 is the default for Rain), demote Omnix from default-ON to opt-in enhancement, wire three new Tauri commands (STT/TTS/vision) against Lemonade's API surface.
+
+## Status Table
+
+| # | Task | Status | Notes |
+|---|---|---|---|
+| 1 | New Rust module `lemonade_extras.rs` (3 Tauri commands) | ✅ Done | `lemonade_tts(text, voice?, model?, endpoint?) -> Vec<u8>` (raw audio bytes); `lemonade_stt(audio_base64, filename, model?, language?, endpoint?) -> String` (Whisper-style multipart); `lemonade_image(image_path, prompt?, model?, endpoint?) -> String` (chat-completions with inline image_url data URL). All accept an `endpoint` override; helper `resolve_base()` strips trailing `/v1` + `/` + whitespace. 5 unit tests. |
+| 2 | Register commands in `lib.rs::run()` handlers | ✅ Done | `mod lemonade_extras;` next to `mod omnix;` + 3 entries in `tauri::generate_handler!` after the omnix block. |
+| 3 | Demote Omnix via schema bump (31 → 32) | ✅ Done | `USER_SETTINGS_SCHEMA_VERSION = 32`. New `if (fromVersion === 31 && toVersion === 32)` block force-sets `meridian.aiPanel.omnixEnabled = false` and reap-kills any orphaned Omnix Electron process via `await invoke('kill_omnix')` (try-catch safe). |
+| 4 | Initial defaults `omnixEnabled: false` | ✅ Done | `src/stores/storage/user-settings.ts` initial defaults: `omnixEnabled: false`. |
+| 5 | Pinia fallback `?? false` | ✅ Done | `src/stores/runtime/ai-panel.ts` line 84 — `useOmnix` ref now falls back to `false` (matches post-pivot source-of-truth). |
+| 6 | `ai-panel.vue` wires Lemonade as Tier-1 with Omnix fallback | ✅ Done | `maybeSpeak` branches on `(useOmnix && omnixOnline)` between Omnix Kokoro (Web Audio float-samples) and Lemonade TTS (Blob → `<audio>` element via `URL.createObjectURL`). New `else if (hasImage)` Lemonade vision branch sits next to the legacy Omnix one. Hint text updated to point users at Backend Manager for Lemonade. |
+| 7 | Settings copy updated | ✅ Done | `src/modules/settings/ui/categories/meridian/ai-panel.vue` — section title flipped from "on by default" to "optional, off by default"; description now points users at Lemonade as the primary backend with Omnix as an optional add-on. |
+| 8 | Hint copy synced in `rain-cli.vue` + `rain-cli-slide-in.vue` | ✅ Done | Both files now use the same 2-variant `aiPanelStore.routerOnline` hint pattern as `ai-panel.vue`: points at Backend Manager / Lemonade first, then mentions Omnix as the legacy fallback. "Could not reach your AI server" copies in `rain-cli.vue` also reference Lemonade. |
+| 9 | Build + typecheck + tests | ✅ Done | `cargo check` exit 0 (16 warnings, no errors). `vue-tsc --build` exit 0. `vite build` exit 0. `npm test` 1741/1761 pass — the 20 failures live in upstream sibling "Sigma File manager repo files\sigma-file-manager-..." paths, NOT in active Meridian src/ tree. |
+| 10 | Code-reviewer verdict | ✅ Done | PASS with one actionable note (orphaned Electron process on demote) — addressed via the `invoke('kill_omnix')` call inside the 31→32 migration block. |
+
+## Files Touched (uncommitted, ready for JC to commit/push)
+
+| File | Change |
+|---|---|
+| `src-tauri/src/lemonade_extras.rs` (NEW) | Three Tauri commands (`lemonade_tts`, `lemonade_stt`, `lemonade_image`) + `resolve_base()` helper + 5 unit tests. ~250 lines. |
+| `src-tauri/src/lib.rs` | Added `mod lemonade_extras;` next to `mod omnix;`. Added `lemonade_extras::lemonade_stt`, `::lemonade_tts`, `::lemonade_image` in `tauri::generate_handler!`. |
+| `src/stores/storage/user-settings.ts` | Initial defaults: `omnixEnabled: true` → `omnixEnabled: false` (with Phase-11 day-2 comment). |
+| `src/stores/schemas/user-settings.ts` | `USER_SETTINGS_SCHEMA_VERSION = 31` → `= 32`. Added new `if (fromVersion === 31 && toVersion === 32)` migration block: force-sets `meridian.aiPanel.omnixEnabled = false` + reap-kills orphaned Electron via `await invoke('kill_omnix')`. Multi-line comment explains the demote. |
+| `src/stores/runtime/ai-panel.ts` | Line 84: `useOmnix` ref fallback `?? true` → `?? false`. Comment cites the new source-of-truth. |
+| `src/modules/ai-panel/ai-panel.vue` | `maybeSpeak` rewritten to branch on `(useOmnix && omnixOnline)`: Omnix Kokoro (existing path) vs Lemonade TTS (new path). New `else if (hasImage)` branch for Lemonade vision. Hint text updated (2-variant with `routerOnline` flag). |
+| `src/modules/rain-cli/pages/rain-cli.vue` | Both "Could not reach your AI server" copies + the final `else` branch all now point at Backend Manager / Lemonade. Same 2-variant pattern as `ai-panel.vue`. |
+| `src/modules/rain-cli/components/rain-cli-slide-in.vue` | The "No AI endpoint is configured" hint now uses the 2-variant pattern that mentions Lemonade first, then Omnix as the legacy fallback. |
+| `src/modules/settings/ui/categories/meridian/ai-panel.vue` | Section title flipped to "Local AI Enhancement (Omnix) — optional, off by default". Description now points at Lemonade as the primary backend. |
+
+## Validation Table
+
+| Tool | Result |
+|---|---|
+| `cargo check` (src-tauri) | Exit 0. 16 warnings (mostly unused imports in the new module), zero new errors. |
+| `vue-tsc --build` (`npm run type-check`) | Exit 0. |
+| `npm run build` (vite frontend bundle) | Exit 0. |
+| `npm test` (vitest) | 1741/1761 pass. 20 failures are pre-existing in upstream sibling "Sigma File manager repo files\sigma-file-manager-..." paths and unrelated to day-2 changes. |
+
+## Frontend-to-Rust contract notes
+
+- All `lemonade_*` arg names on the Rust side are `snake_case` (text/voice/model/endpoint/audio_base64/filename/language/image_path/prompt). Tauri 2's invoke auto-converts JS camelCase keys → Rust snake_case, mirroring the existing pattern in `omnix::omnix_vision` (called from `ai-panel.vue` as `invoke('omnix_vision', { imagePath, prompt })`).
+- All commands return Rust `String` / `Vec<u8>` mapped to JS `string` / `number[]` respectively. `lemonade_tts` returns raw audio bytes; the consumer in `maybeSpeak` builds `new Uint8Array(byteArray)` + `new Blob(...)` + `URL.createObjectURL(blob)` + `new Audio(url)`.
+- Lemonade at http://localhost:13305 is the default base; callers can override via `endpoint: aiPanelStore.localEndpointUrl` (or any nickname like `http://192.168.1.X:13305/v1` — `resolve_base()` strips the trailing `/v1`).
+
+## Day's Ready-for-testing summary
+
+1. **Fresh install**: launch Meridian. Settings → Meridian → AI Panel. Omnix toggle is OFF by default. Local AI server URL is `http://localhost:13305/v1` (Lemonade). TTS toggle is OFF by default.
+2. **Download Lemonade**: Open Backend Manager → Backends tab → lemonade row → click Install → progress bar visible → binary lands at `E:\ai\Apps\backends\lemonade\lemonade-server.exe`. Click Start → process spawned, port 13305 confirmed via `probe_backend_api` listing `v1/models` first.
+3. **Send a text prompt in AI Panel**: Rain POSTs to `${routerEndpoint}/v1/chat/completions` (runAgentLoop path). With Lemonade running, response comes back + renders as markdown.
+4. **Attach an image + send prompt**: New `else if (hasImage)` branch runs `lemonade_image` Tauri command → Lemonade `/v1/chat/completions` with image_url data URL → receives text → renders as assistant message.
+5. **Enable TTS**: tick "Speak responses" toggle → send a prompt → `maybeSpeak` calls `lemonade_tts` → audio plays from `<audio>` element.
+6. **Upgrade from a pre-pivot install**: relaunch Meridian. Lazy-store migrations run; 31→32 fires. Omnix toggle demoted to OFF. Orphaned Electron process from a previous Omnix-on session gets reap-killed via the `await invoke('kill_omnix')` call. AI panel still talks to `http://localhost:13305/v1` (3rd migration in the chain: 30→31 forced URL rewrite, 31→32 forced Omnix OFF).
+
+## Known follow-ups
+
+1. **No JS caller for `lemonade_stt`** yet (the Mic button → voice transcription wiring). The Rust command is wired and tested at compile time; the UI button lives behind Day-3 work.
+2. **Unused-element compile warnings** in `lemonade_extras.rs` (16 warnings, all "unused variable" in test scope + the `reqwest::Client::builder()` build result). Non-blocking; flagged for cleanup in the next session.
+3. The 4 locale files still showing English "Model Search" string (from Day 1) — still pending native-speaker transliteration review.
+

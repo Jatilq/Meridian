@@ -81,10 +81,23 @@ const modelsLoaded = ref(false);
 // including ones that migrated from an older `false`. `persisted` is
 // still imported and persists `endpoint` + `selectedModel`, so the
 // removal is a single-line drop with no other call-site impact.
-const useOmnix = ref(userSettingsStore.userSettings.meridian?.aiPanel?.omnixEnabled ?? true);
+// Phase-11 pivot: Lemonade is the new Tier-1 backend. `omnixEnabled` defaults
+// to false on fresh installs (initial defaults object in
+// storage/user-settings.ts); the 31->32 schema migration demotes any
+// existing install that was force-set ON via the legacy 22->23 / 27->28
+// migrations. `?? false` matches that source of truth so the Pinia fallback
+// at first paint agrees with the persisted user setting without needing
+// a localStorage bootstrap round-trip.
+const useOmnix = ref(userSettingsStore.userSettings.meridian?.aiPanel?.omnixEnabled ?? false);
 const omnixOnline = ref(false);
 const omnixPath = ref(userSettingsStore.userSettings.meridian?.aiPanel?.omnixPath || 'E:\\ai\\Apps\\Omnix');
-const routerEndpoint = ref(userSettingsStore.userSettings.meridian?.aiPanel?.routerEndpoint || 'http://localhost:11434/v1');
+// Default to Lemonade on port 13305 (catalog row in src/data/backends.json,
+// shipped to installers via tauri.conf.json::bundle.resources). Falls back
+// to this URL only when the persisted user setting is missing; the
+// 30→31 schema migration in schemas/user-settings.ts rewrites the legacy
+// Ollama literal for existing installs so this fallback rarely fires
+// in practice for users upgrading past the pivot.
+const routerEndpoint = ref(userSettingsStore.userSettings.meridian?.aiPanel?.routerEndpoint || 'http://localhost:13305/v1');
 const ttsEnabled = ref(userSettingsStore.userSettings.meridian?.aiPanel?.ttsEnabled ?? false);
 const routerOnline = ref(false);
 const systemPrompt = ref(userSettingsStore.userSettings.meridian?.aiPanel?.systemPrompt || 'You are Rain, a direct and slightly dry companion built into Meridian. You help the user navigate, organize, search, and manage their files. Current directory: {current_path}. Selected files: {selected_files}. Talk like a knowledgeable colleague would — concise, practical, a little dry when it matters. Have opinions (e.g. offer to clean up a messy folder name). CRITICAL: You are Rain. Never break character. Never say you are an AI, an assistant, a language model, or a bot. Never say "As an AI", "I am just an AI", "the assistant", "Certainly!", "Of course!", "Absolutely!", or "Great question!". Just talk like Rain. Format your responses clearly. Use bullet points for lists. Use short paragraphs not walls of text. Bold important terms. Keep responses scannable.');
@@ -105,7 +118,10 @@ const onboardingComplete = ref(userSettingsStore.userSettings.meridian?.aiPanel?
 const onboardingStep = ref(userSettingsStore.userSettings.meridian?.aiPanel?.onboardingStep ?? 'intro');
 const connectionMode = ref<AiPanelConnectionMode>(userSettingsStore.userSettings.meridian?.aiPanel?.connectionMode ?? 'basic');
 const apiProvider = ref<AiPanelProviderId>(userSettingsStore.userSettings.meridian?.aiPanel?.apiProvider ?? 'custom');
-const localEndpointUrl = ref(userSettingsStore.userSettings.meridian?.aiPanel?.localEndpointUrl ?? 'http://localhost:11434/v1');
+// Onboarding flow writes both `routerEndpoint` and `localEndpointUrl` from the
+// same input (see setLocalEndpoint below). The runtime fallback keeps them in
+// lockstep so the first paint of the AI panel matches the chosen backend.
+const localEndpointUrl = ref(userSettingsStore.userSettings.meridian?.aiPanel?.localEndpointUrl ?? 'http://localhost:13305/v1');
 const apiKeyTemp = ref(userSettingsStore.userSettings.meridian?.aiPanel?.apiKeyTemp ?? '');
 let onboardingSkipped = false;
 let memoryLoaded = false;

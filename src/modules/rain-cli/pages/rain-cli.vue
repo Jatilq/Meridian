@@ -436,10 +436,10 @@ async function handleSend() {
               topP: aiPanelStore.topP,
             });
           } else {
-            finalText = 'Could not reach your AI server and Omnix is not running. Start your local server or enable Omnix in Settings.';
+            finalText = 'Could not reach your AI server. Download Lemonade from Backend Manager (the default Tier-1 backend), or enable Omnix in Settings for the legacy Electron fallback.';
           }
         } catch {
-          finalText = 'Could not reach your AI server and Omnix is not running. Start your local server or enable Omnix in Settings.';
+          finalText = 'Could not reach your AI server. Download Lemonade from Backend Manager (the default Tier-1 backend), or enable Omnix in Settings for the legacy Electron fallback.';
         }
       }
     }
@@ -448,7 +448,9 @@ async function handleSend() {
         ? (omnixTimedOut
             ? 'Rain is warming up. Hang tight, I\'ll try again in a moment...'
             : 'Omnix is starting up. Give me a moment and try again.')
-        : 'No AI endpoint is configured. Enable Omnix in Settings to get started right away.';
+        : aiPanelStore.routerOnline
+          ? 'No AI endpoint is configured. Download Lemonade from Backend Manager to start with a local model, or enable Omnix in Settings.'
+          : 'No AI endpoint is configured. Open Backend Manager to install Lemonade (the default Tier-1 backend), or enable Omnix in Settings.';
     }
 
     // Stream the final text character by character
